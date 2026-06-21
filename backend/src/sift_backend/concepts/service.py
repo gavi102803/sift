@@ -2,6 +2,7 @@ from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
 
+from sift_backend.ai.context_pack import RecentTurn
 from sift_backend.ai.model_gateway import ConceptModelGateway, ConceptModelGatewayError
 from sift_backend.notes.patch_engine import (
     NoteSnapshot,
@@ -44,6 +45,7 @@ class InMemoryConceptStore:
         self.concepts: dict[UUID, ConceptDTO] = {}
         self.proposals: dict[UUID, UpdateProposalDTO] = {}
         self.proposal_concept_ids: dict[UUID, UUID] = {}
+        self.turns: dict[UUID, list[RecentTurn]] = {}
 
     def save_concept(self, concept: ConceptDTO) -> ConceptDTO:
         self.concepts[concept.id] = concept
@@ -86,6 +88,18 @@ class InMemoryConceptStore:
                 detail="Update proposal concept mapping not found.",
             ) from error
 
+    def get_recent_turns(self, concept_id: UUID, limit: int = 10) -> list[RecentTurn]:
+        return self.turns.get(concept_id, [])[-limit:]
+
+    def append_turn_pair(self, concept_id: UUID, user_query: str, answer: str) -> None:
+        concept_turns = self.turns.setdefault(concept_id, [])
+        concept_turns.extend(
+            [
+                RecentTurn(role="user", content=user_query),
+                RecentTurn(role="assistant", content=answer),
+            ]
+        )
+
 
 class MockConceptModelService:
     """Deterministic stand-in for LiteLLM-backed generation while service wiring lands."""
@@ -112,6 +126,8 @@ class MockConceptModelService:
         self,
         concept: ConceptDTO,
         request: ConceptTurnRequest,
+        recent_turns: list[RecentTurn] | None = None,
+        card_memory: str = "",
     ) -> ConceptTurnResult:
         first_block = concept.blocks[0] if concept.blocks else None
         answer_source = AnswerSourceDTO(
@@ -197,11 +213,13 @@ class LiteLLMConceptModelService:
         self,
         concept: ConceptDTO,
         request: ConceptTurnRequest,
+        recent_turns: list[RecentTurn] | None = None,
+        card_memory: str = "",
     ) -> ConceptTurnResult:
         return await self.gateway.answer_concept_turn(
             concept=concept,
-            card_memory="",
-            recent_turns=[],
+            card_memory=card_memory,
+            recent_turns=recent_turns or [],
             user_query=request.question,
             model_alias=self.model_alias,
         )
@@ -236,8 +254,13 @@ class ConceptService:
         request: ConceptTurnRequest,
     ) -> ConceptTurnResponse:
         concept = self.store.get_concept(concept_id)
+        recent_turns = self.store.get_recent_turns(concept.id)
         try:
-            result = await self.model_service.answer_turn(concept, request)
+            result = await self.model_service.answer_turn(
+                concept,
+                request,
+                recent_turns=recent_turns,
+            )
         except ConceptModelGatewayError as error:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
@@ -251,6 +274,8 @@ class ConceptService:
             proposal = self._create_update_proposal(concept.id, result)
         else:
             proposal = None
+
+        self.store.append_turn_pair(concept.id, request.question, result.answer)
 
         return ConceptTurnResponse(
             answer=result.answer,

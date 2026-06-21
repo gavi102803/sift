@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from sift_backend.api.concepts import router as concepts_router
 from sift_backend.config import load_settings
 
 
@@ -21,8 +22,9 @@ def create_app() -> FastAPI:
     async def health() -> HealthResponse:
         return HealthResponse(status="ok", env=settings.env)
 
+    app.include_router(concepts_router)
+
     return app
 
 
 app = create_app()
-

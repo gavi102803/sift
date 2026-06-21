@@ -5,11 +5,17 @@ struct RecordView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Concept.updatedAt, order: .reverse) private var recentConcepts: [Concept]
     @State private var captureText = ""
+    @State private var errorMessage: String?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 captureCard
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
                 recentSection
             }
             .padding(20)
@@ -96,16 +102,13 @@ struct RecordView: View {
     }
 
     private func saveDraft() {
-        let rawCapture = captureText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !rawCapture.isEmpty else { return }
-
-        let concept = Concept(
-            canonicalTitle: rawCapture,
-            displayTitle: rawCapture,
-            captureStatus: CaptureStatus.draft.rawValue
+        let service = CaptureFlowService(
+            localStore: ConceptLocalStore(modelContext: modelContext),
+            apiClient: MockSiftAPIClient()
         )
-        modelContext.insert(concept)
+        guard service.saveDraft(rawCapture: captureText) != nil else { return }
         captureText = ""
+        errorMessage = nil
     }
 }
 
@@ -137,4 +140,3 @@ private struct ConceptRow: View {
         RecordView()
     }
 }
-

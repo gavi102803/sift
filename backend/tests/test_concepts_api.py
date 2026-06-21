@@ -1,0 +1,53 @@
+from fastapi.testclient import TestClient
+
+from sift_backend.main import create_app
+
+
+def test_create_concept_returns_ready_card() -> None:
+    client = TestClient(create_app())
+
+    response = client.post("/v1/concepts", json={"raw_capture": "RAG", "locale": "en"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["displayTitle"] == "RAG"
+    assert body["captureStatus"] == "ready"
+    assert body["noteRevision"] == 1
+    assert len(body["blocks"]) == 2
+
+
+def test_create_concept_rejects_empty_capture() -> None:
+    client = TestClient(create_app())
+
+    response = client.post("/v1/concepts", json={"raw_capture": "", "locale": "en"})
+
+    assert response.status_code == 422
+
+
+def test_submit_turn_returns_answer_and_updated_concept() -> None:
+    client = TestClient(create_app())
+    concept = client.post("/v1/concepts", json={"raw_capture": "Embedding", "locale": "en"}).json()
+
+    response = client.post(
+        f"/v1/concepts/{concept['id']}/turns",
+        json={"question": "How is it different from a token?"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["answer"] == "Draft answer for: How is it different from a token?"
+    assert body["answerSource"]["sourceType"] == "modelKnowledge"
+    assert body["updateMode"] == "none"
+    assert body["concept"]["noteRevision"] == 2
+
+
+def test_submit_turn_returns_404_for_missing_concept() -> None:
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/v1/concepts/00000000-0000-0000-0000-000000000001/turns",
+        json={"question": "What is this?"},
+    )
+
+    assert response.status_code == 404
+

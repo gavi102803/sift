@@ -2,6 +2,7 @@ from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
 
+from sift_backend.ai.model_gateway import ConceptModelGateway, ConceptModelGatewayError
 from sift_backend.notes.patch_engine import (
     NoteSnapshot,
     PatchApplicationError,
@@ -107,7 +108,11 @@ class MockConceptModelService:
             ),
         ]
 
-    def answer_turn(self, concept: ConceptDTO, request: ConceptTurnRequest) -> ConceptTurnResult:
+    async def answer_turn(
+        self,
+        concept: ConceptDTO,
+        request: ConceptTurnRequest,
+    ) -> ConceptTurnResult:
         first_block = concept.blocks[0] if concept.blocks else None
         answer_source = AnswerSourceDTO(
             sourceType=AnswerSourceType.model_knowledge,
@@ -173,11 +178,40 @@ class MockConceptModelService:
         )
 
 
+class LiteLLMConceptModelService:
+    """Concept model service backed by Sift's LiteLLM model gateway."""
+
+    def __init__(
+        self,
+        gateway: ConceptModelGateway,
+        model_alias: str,
+    ) -> None:
+        self.gateway = gateway
+        self.model_alias = model_alias
+        self._fallback_initial_blocks = MockConceptModelService()
+
+    def initial_blocks(self, title: str) -> list[NoteBlockDTO]:
+        return self._fallback_initial_blocks.initial_blocks(title)
+
+    async def answer_turn(
+        self,
+        concept: ConceptDTO,
+        request: ConceptTurnRequest,
+    ) -> ConceptTurnResult:
+        return await self.gateway.answer_concept_turn(
+            concept=concept,
+            card_memory="",
+            recent_turns=[],
+            user_query=request.question,
+            model_alias=self.model_alias,
+        )
+
+
 class ConceptService:
     def __init__(
         self,
         store: InMemoryConceptStore | None = None,
-        model_service: MockConceptModelService | None = None,
+        model_service: MockConceptModelService | LiteLLMConceptModelService | None = None,
     ) -> None:
         self.store = store or InMemoryConceptStore()
         self.model_service = model_service or MockConceptModelService()
@@ -196,9 +230,19 @@ class ConceptService:
         )
         return self.store.save_concept(concept)
 
-    def submit_turn(self, concept_id: UUID, request: ConceptTurnRequest) -> ConceptTurnResponse:
+    async def submit_turn(
+        self,
+        concept_id: UUID,
+        request: ConceptTurnRequest,
+    ) -> ConceptTurnResponse:
         concept = self.store.get_concept(concept_id)
-        result = self.model_service.answer_turn(concept, request)
+        try:
+            result = await self.model_service.answer_turn(concept, request)
+        except ConceptModelGatewayError as error:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"code": error.code, "message": str(error)},
+            ) from error
 
         if result.update_mode == UpdateMode.auto_merge and result.auto_patch:
             concept = self._apply_auto_patch(concept, result.auto_patch)

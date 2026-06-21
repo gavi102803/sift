@@ -39,7 +39,10 @@ Primary promise:
    AI suggests topics, tags, and related concepts. Users can correct them.
 
 7. The MVP uses one system-managed default model.
-   The data model remains provider-agnostic and stores model metadata for future multi-model support, but the first release does not expose per-message model selection.
+   The backend remains provider-agnostic through model aliases and stores model metadata for future multi-model support, but the first release does not expose per-message model selection.
+
+8. iOS never talks directly to upstream model providers.
+   The app calls Sift Backend only. Sift Backend calls a self-hosted LiteLLM Proxy, which then routes to OpenAI, Anthropic, Gemini, or other providers.
 
 ## MVP Scope
 
@@ -54,7 +57,9 @@ The first release should include:
 - A concept detail screen with the note and follow-up input.
 - One logical conversation per concept card.
 - A single system-managed default model for answer generation, update decisions, and note merging.
-- Provider-agnostic model metadata in the data layer for future expansion.
+- Sift Backend API for generation, follow-up turns, update proposal merge/dismiss, and telemetry.
+- Self-hosted LiteLLM Proxy behind the backend for multi-provider model access.
+- Provider-agnostic model metadata in the backend and local data layer for future expansion.
 - AI update decisions after each follow-up:
   - no update
   - automatic merge
@@ -77,6 +82,8 @@ The first release should not include:
 - Heavy folder management.
 - Multi-device realtime sync.
 - App Intents or Shortcuts flows.
+- Direct iOS access to OpenAI, Anthropic, Gemini, LiteLLM, or any upstream provider key.
+- Codex, Claude Code, OpenAI Agents SDK, or Claude Agent SDK as the production runtime.
 
 ## Post-MVP System Integrations
 
@@ -96,6 +103,39 @@ V1.2 should consider:
 - Tap-through into Concept Detail.
 
 The previous "Continue Concept" intent is deferred. It requires entity lookup, ambiguity resolution, foreground/background transitions, network calls, and update presentation. Its value is lower than making in-app capture and card growth reliable.
+
+## System Architecture
+
+Sift uses a backend-mediated model architecture:
+
+```text
+iOS App
+  -> Sift Backend
+  -> Self-hosted LiteLLM Proxy
+  -> OpenAI / Anthropic / Gemini / other providers
+```
+
+The iOS app owns local-first capture, local persistence, navigation, editing UI, and recovery states. It does not hold upstream model provider keys and does not call LiteLLM directly.
+
+Sift Backend owns:
+
+- Authentication and quota controls.
+- Context pack construction.
+- Calls to LiteLLM through model aliases such as `sift-explain`, `sift-curate`, and `sift-fast`.
+- SSE streaming to iOS where useful.
+- Structured output validation.
+- Patch/merge validation.
+- Update proposal creation.
+- Model, token, latency, cost, and failure logging.
+
+LiteLLM owns:
+
+- Multi-provider API normalization.
+- Provider key management.
+- Provider fallback configuration.
+- OpenAI-compatible model gateway behavior.
+
+The domain truth remains Sift's own data: `Concept`, `ConceptNote`, `Conversation`, `CardMemory`, `ConversationMessage`, `NoteRevision`, `UpdateEvent`, and `ConceptUpdateProposal`.
 
 ## Information Architecture
 
@@ -156,7 +196,7 @@ Settings and ownership controls.
 Primary capabilities:
 
 - View the system-managed default model.
-- Manage the model provider connection if required.
+- View account/backend connection status.
 - Privacy and local storage notes.
 - Export options.
 - Future system integration settings.
@@ -563,7 +603,7 @@ uncertaintyNote
 
 ### Same Concept, Same Logical Conversation
 
-When the user returns to a concept card later, Sift sends the same concept's note, card memory, and recent messages to the default model. This preserves the user's sense that the card remembers the learning journey.
+When the user returns to a concept card later, Sift Backend sends the same concept's note, card memory, and recent messages to the default model alias through LiteLLM. This preserves the user's sense that the card remembers the learning journey.
 
 ### Different Concepts, Different Conversations
 
@@ -572,6 +612,12 @@ Different concept cards use separate conversations by default. Related concepts 
 ### Model Strategy
 
 The MVP uses one system-managed default model. The user does not choose the model per follow-up.
+
+Sift Backend calls LiteLLM through model aliases rather than hard-coding provider model names. Initial aliases should include:
+
+- `sift-explain` for answering the user's immediate question.
+- `sift-curate` for update decisions, patch operations, topic/tag suggestions, relations, and card memory updates.
+- `sift-fast` for future low-latency classification or draft tasks.
 
 The data layer still stores `modelId`, `providerId`, and optional `ModelThread` records so future versions can support multiple providers without rewriting the conversation model.
 
@@ -622,8 +668,10 @@ Recommended stack:
 
 - SwiftUI for UI.
 - SwiftData for local persistence.
-- A small service layer for AI calls and context construction.
-- Provider adapter interfaces for future model expansion.
+- URLSession-based Sift API client.
+- SSE streaming client if response streaming ships in MVP.
+- MarkdownUI for rendering AI answers and follow-up history.
+- No direct upstream model SDK in production iOS.
 
 Suggested modules or folders:
 
@@ -635,8 +683,8 @@ Suggested modules or folders:
   - Concept library, topics, tags, relations, search.
 - ConceptDetail
   - Note reading, follow-up, update proposals, manual edits, source notices.
-- AI
-  - AIClient, default model adapter, context pack builder, structured output parser, curator/merge service.
+- API
+  - SiftAPIClient, DTOs, SSE stream parser, request retry/error mapping.
 - Persistence
   - SwiftData models and repositories.
 - SystemIntegrations
@@ -648,7 +696,29 @@ Root app structure:
 - Use NavigationStack per tab.
 - Install app-level services from one dependency graph modifier.
 - Keep feature-local state inside feature views.
-- Keep AI/networking out of SwiftUI body code paths.
+- Keep API/networking out of SwiftUI body code paths.
+
+## Backend Architecture
+
+Recommended backend responsibilities:
+
+- Expose Sift API endpoints for concept creation, concept turns, proposal merge, and proposal dismissal.
+- Persist authoritative concept/conversation data in PostgreSQL or an equivalent server database.
+- Build context packs from `ConceptNote`, `CardMemory`, recent messages, and the current query.
+- Call LiteLLM through model aliases.
+- Validate structured model output against JSON Schema.
+- Apply patch operations only after revision, hash, target-block, and user-lock checks.
+- Create `NoteRevision` and `UpdateEvent` records for every merge.
+- Return recoverable error states to iOS without deleting the user's local capture.
+
+Initial API shape:
+
+```text
+POST /v1/concepts
+POST /v1/concepts/{conceptId}/turns
+POST /v1/update-proposals/{proposalId}/merge
+POST /v1/update-proposals/{proposalId}/dismiss
+```
 
 ## UX Tone
 
@@ -690,15 +760,18 @@ The MVP succeeds if:
 - Significant changes are represented as revision-aware proposals.
 - The concept library remains browsable without manual organization.
 - The app can explain whether an answer came from model knowledge, user-provided context, or verified external sources.
+- iOS never stores or transmits upstream provider API keys.
+- All model output that can mutate note state is schema-validated by Sift Backend before persistence.
 
 ## Open Decisions
 
 These are intentionally left for implementation planning:
 
-- Which single default model/provider to use in the first build.
-- Whether API keys are user-provided or app-managed.
+- Which default LiteLLM provider/model backs `sift-explain` and `sift-curate`.
+- Which backend stack to use for Sift Backend.
+- Whether API keys are app-managed only or if user-provided provider keys are supported later through the backend.
 - Whether voice input ships in MVP or immediately after.
 - Whether data sync is deferred entirely or implemented as simple iCloud persistence.
-- Exact structured output schema for the first model provider.
+- Exact structured output schema for backend validation.
 - Exact patch operation schema for note updates.
 - Whether web verification is implemented in MVP or represented only by the source model.

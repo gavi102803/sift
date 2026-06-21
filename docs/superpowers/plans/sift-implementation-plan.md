@@ -11,8 +11,8 @@ The implementation should start with a narrow MVP:
 
 - SwiftUI app shell with Record, Concept Library, and Profile tabs.
 - SwiftData persistence for captures, concepts, notes, revisions, conversations, messages, tags, topics, relations, and update events.
-- One system-managed default AI model behind a provider-agnostic adapter.
-- Structured AI responses that separate answering from note updates.
+- Sift Backend mediating all model access through a self-hosted LiteLLM Proxy.
+- Structured backend responses that separate answering from note updates.
 - Revision-aware patch proposals for significant changes.
 - No App Intents, multi-model UI, sync, sharing, or spaced repetition in MVP.
 
@@ -20,12 +20,13 @@ The implementation should start with a narrow MVP:
 
 Yes, we should look at related open-source projects before implementation, but only for targeted patterns:
 
-- AI chat clients: streaming, provider abstraction, retry/error states, message persistence.
+- AI chat clients: streaming, retry/error states, message persistence, and interaction details only.
+- LiteLLM/backend model gateways: provider aliases, fallback, logging, and OpenAI-compatible APIs.
 - SwiftData note/sample apps: model design, queries, search, list performance.
 - Markdown or rich text renderers: note block rendering and editing trade-offs.
 - Local-first note apps: export, persistence boundaries, and offline behavior.
 
-Do not copy their product architecture directly. Sift's hard part is not chat UI; it is the reliable growth of a concept card through `ConceptNote`, `Conversation`, `CardMemory`, `NoteRevision`, `UpdateEvent`, and patch-based merges.
+Do not copy their product architecture directly. Sift's hard part is not chat UI; it is the reliable growth of a concept card through `ConceptNote`, `Conversation`, `CardMemory`, `NoteRevision`, `UpdateEvent`, and patch-based merges. Production iOS should not directly use upstream model SDKs or hold provider keys.
 
 Initial references to review:
 
@@ -34,6 +35,7 @@ Initial references to review:
 - Apple App Intents documentation for post-MVP planning: https://developer.apple.com/documentation/AppIntents
 - OpenAI Responses API documentation: https://platform.openai.com/docs/api-reference/responses
 - OpenAI Structured Outputs guide: https://platform.openai.com/docs/guides/structured-outputs
+- LiteLLM documentation: https://docs.litellm.ai/
 - Swift Markdown package: https://github.com/swiftlang/swift-markdown
 - MarkdownUI for SwiftUI rendering: https://github.com/gonzalezreal/swift-markdown-ui
 
@@ -48,9 +50,11 @@ Research output should be a short `docs/research/open-source-notes.md` file with
 
 - macOS with current Xcode and iOS Simulator for build and runtime validation.
 - iOS deployment target decision, recommended iOS 17+ for SwiftData and Observation.
-- One default model/provider decision for MVP.
-- API key handling decision: user-provided key, app-managed key, or local mock only during early development.
-- Network access for AI calls.
+- Backend stack decision for Sift Backend.
+- Self-hosted LiteLLM Proxy for production-like model access.
+- One default LiteLLM alias/provider decision for `sift-explain` and `sift-curate`.
+- API key handling decision for backend-managed provider keys.
+- Network access from backend to LiteLLM and from iOS to Sift Backend.
 - Git branch for implementation work, recommended `codex/sift-mvp`.
 
 ## Sprint 0: Research and Project Decisions
@@ -65,7 +69,7 @@ Research output should be a short `docs/research/open-source-notes.md` file with
 ### Task 0.1: Review open-source AI chat clients
 
 - **Location**: `docs/research/open-source-notes.md`
-- **Description**: Review 2-3 SwiftUI AI chat/client projects for streaming, provider adapters, message persistence, cancellation, retries, and error UI.
+- **Description**: Review 2-3 SwiftUI AI chat/client projects for streaming UI, message persistence, cancellation, retries, and error UI. Provider adapter ideas may be borrowed for backend design, not for production iOS model access.
 - **Dependencies**: None
 - **Acceptance Criteria**:
   - At least two candidate projects reviewed.
@@ -85,26 +89,27 @@ Research output should be a short `docs/research/open-source-notes.md` file with
 - **Validation**:
   - Notes explicitly map findings to Sift's `Concept`, `Tag`, `Topic`, and relation screens.
 
-### Task 0.3: Decide MVP platform and provider constraints
+### Task 0.3: Decide MVP platform, backend, and provider constraints
 
 - **Location**: `docs/decisions/sift-mvp-decisions.md`
-- **Description**: Record deployment target, default model/provider, API key strategy, and whether voice input ships in MVP.
+- **Description**: Record deployment target, backend stack, LiteLLM deployment mode, default model aliases, provider key strategy, and whether voice input ships in MVP.
 - **Dependencies**: Tasks 0.1, 0.2
 - **Acceptance Criteria**:
   - Decisions are specific enough to scaffold the app.
   - Deferred items are explicitly marked.
 - **Validation**:
-  - No implementation task depends on an unresolved platform/provider choice.
+  - No implementation task depends on an unresolved platform/backend/provider choice.
 
 ## Sprint 1: App Scaffold and Local Persistence
 
-**Goal**: Create a runnable iOS app with local-first data models and a navigable shell.
+**Goal**: Create a runnable iOS app with local-first data models, a navigable shell, and a minimal backend skeleton.
 
 **Demo/Validation**:
 
 - App launches in Simulator.
 - Record, Concept Library, and Profile tabs are visible.
 - A local sample concept can be seeded and displayed.
+- Backend health check runs locally.
 - Unit tests validate model creation.
 
 ### Task 1.1: Create Xcode project
@@ -155,6 +160,19 @@ Research output should be a short `docs/research/open-source-notes.md` file with
   - Update events are created whenever note data changes.
 - **Validation**:
   - Repository unit tests cover draft creation, ready state, failure state, and note revision creation.
+
+### Task 1.5: Scaffold Sift Backend
+
+- **Location**: `backend/`
+- **Description**: Create the backend project using the stack chosen in Task 0.3. Add health check, config loading, structured logging, and test harness.
+- **Dependencies**: Task 0.3
+- **Acceptance Criteria**:
+  - Backend starts locally.
+  - `GET /health` returns a simple healthy response.
+  - Provider keys are loaded from environment/config and never committed.
+  - Test command runs.
+- **Validation**:
+  - Run backend locally and hit `/health`.
 
 ## Sprint 2: Record Flow Without AI
 
@@ -241,61 +259,63 @@ Research output should be a short `docs/research/open-source-notes.md` file with
 - **Validation**:
   - Unit tests verify revision and lock creation after manual edit.
 
-## Sprint 4: AI Provider Adapter and Structured Output
+## Sprint 4: Backend Model Gateway and Structured Output
 
-**Goal**: Connect one default model through a provider-agnostic interface with mockable structured responses.
+**Goal**: Connect Sift Backend to LiteLLM through model aliases and expose mockable Sift API contracts to iOS.
 
 **Demo/Validation**:
 
-- App can generate an initial concept card from a real or mocked model.
-- Tests run against a mock provider without network access.
+- Backend can call a mock LiteLLM-compatible endpoint and validate structured output.
+- iOS can call a mock Sift API client without any upstream model SDK or provider key.
 
-### Task 4.1: Define AI adapter contracts
+### Task 4.1: Define backend model contracts
 
-- **Location**: `Sift/AI/AIClient.swift`, `Sift/AI/AIProvider.swift`, `Sift/AI/AIResponseModels.swift`
-- **Description**: Define request/response types for initial generation and follow-up responses, including `AnswerSource`, update mode, patch operations, topic/tag suggestions, relation suggestions, and memory patch.
-- **Dependencies**: Task 1.3
+- **Location**: `backend/src/ai/`
+- **Description**: Define backend request/response types for initial generation and follow-up turns, including `AnswerSource`, update decision, patch operations, topic/tag suggestions, relation suggestions, memory patch, and model metadata.
+- **Dependencies**: Task 1.5
 - **Acceptance Criteria**:
-  - Contracts are provider-agnostic.
-  - Structured output can be decoded from JSON.
-  - Mock provider conforms to the same interface.
+  - Contracts are provider-agnostic and model-alias based.
+  - Structured output can be validated from JSON.
+  - Invalid structured output maps to a recoverable backend error.
 - **Validation**:
-  - Unit tests decode valid output and reject malformed output.
+  - Backend tests accept valid fixtures and reject malformed output.
 
-### Task 4.2: Build context pack builder
+### Task 4.2: Build backend context pack builder
 
-- **Location**: `Sift/AI/ContextPackBuilder.swift`
+- **Location**: `backend/src/ai/context-pack-builder.*`
 - **Description**: Build the prompt/context package from concept metadata, current note blocks, card memory, recent 6-10 messages, and user query.
-- **Dependencies**: Tasks 1.4, 4.1
+- **Dependencies**: Tasks 1.5, 4.1
 - **Acceptance Criteria**:
-  - Provider sessions are optional.
+  - Provider sessions are optional optimization metadata only.
   - User-locked blocks and source/confidence metadata are included.
   - Output contract is explicit.
 - **Validation**:
   - Snapshot tests for context pack shape.
 
-### Task 4.3: Implement default provider
+### Task 4.3: Implement LiteLLM client
 
-- **Location**: `Sift/AI/Providers/DefaultAIProvider.swift`
-- **Description**: Implement the chosen model provider using the adapter contract. Keep API key loading isolated.
+- **Location**: `backend/src/ai/litellm-client.*`
+- **Description**: Implement a backend LiteLLM client using aliases such as `sift-explain`, `sift-curate`, and `sift-fast`. Keep provider keys in LiteLLM/backend config, never in iOS.
 - **Dependencies**: Tasks 0.3, 4.1, 4.2
 - **Acceptance Criteria**:
-  - API key is not hard-coded.
-  - Network errors map to recoverable app errors.
+  - Backend calls aliases rather than upstream provider model names.
+  - Network/provider errors map to recoverable Sift API errors.
   - Timeouts and cancellation are handled.
+  - Token, latency, provider, model, and failure metadata can be logged.
 - **Validation**:
-  - Manual generation test in Simulator.
-  - Unit tests with mocked transport.
+  - Backend tests with mocked LiteLLM transport.
 
-### Task 4.4: Add mock provider for development
+### Task 4.4: Define iOS Sift API client and DTOs
 
-- **Location**: `Sift/AI/Providers/MockAIProvider.swift`
-- **Description**: Add deterministic initial-card and follow-up responses for previews, UI tests, and offline development.
+- **Location**: `Sift/API/SiftAPIClient.swift`, `Sift/API/SiftDTOs.swift`, `Sift/API/MockSiftAPIClient.swift`
+- **Description**: Define iOS DTOs for backend concept creation, turns, proposal merge/dismiss, and deterministic mock responses for previews/UI tests.
 - **Dependencies**: Task 4.1
 - **Acceptance Criteria**:
-  - Mock can return success, timeout-like failure, auto-merge, and proposal cases.
+  - iOS has no direct upstream model SDK dependency.
+  - Mock API client can return success, timeout-like failure, auto-merge, and proposal cases.
+  - API errors map to user-facing recoverable states.
 - **Validation**:
-  - UI tests use mock provider only.
+  - UI tests use mock Sift API client only.
 
 ## Sprint 5: Initial Generation Flow
 
@@ -307,27 +327,28 @@ Research output should be a short `docs/research/open-source-notes.md` file with
 
 ### Task 5.1: Implement initial generation service
 
-- **Location**: `Sift/AI/InitialConceptGenerationService.swift`
-- **Description**: Call the AI provider for a saved capture, parse structured output, create concept note blocks, conversation, first messages, source, tags, topics, relations, and revisions.
+- **Location**: `backend/src/concepts/initial-generation.*`
+- **Description**: Implement backend concept generation for a saved capture: build context, call LiteLLM, validate structured output, create concept note blocks, conversation, first messages, source, tags, topics, relations, and revisions.
 - **Dependencies**: Tasks 2.2, 4.3, 4.4
 - **Acceptance Criteria**:
-  - Raw capture exists before model call.
+  - Raw capture exists before iOS calls backend generation.
   - Generation success transitions capture to `ready`.
   - Generation failure transitions to `generationFailed`.
   - Initial note creates `NoteRevision` and `UpdateEvent`.
 - **Validation**:
-  - Unit tests for success, malformed output, timeout, and retry.
+  - Backend tests for success, malformed output, timeout, and retry.
 
 ### Task 5.2: Wire generation into Record UI
 
-- **Location**: `Sift/Record/RecordView.swift`, `Sift/Record/CaptureGenerationViewModel.swift`
-- **Description**: Start generation after local save, show progress, handle retry, and route to detail on success.
+- **Location**: `Sift/Record/RecordView.swift`, `Sift/Record/CaptureGenerationViewModel.swift`, `Sift/API/SiftAPIClient.swift`
+- **Description**: After local save, call Sift Backend to generate the concept, show progress, handle retry, persist returned concept state locally, and route to detail on success.
 - **Dependencies**: Task 5.1
 - **Acceptance Criteria**:
   - User can leave and return while generation state persists.
   - Failed drafts show retry.
+  - Backend failure never deletes the local raw capture.
 - **Validation**:
-  - UI tests for success and failure with mock provider.
+  - UI tests for success and failure with mock Sift API client.
 
 ## Sprint 6: Follow-Up Conversation and Merge Engine
 
@@ -340,19 +361,19 @@ Research output should be a short `docs/research/open-source-notes.md` file with
 
 ### Task 6.1: Implement follow-up service
 
-- **Location**: `Sift/AI/FollowUpService.swift`
-- **Description**: Append user message, build context pack, call default provider, save assistant message, update card memory, and hand off update decision.
+- **Location**: `backend/src/concepts/follow-up-service.*`
+- **Description**: Append user message, build context pack, call LiteLLM through the default aliases, save assistant message, update card memory, and hand off update decision.
 - **Dependencies**: Tasks 4.2, 5.1
 - **Acceptance Criteria**:
   - Follow-ups use the concept's logical conversation.
   - Recent messages and card memory are included.
   - Network failure does not corrupt conversation state.
 - **Validation**:
-  - Unit tests for successful answer, failed answer, and message persistence.
+  - Backend tests for successful answer, failed answer, and message persistence.
 
 ### Task 6.2: Implement patch operation engine
 
-- **Location**: `Sift/AI/PatchOperationEngine.swift`
+- **Location**: `backend/src/notes/patch-operation-engine.*`
 - **Description**: Apply append/replace/add-block operations against a base note revision, using hashes for replace safety.
 - **Dependencies**: Task 6.1
 - **Acceptance Criteria**:
@@ -360,15 +381,16 @@ Research output should be a short `docs/research/open-source-notes.md` file with
   - Replace operations verify old value hash.
   - Stale proposals are detected.
 - **Validation**:
-  - Unit tests cover append, replace, stale base revision, locked block, and invalid target.
+  - Backend tests cover append, replace, stale base revision, locked block, and invalid target.
 
 ### Task 6.3: Build update proposal UI
 
 - **Location**: `Sift/ConceptDetail/UpdateProposalSheet.swift`
-- **Description**: Show proposed patch operations, rationale, confidence, stale state, accept, dismiss, and regenerate actions.
+- **Description**: Show backend-created proposed patch operations, rationale, confidence, stale state, accept, dismiss, and regenerate actions.
 - **Dependencies**: Task 6.2
 - **Acceptance Criteria**:
-  - Accepted proposal creates `NoteRevision` and `UpdateEvent`.
+  - Accept/dismiss actions call Sift Backend.
+  - Accepted proposal creates `NoteRevision` and `UpdateEvent` on the backend and syncs the local copy.
   - Dismissed proposal is retained with dismissed status.
   - Stale proposal cannot be blindly applied.
 - **Validation**:
@@ -376,15 +398,16 @@ Research output should be a short `docs/research/open-source-notes.md` file with
 
 ### Task 6.4: Wire follow-up input
 
-- **Location**: `Sift/ConceptDetail/ConceptDetailView.swift`, `Sift/ConceptDetail/FollowUpComposer.swift`
-- **Description**: Add follow-up input, loading state, answer display, source notice, auto-merge toast, and proposal presentation.
+- **Location**: `Sift/ConceptDetail/ConceptDetailView.swift`, `Sift/ConceptDetail/FollowUpComposer.swift`, `Sift/API/SiftAPIClient.swift`
+- **Description**: Add follow-up input, loading state, backend turn submission, answer display, source notice, auto-merge toast, and proposal presentation.
 - **Dependencies**: Tasks 6.1, 6.3
 - **Acceptance Criteria**:
   - Follow-up input is disabled while submitting.
   - Answer is visible before or alongside merge result.
   - Source/confidence is visible but lightweight.
+  - Failed follow-up keeps the user question recoverable locally.
 - **Validation**:
-  - Simulator walkthrough with mock provider.
+  - Simulator walkthrough with mock Sift API client.
 
 ## Sprint 7: Reliability, Search, and Polish
 
@@ -426,7 +449,7 @@ Research output should be a short `docs/research/open-source-notes.md` file with
   - Failed follow-up keeps user question recoverable.
   - Error messages are concise and non-technical.
 - **Validation**:
-  - UI tests simulate provider failure and recovery.
+  - UI tests simulate backend/model failure and recovery.
 
 ### Task 7.4: Add accessibility and empty states
 
@@ -453,7 +476,7 @@ Research output should be a short `docs/research/open-source-notes.md` file with
 ### Task 8.1: Add end-to-end smoke tests
 
 - **Location**: `SiftUITests/`
-- **Description**: Cover capture, generation, library search, detail open, follow-up, proposal merge, manual edit, and failure retry using the mock provider.
+- **Description**: Cover capture, generation, library search, detail open, follow-up, proposal merge, manual edit, and failure retry using the mock Sift API client.
 - **Dependencies**: Sprints 1-7
 - **Acceptance Criteria**:
   - Core happy path has UI test coverage.
@@ -485,7 +508,7 @@ Research output should be a short `docs/research/open-source-notes.md` file with
 ## Testing Strategy
 
 - Unit tests for SwiftData repositories, capture transitions, patch operations, context pack construction, structured output decoding, and data integrity.
-- UI tests with mock provider for capture, generation, follow-up, proposal handling, search, and failure recovery.
+- UI tests with mock Sift API client for capture, generation, follow-up, proposal handling, search, and failure recovery.
 - Snapshot or preview checks for Record, Library, Concept Detail, update proposal, and source notice states.
 - Manual Simulator checks for navigation, keyboard behavior, loading states, Dynamic Type, and offline/failure behavior.
 - Device smoke test before any real usage build.
@@ -494,7 +517,7 @@ Research output should be a short `docs/research/open-source-notes.md` file with
 
 - SwiftData schema churn can become expensive. Keep migrations simple during MVP and freeze model names before real user testing.
 - AI structured output can drift. Treat decoding failure as recoverable and keep the original capture/message.
-- Provider latency can make the app feel broken. Always show saved draft and progress before model completion.
+- Backend/model latency can make the app feel broken. Always show saved draft and progress before model completion.
 - Patch-based merging is the core risk. Keep operations few and heavily tested before adding richer edits.
 - User-locked blocks must be respected everywhere, including proposal acceptance and future model-generated patches.
 - Source/confidence UI must stay lightweight, but uncertainty must not be hidden for sensitive or time-sensitive concepts.
@@ -503,7 +526,7 @@ Research output should be a short `docs/research/open-source-notes.md` file with
 
 ## Rollback Plan
 
-- If AI integration is unstable, keep mock provider and ship local capture/library/detail first.
+- If AI integration is unstable, keep mock Sift API client and ship local capture/library/detail first.
 - If patch merge is unstable, disable automatic merge and route all updates through proposals.
 - If SwiftData relations become difficult, simplify library grouping to query through explicit repository methods while preserving model truth sources.
 - If source/confidence is not ready, display "Generated from model knowledge, no external sources cited" and prevent uncertain content from auto-merging.

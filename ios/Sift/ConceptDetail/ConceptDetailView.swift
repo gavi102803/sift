@@ -2,9 +2,13 @@ import SwiftData
 import SwiftUI
 
 struct ConceptDetailView: View {
+    @Environment(\.appServices) private var appServices
     @Environment(\.modelContext) private var modelContext
     @Query private var concepts: [Concept]
     @State private var followUpText = ""
+    @State private var lastAnswer: String?
+    @State private var errorMessage: String?
+    @State private var isSubmittingFollowUp = false
 
     private var conceptId: UUID
 
@@ -25,6 +29,14 @@ struct ConceptDetailView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         header(for: concept)
+                        if let lastAnswer {
+                            answerSection(lastAnswer)
+                        }
+                        if let errorMessage {
+                            Text(errorMessage)
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                        }
                         noteSection(for: concept)
                     }
                     .padding(20)
@@ -81,6 +93,23 @@ struct ConceptDetailView: View {
         }
     }
 
+    private func answerSection(_ answer: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Answer")
+                .font(.headline)
+            Text(answer)
+                .font(.body)
+                .foregroundStyle(.primary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(.quaternary, lineWidth: 1)
+        }
+    }
+
     private var followUpComposer: some View {
         HStack(spacing: 10) {
             TextField("Ask a follow-up", text: $followUpText, axis: .vertical)
@@ -94,17 +123,49 @@ struct ConceptDetailView: View {
                 }
 
             Button {
-                followUpText = ""
+                if let concept {
+                    Task {
+                        await submitFollowUp(for: concept)
+                    }
+                }
             } label: {
-                Image(systemName: "arrow.up")
-                    .frame(width: 34, height: 34)
+                if isSubmittingFollowUp {
+                    ProgressView()
+                        .frame(width: 34, height: 34)
+                } else {
+                    Image(systemName: "arrow.up")
+                        .frame(width: 34, height: 34)
+                }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(followUpText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(
+                isSubmittingFollowUp
+                    || followUpText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            )
             .accessibilityLabel("Submit follow-up")
         }
         .padding(12)
         .background(.bar)
+    }
+
+    private func submitFollowUp(for concept: Concept) async {
+        let question = followUpText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !question.isEmpty else { return }
+
+        isSubmittingFollowUp = true
+        errorMessage = nil
+        do {
+            let response = try await appServices.apiClient.submitTurn(
+                conceptId: concept.id,
+                request: ConceptTurnRequest(question: question)
+            )
+            _ = try ConceptLocalStore(modelContext: modelContext).upsertConcept(from: response.concept)
+            lastAnswer = response.answer
+            followUpText = ""
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isSubmittingFollowUp = false
     }
 }
 
@@ -155,4 +216,3 @@ private struct NoteBlockView: View {
         }
     }
 }
-

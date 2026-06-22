@@ -59,6 +59,42 @@ struct ConceptLocalStore {
         return concept
     }
 
+    func upsertProposal(_ dto: UpdateProposalDTO, conceptId: UUID) throws -> ConceptUpdateProposal {
+        let existingProposal = try fetchProposal(id: dto.id)
+        let proposal = existingProposal ?? ConceptUpdateProposal(
+            id: dto.id,
+            conceptId: conceptId,
+            sourceMessageId: UUID(),
+            baseNoteRevision: dto.baseNoteRevision,
+            patchOperationsJSON: "[]",
+            rationale: dto.rationale,
+            confidence: dto.confidence,
+            status: dto.status
+        )
+
+        proposal.conceptId = conceptId
+        proposal.baseNoteRevision = dto.baseNoteRevision
+        proposal.patchOperationsJSON = try encodePatchOperations(dto.patchOperations)
+        proposal.rationale = dto.rationale
+        proposal.confidence = dto.confidence
+        proposal.status = dto.status
+        if dto.status != ProposalStatus.proposed.rawValue {
+            proposal.resolvedAt = .now
+        }
+
+        if existingProposal == nil {
+            modelContext.insert(proposal)
+        }
+
+        return proposal
+    }
+
+    func markProposal(id: UUID, status: ProposalStatus) throws {
+        guard let proposal = try fetchProposal(id: id) else { return }
+        proposal.status = status.rawValue
+        proposal.resolvedAt = .now
+    }
+
     private func fetchConcept(id: UUID) throws -> Concept? {
         var descriptor = FetchDescriptor<Concept>(
             predicate: #Predicate<Concept> { concept in
@@ -67,5 +103,20 @@ struct ConceptLocalStore {
         )
         descriptor.fetchLimit = 1
         return try modelContext.fetch(descriptor).first
+    }
+
+    private func fetchProposal(id: UUID) throws -> ConceptUpdateProposal? {
+        var descriptor = FetchDescriptor<ConceptUpdateProposal>(
+            predicate: #Predicate<ConceptUpdateProposal> { proposal in
+                proposal.id == id
+            }
+        )
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first
+    }
+
+    private func encodePatchOperations(_ operations: [PatchOperationDTO]) throws -> String {
+        let data = try JSONEncoder().encode(operations)
+        return String(data: data, encoding: .utf8) ?? "[]"
     }
 }

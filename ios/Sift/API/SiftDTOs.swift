@@ -46,7 +46,7 @@ struct UpdateProposalDTO: Codable, Identifiable {
 }
 
 struct PatchOperationDTO: Codable, Identifiable {
-    var id: UUID
+    var id = UUID()
     var operation: String
     var targetBlockId: UUID?
     var content: String?
@@ -54,6 +54,16 @@ struct PatchOperationDTO: Codable, Identifiable {
     var newContent: String?
     var targetConceptId: UUID?
     var relationType: String?
+
+    enum CodingKeys: String, CodingKey {
+        case operation
+        case targetBlockId
+        case content
+        case oldValueHash
+        case newContent
+        case targetConceptId
+        case relationType
+    }
 }
 
 struct AnswerSourceDTO: Codable {
@@ -61,4 +71,3 @@ struct AnswerSourceDTO: Codable {
     var confidence: Double
     var uncertaintyNote: String?
 }
-

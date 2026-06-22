@@ -5,10 +5,12 @@ struct ConceptDetailView: View {
     @Environment(\.appServices) private var appServices
     @Environment(\.modelContext) private var modelContext
     @Query private var concepts: [Concept]
+    @Query private var proposals: [ConceptUpdateProposal]
     @State private var followUpText = ""
     @State private var lastAnswer: String?
     @State private var errorMessage: String?
     @State private var isSubmittingFollowUp = false
+    @State private var resolvingProposalId: UUID?
 
     private var conceptId: UUID
 
@@ -17,10 +19,23 @@ struct ConceptDetailView: View {
         _concepts = Query(filter: #Predicate<Concept> { concept in
             concept.id == conceptId
         })
+        _proposals = Query(
+            filter: #Predicate<ConceptUpdateProposal> { proposal in
+                proposal.conceptId == conceptId
+            },
+            sort: \ConceptUpdateProposal.createdAt,
+            order: .reverse
+        )
     }
 
     private var concept: Concept? {
         concepts.first
+    }
+
+    private var activeProposal: ConceptUpdateProposal? {
+        proposals.first { proposal in
+            proposal.status == ProposalStatus.proposed.rawValue
+        }
     }
 
     var body: some View {
@@ -36,6 +51,9 @@ struct ConceptDetailView: View {
                             Text(errorMessage)
                                 .font(.footnote)
                                 .foregroundStyle(.red)
+                        }
+                        if let activeProposal {
+                            proposalSection(activeProposal)
                         }
                         noteSection(for: concept)
                     }
@@ -110,6 +128,59 @@ struct ConceptDetailView: View {
         }
     }
 
+    private func proposalSection(_ proposal: ConceptUpdateProposal) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Pending Update", systemImage: "checklist")
+                    .font(.headline)
+                Spacer()
+                Text("\(Int(proposal.confidence * 100))%")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(proposal.rationale)
+                .font(.body)
+                .foregroundStyle(.primary)
+
+            HStack(spacing: 10) {
+                Button {
+                    Task {
+                        await mergeProposal(proposal)
+                    }
+                } label: {
+                    if resolvingProposalId == proposal.id {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Label("Confirm", systemImage: "checkmark")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(resolvingProposalId != nil)
+
+                Button {
+                    Task {
+                        await dismissProposal(proposal)
+                    }
+                } label: {
+                    Label("Skip", systemImage: "xmark")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(resolvingProposalId != nil)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(.orange.opacity(0.45), lineWidth: 1)
+        }
+    }
+
     private var followUpComposer: some View {
         HStack(spacing: 10) {
             TextField("Ask a follow-up", text: $followUpText, axis: .vertical)
@@ -159,13 +230,46 @@ struct ConceptDetailView: View {
                 conceptId: concept.id,
                 request: ConceptTurnRequest(question: question)
             )
-            _ = try ConceptLocalStore(modelContext: modelContext).upsertConcept(from: response.concept)
+            let store = ConceptLocalStore(modelContext: modelContext)
+            _ = try store.upsertConcept(from: response.concept)
+            if let proposal = response.proposal {
+                _ = try store.upsertProposal(proposal, conceptId: response.concept.id)
+            }
             lastAnswer = response.answer
             followUpText = ""
         } catch {
             errorMessage = error.localizedDescription
         }
         isSubmittingFollowUp = false
+    }
+
+    private func mergeProposal(_ proposal: ConceptUpdateProposal) async {
+        resolvingProposalId = proposal.id
+        errorMessage = nil
+        do {
+            let concept = try await appServices.apiClient.mergeProposal(id: proposal.id)
+            let store = ConceptLocalStore(modelContext: modelContext)
+            _ = try store.upsertConcept(from: concept)
+            try store.markProposal(id: proposal.id, status: .accepted)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        resolvingProposalId = nil
+    }
+
+    private func dismissProposal(_ proposal: ConceptUpdateProposal) async {
+        resolvingProposalId = proposal.id
+        errorMessage = nil
+        do {
+            try await appServices.apiClient.dismissProposal(id: proposal.id)
+            try ConceptLocalStore(modelContext: modelContext).markProposal(
+                id: proposal.id,
+                status: .dismissed
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        resolvingProposalId = nil
     }
 }
 

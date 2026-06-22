@@ -73,6 +73,9 @@ struct HTTPSiftAPIClient: SiftAPIClient {
         guard (200..<300).contains(httpResponse.statusCode) else {
             throw SiftAPIError.httpStatus(httpResponse.statusCode)
         }
+        if Response.self == EmptyResponse.self {
+            return EmptyResponse() as! Response
+        }
         return try jsonDecoder.decode(Response.self, from: data)
     }
 }

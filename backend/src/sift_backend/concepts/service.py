@@ -22,6 +22,7 @@ from sift_backend.schemas.common import (
 from sift_backend.schemas.concepts import (
     AnswerSourceDTO,
     ConceptDTO,
+    ConceptHistoryTurnDTO,
     ConceptTurnRequest,
     ConceptTurnResponse,
     CreateConceptRequest,
@@ -102,6 +103,10 @@ class InMemoryConceptStore:
                 RecentTurn(role="assistant", content=answer),
             ]
         )
+
+    def list_turns(self, concept_id: UUID) -> list[RecentTurn]:
+        self.get_concept(concept_id)
+        return self.turns.get(concept_id, [])
 
 
 class MockConceptModelService:
@@ -256,6 +261,12 @@ class ConceptService:
 
     def get_concept(self, concept_id: UUID) -> ConceptDTO:
         return self.store.get_concept(concept_id)
+
+    def list_turns(self, concept_id: UUID) -> list[ConceptHistoryTurnDTO]:
+        return [
+            ConceptHistoryTurnDTO(role=turn.role, content=turn.content)
+            for turn in self.store.list_turns(concept_id)
+        ]
 
     async def submit_turn(
         self,

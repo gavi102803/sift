@@ -8,6 +8,7 @@ from sift_backend.concepts.service import ConceptService, LiteLLMConceptModelSer
 from sift_backend.config import Settings, load_settings
 from sift_backend.schemas.concepts import (
     ConceptDTO,
+    ConceptHistoryTurnDTO,
     ConceptTurnRequest,
     ConceptTurnResponse,
     CreateConceptRequest,
@@ -54,6 +55,15 @@ async def create_concept(request: Request, payload: CreateConceptRequest) -> Con
 @router.get("/concepts/{concept_id}", response_model=ConceptDTO, response_model_by_alias=True)
 async def get_concept(request: Request, concept_id: UUID) -> ConceptDTO:
     return get_concept_service(request).get_concept(concept_id)
+
+
+@router.get(
+    "/concepts/{concept_id}/turns",
+    response_model=list[ConceptHistoryTurnDTO],
+    response_model_by_alias=True,
+)
+async def list_concept_turns(request: Request, concept_id: UUID) -> list[ConceptHistoryTurnDTO]:
+    return get_concept_service(request).list_turns(concept_id)
 
 
 @router.post(

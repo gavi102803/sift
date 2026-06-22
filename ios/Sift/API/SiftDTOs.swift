@@ -28,6 +28,17 @@ struct ConceptTurnRequest: Codable {
     var question: String
 }
 
+struct ConceptHistoryTurnDTO: Codable, Identifiable {
+    var id = UUID()
+    var role: String
+    var content: String
+
+    enum CodingKeys: String, CodingKey {
+        case role
+        case content
+    }
+}
+
 struct ConceptTurnResponse: Codable {
     var answer: String
     var answerSource: AnswerSourceDTO

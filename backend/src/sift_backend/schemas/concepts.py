@@ -46,6 +46,11 @@ class ConceptTurnRequest(SiftBaseModel):
     question: str = Field(min_length=1)
 
 
+class ConceptHistoryTurnDTO(SiftBaseModel):
+    role: str
+    content: str
+
+
 class AnswerSourceDTO(SiftBaseModel):
     source_type: AnswerSourceType = Field(
         default=AnswerSourceType.model_knowledge,

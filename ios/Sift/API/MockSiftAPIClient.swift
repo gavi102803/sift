@@ -22,6 +22,11 @@ struct MockSiftAPIClient: SiftAPIClient {
         )
     }
 
+    func listTurns(conceptId: UUID) async throws -> [ConceptHistoryTurnDTO] {
+        try await Task.sleep(nanoseconds: delayNanoseconds)
+        return []
+    }
+
     func createConcept(_ request: CreateConceptRequest) async throws -> ConceptDTO {
         try await Task.sleep(nanoseconds: delayNanoseconds)
 

@@ -3,6 +3,7 @@ import Foundation
 protocol SiftAPIClient {
     func listConcepts() async throws -> [ConceptDTO]
     func getConcept(id: UUID) async throws -> ConceptDTO
+    func listTurns(conceptId: UUID) async throws -> [ConceptHistoryTurnDTO]
     func createConcept(_ request: CreateConceptRequest) async throws -> ConceptDTO
     func submitTurn(conceptId: UUID, request: ConceptTurnRequest) async throws -> ConceptTurnResponse
     func mergeProposal(id: UUID) async throws -> ConceptDTO
@@ -46,6 +47,10 @@ struct HTTPSiftAPIClient: SiftAPIClient {
 
     func getConcept(id: UUID) async throws -> ConceptDTO {
         try await get(path: "/v1/concepts/\(id.uuidString)")
+    }
+
+    func listTurns(conceptId: UUID) async throws -> [ConceptHistoryTurnDTO] {
+        try await get(path: "/v1/concepts/\(conceptId.uuidString)/turns")
     }
 
     func createConcept(_ request: CreateConceptRequest) async throws -> ConceptDTO {

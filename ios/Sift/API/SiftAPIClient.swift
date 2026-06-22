@@ -7,6 +7,31 @@ protocol SiftAPIClient {
     func dismissProposal(id: UUID) async throws
 }
 
+enum SiftAPIClientFactory {
+    static func makeDefault() -> any SiftAPIClient {
+        if let baseURL = configuredBackendBaseURL() {
+            return HTTPSiftAPIClient(baseURL: baseURL)
+        }
+        return MockSiftAPIClient()
+    }
+
+    private static func configuredBackendBaseURL() -> URL? {
+        if let value = ProcessInfo.processInfo.environment["SIFT_BACKEND_BASE_URL"],
+           let url = URL(string: value),
+           !value.isEmpty {
+            return url
+        }
+
+        if let value = Bundle.main.object(forInfoDictionaryKey: "SIFTBackendBaseURL") as? String,
+           let url = URL(string: value),
+           !value.isEmpty {
+            return url
+        }
+
+        return nil
+    }
+}
+
 struct HTTPSiftAPIClient: SiftAPIClient {
     var baseURL: URL
     var urlSession: URLSession = .shared
@@ -68,4 +93,3 @@ enum SiftAPIError: LocalizedError {
 
 private struct EmptyRequest: Codable {}
 private struct EmptyResponse: Codable {}
-

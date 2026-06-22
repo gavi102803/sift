@@ -6,6 +6,7 @@ struct SiftApp: App {
     var body: some Scene {
         WindowGroup {
             AppView()
+                .environment(\.appServices, .live)
         }
         .modelContainer(for: [
             Concept.self,
@@ -26,4 +27,3 @@ struct SiftApp: App {
         ])
     }
 }
-

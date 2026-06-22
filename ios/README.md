@@ -16,3 +16,10 @@ Recommended Xcode target settings:
 - SwiftData enabled
 - Add `MarkdownUI` package when rich answer rendering is wired
 
+Backend configuration:
+
+- Set the `SIFT_BACKEND_BASE_URL` environment variable in the Xcode scheme to call a real backend.
+- For iOS Simulator, use the Mac host URL, for example `http://127.0.0.1:8000`.
+- For a physical device, use the Mac's LAN address, for example `http://192.168.1.10:8000`.
+- Alternatively add an Info.plist string key named `SIFTBackendBaseURL`.
+- If no backend URL is configured, the app falls back to `MockSiftAPIClient` for local UI work.

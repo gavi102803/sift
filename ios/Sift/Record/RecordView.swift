@@ -2,10 +2,12 @@ import SwiftData
 import SwiftUI
 
 struct RecordView: View {
+    @Environment(\.appServices) private var appServices
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Concept.updatedAt, order: .reverse) private var recentConcepts: [Concept]
     @State private var captureText = ""
     @State private var errorMessage: String?
+    @State private var isSubmitting = false
 
     var body: some View {
         ScrollView {
@@ -59,13 +61,25 @@ struct RecordView: View {
 
                 Spacer()
 
-                Button(action: saveDraft) {
-                    Image(systemName: "arrow.right")
-                        .frame(width: 42, height: 36)
+                Button {
+                    Task {
+                        await captureConcept()
+                    }
+                } label: {
+                    if isSubmitting {
+                        ProgressView()
+                            .frame(width: 42, height: 36)
+                    } else {
+                        Image(systemName: "arrow.right")
+                            .frame(width: 42, height: 36)
+                    }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(captureText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .accessibilityLabel("Save concept draft")
+                .disabled(
+                    isSubmitting
+                        || captureText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
+                .accessibilityLabel("Capture concept")
             }
         }
         .padding(18)
@@ -101,14 +115,22 @@ struct RecordView: View {
         }
     }
 
-    private func saveDraft() {
+    private func captureConcept() async {
         let service = CaptureFlowService(
             localStore: ConceptLocalStore(modelContext: modelContext),
-            apiClient: MockSiftAPIClient()
+            apiClient: appServices.apiClient
         )
-        guard service.saveDraft(rawCapture: captureText) != nil else { return }
-        captureText = ""
+        guard let draft = service.saveDraft(rawCapture: captureText) else { return }
+
+        isSubmitting = true
         errorMessage = nil
+        do {
+            _ = try await service.generateConcept(from: draft)
+            captureText = ""
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isSubmitting = false
     }
 }
 
@@ -139,4 +161,5 @@ private struct ConceptRow: View {
     NavigationStack {
         RecordView()
     }
+    .environment(\.appServices, .preview)
 }

@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from sift_backend.api.concepts import build_concept_service
 from sift_backend.api.concepts import router as concepts_router
 from sift_backend.config import load_settings
 
@@ -17,6 +18,7 @@ def create_app() -> FastAPI:
         version="0.1.0",
         description="Backend API for Sift concept learning notes.",
     )
+    app.state.concept_service = build_concept_service(settings)
 
     @app.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:

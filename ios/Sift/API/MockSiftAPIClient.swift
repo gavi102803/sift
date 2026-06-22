@@ -3,6 +3,25 @@ import Foundation
 struct MockSiftAPIClient: SiftAPIClient {
     var delayNanoseconds: UInt64 = 250_000_000
 
+    func listConcepts() async throws -> [ConceptDTO] {
+        try await Task.sleep(nanoseconds: delayNanoseconds)
+        return []
+    }
+
+    func getConcept(id: UUID) async throws -> ConceptDTO {
+        try await Task.sleep(nanoseconds: delayNanoseconds)
+        return ConceptDTO(
+            id: id,
+            canonicalTitle: "RAG",
+            displayTitle: "RAG",
+            oneLineExplanation: "Retrieval-augmented generation improves answers with retrieved context.",
+            maturity: ConceptMaturity.growing.rawValue,
+            captureStatus: CaptureStatus.ready.rawValue,
+            noteRevision: 1,
+            blocks: []
+        )
+    }
+
     func createConcept(_ request: CreateConceptRequest) async throws -> ConceptDTO {
         try await Task.sleep(nanoseconds: delayNanoseconds)
 
@@ -79,4 +98,3 @@ struct MockSiftAPIClient: SiftAPIClient {
         try await Task.sleep(nanoseconds: delayNanoseconds)
     }
 }
-

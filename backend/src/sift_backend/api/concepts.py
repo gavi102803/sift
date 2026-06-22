@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Request, status
 
 from sift_backend.ai.litellm_client import LiteLLMClient
 from sift_backend.ai.model_gateway import ConceptModelGateway
@@ -33,12 +33,27 @@ def build_concept_service(settings: Settings | None = None) -> ConceptService:
     )
 
 
-service = build_concept_service()
+def get_concept_service(request: Request) -> ConceptService:
+    service = getattr(request.app.state, "concept_service", None)
+    if service is None:
+        service = build_concept_service()
+        request.app.state.concept_service = service
+    return service
+
+
+@router.get("/concepts", response_model=list[ConceptDTO], response_model_by_alias=True)
+async def list_concepts(request: Request) -> list[ConceptDTO]:
+    return get_concept_service(request).list_concepts()
 
 
 @router.post("/concepts", response_model=ConceptDTO, response_model_by_alias=True)
-async def create_concept(request: CreateConceptRequest) -> ConceptDTO:
-    return service.create_concept(request)
+async def create_concept(request: Request, payload: CreateConceptRequest) -> ConceptDTO:
+    return get_concept_service(request).create_concept(payload)
+
+
+@router.get("/concepts/{concept_id}", response_model=ConceptDTO, response_model_by_alias=True)
+async def get_concept(request: Request, concept_id: UUID) -> ConceptDTO:
+    return get_concept_service(request).get_concept(concept_id)
 
 
 @router.post(
@@ -47,10 +62,11 @@ async def create_concept(request: CreateConceptRequest) -> ConceptDTO:
     response_model_by_alias=True,
 )
 async def submit_concept_turn(
+    request: Request,
     concept_id: UUID,
-    request: ConceptTurnRequest,
+    payload: ConceptTurnRequest,
 ) -> ConceptTurnResponse:
-    return await service.submit_turn(concept_id, request)
+    return await get_concept_service(request).submit_turn(concept_id, payload)
 
 
 @router.post(
@@ -58,10 +74,10 @@ async def submit_concept_turn(
     response_model=ConceptDTO,
     response_model_by_alias=True,
 )
-async def merge_update_proposal(proposal_id: UUID) -> ConceptDTO:
-    return service.merge_proposal(proposal_id)
+async def merge_update_proposal(request: Request, proposal_id: UUID) -> ConceptDTO:
+    return get_concept_service(request).merge_proposal(proposal_id)
 
 
 @router.post("/update-proposals/{proposal_id}/dismiss", status_code=status.HTTP_204_NO_CONTENT)
-async def dismiss_update_proposal(proposal_id: UUID) -> None:
-    service.dismiss_proposal(proposal_id)
+async def dismiss_update_proposal(request: Request, proposal_id: UUID) -> None:
+    get_concept_service(request).dismiss_proposal(proposal_id)

@@ -51,6 +51,9 @@ class InMemoryConceptStore:
         self.concepts[concept.id] = concept
         return concept
 
+    def list_concepts(self) -> list[ConceptDTO]:
+        return list(self.concepts.values())
+
     def get_concept(self, concept_id: UUID) -> ConceptDTO:
         try:
             return self.concepts[concept_id]
@@ -247,6 +250,12 @@ class ConceptService:
             blocks=self.model_service.initial_blocks(title),
         )
         return self.store.save_concept(concept)
+
+    def list_concepts(self) -> list[ConceptDTO]:
+        return self.store.list_concepts()
+
+    def get_concept(self, concept_id: UUID) -> ConceptDTO:
+        return self.store.get_concept(concept_id)
 
     async def submit_turn(
         self,

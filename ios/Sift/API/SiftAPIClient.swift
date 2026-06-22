@@ -1,6 +1,8 @@
 import Foundation
 
 protocol SiftAPIClient {
+    func listConcepts() async throws -> [ConceptDTO]
+    func getConcept(id: UUID) async throws -> ConceptDTO
     func createConcept(_ request: CreateConceptRequest) async throws -> ConceptDTO
     func submitTurn(conceptId: UUID, request: ConceptTurnRequest) async throws -> ConceptTurnResponse
     func mergeProposal(id: UUID) async throws -> ConceptDTO
@@ -38,6 +40,14 @@ struct HTTPSiftAPIClient: SiftAPIClient {
     var jsonDecoder: JSONDecoder = JSONDecoder()
     var jsonEncoder: JSONEncoder = JSONEncoder()
 
+    func listConcepts() async throws -> [ConceptDTO] {
+        try await get(path: "/v1/concepts")
+    }
+
+    func getConcept(id: UUID) async throws -> ConceptDTO {
+        try await get(path: "/v1/concepts/\(id.uuidString)")
+    }
+
     func createConcept(_ request: CreateConceptRequest) async throws -> ConceptDTO {
         try await post(path: "/v1/concepts", body: request)
     }
@@ -55,6 +65,18 @@ struct HTTPSiftAPIClient: SiftAPIClient {
             path: "/v1/update-proposals/\(id.uuidString)/dismiss",
             body: EmptyRequest()
         )
+    }
+
+    private func get<Response: Decodable>(path: String) async throws -> Response {
+        let urlRequest = URLRequest(url: baseURL.appending(path: path))
+        let (data, response) = try await urlSession.data(for: urlRequest)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw SiftAPIError.invalidResponse
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw SiftAPIError.httpStatus(httpResponse.statusCode)
+        }
+        return try jsonDecoder.decode(Response.self, from: data)
     }
 
     private func post<Request: Encodable, Response: Decodable>(

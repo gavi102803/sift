@@ -24,6 +24,37 @@ def test_create_concept_rejects_empty_capture() -> None:
     assert response.status_code == 422
 
 
+def test_list_concepts_returns_created_cards() -> None:
+    client = TestClient(create_app())
+    client.post("/v1/concepts", json={"raw_capture": "RAG", "locale": "en"})
+    client.post("/v1/concepts", json={"raw_capture": "Embedding", "locale": "en"})
+
+    response = client.get("/v1/concepts")
+
+    assert response.status_code == 200
+    titles = [concept["displayTitle"] for concept in response.json()]
+    assert titles == ["RAG", "Embedding"]
+
+
+def test_get_concept_returns_card_by_id() -> None:
+    client = TestClient(create_app())
+    concept = client.post("/v1/concepts", json={"raw_capture": "RAG", "locale": "en"}).json()
+
+    response = client.get(f"/v1/concepts/{concept['id']}")
+
+    assert response.status_code == 200
+    assert response.json()["id"] == concept["id"]
+    assert response.json()["displayTitle"] == "RAG"
+
+
+def test_get_concept_returns_404_for_missing_card() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/v1/concepts/00000000-0000-0000-0000-000000000001")
+
+    assert response.status_code == 404
+
+
 def test_submit_turn_returns_answer_and_updated_concept() -> None:
     client = TestClient(create_app())
     concept = client.post("/v1/concepts", json={"raw_capture": "Embedding", "locale": "en"}).json()

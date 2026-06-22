@@ -10,6 +10,7 @@ struct ConceptDetailView: View {
     @State private var lastAnswer: String?
     @State private var errorMessage: String?
     @State private var isSubmittingFollowUp = false
+    @State private var isRefreshingConcept = false
     @State private var resolvingProposalId: UUID?
 
     private var conceptId: UUID
@@ -44,6 +45,9 @@ struct ConceptDetailView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         header(for: concept)
+                        if isRefreshingConcept {
+                            ProgressView()
+                        }
                         if let lastAnswer {
                             answerSection(lastAnswer)
                         }
@@ -63,15 +67,22 @@ struct ConceptDetailView: View {
                     followUpComposer
                 }
             } else {
-                ContentUnavailableView(
-                    "Concept not found",
-                    systemImage: "exclamationmark.magnifyingglass",
-                    description: Text("This card may have been deleted.")
-                )
+                if isRefreshingConcept {
+                    ProgressView()
+                } else {
+                    ContentUnavailableView(
+                        "Concept not found",
+                        systemImage: "exclamationmark.magnifyingglass",
+                        description: Text("This card may have been deleted.")
+                    )
+                }
             }
         }
         .navigationTitle(concept?.displayTitle ?? "Concept")
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: conceptId) {
+            await refreshConcept(conceptId)
+        }
     }
 
     private func header(for concept: Concept) -> some View {
@@ -241,6 +252,22 @@ struct ConceptDetailView: View {
             errorMessage = error.localizedDescription
         }
         isSubmittingFollowUp = false
+    }
+
+    private func refreshConcept(_ conceptId: UUID) async {
+        guard !isRefreshingConcept else { return }
+        isRefreshingConcept = true
+        defer {
+            isRefreshingConcept = false
+        }
+        do {
+            let concept = try await appServices.apiClient.getConcept(id: conceptId)
+            _ = try ConceptLocalStore(modelContext: modelContext).upsertConcept(from: concept)
+        } catch is CancellationError {
+            return
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func mergeProposal(_ proposal: ConceptUpdateProposal) async {

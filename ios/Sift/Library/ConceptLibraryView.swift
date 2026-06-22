@@ -2,8 +2,12 @@ import SwiftData
 import SwiftUI
 
 struct ConceptLibraryView: View {
+    @Environment(\.appServices) private var appServices
+    @Environment(\.modelContext) private var modelContext
     @Query(sort: \Concept.updatedAt, order: .reverse) private var concepts: [Concept]
     @State private var searchText = ""
+    @State private var isRefreshing = false
+    @State private var errorMessage: String?
 
     private var filteredConcepts: [Concept] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -15,13 +19,35 @@ struct ConceptLibraryView: View {
         }
     }
 
+    private var trimmedSearchText: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     var body: some View {
         List {
+            if isRefreshing && concepts.isEmpty {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                }
+            }
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+
             if filteredConcepts.isEmpty {
                 ContentUnavailableView(
-                    "No matching concepts",
-                    systemImage: "magnifyingglass",
-                    description: Text("Try another title, alias, or explanation.")
+                    trimmedSearchText.isEmpty ? "No concepts yet" : "No matching concepts",
+                    systemImage: trimmedSearchText.isEmpty ? "rectangle.stack.badge.plus" : "magnifyingglass",
+                    description: Text(
+                        trimmedSearchText.isEmpty
+                            ? "Captured concepts will appear here."
+                            : "Try another title, alias, or explanation."
+                    )
                 )
             } else {
                 Section("All Concepts") {
@@ -43,8 +69,31 @@ struct ConceptLibraryView: View {
         }
         .navigationTitle("Library")
         .searchable(text: $searchText, prompt: "Search concepts")
+        .refreshable {
+            await refreshConcepts()
+        }
+        .task {
+            await refreshConcepts()
+        }
         .navigationDestination(for: UUID.self) { conceptId in
             ConceptDetailView(conceptId: conceptId)
+        }
+    }
+
+    private func refreshConcepts() async {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        defer {
+            isRefreshing = false
+        }
+        errorMessage = nil
+        do {
+            let concepts = try await appServices.apiClient.listConcepts()
+            try ConceptLocalStore(modelContext: modelContext).upsertConcepts(from: concepts)
+        } catch is CancellationError {
+            return
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 }
@@ -53,5 +102,5 @@ struct ConceptLibraryView: View {
     NavigationStack {
         ConceptLibraryView()
     }
+    .environment(\.appServices, .preview)
 }
-

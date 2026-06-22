@@ -59,6 +59,12 @@ struct ConceptLocalStore {
         return concept
     }
 
+    func upsertConcepts(from dtos: [ConceptDTO]) throws {
+        for dto in dtos {
+            _ = try upsertConcept(from: dto)
+        }
+    }
+
     func upsertProposal(_ dto: UpdateProposalDTO, conceptId: UUID) throws -> ConceptUpdateProposal {
         let existingProposal = try fetchProposal(id: dto.id)
         let proposal = existingProposal ?? ConceptUpdateProposal(

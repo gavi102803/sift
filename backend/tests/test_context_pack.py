@@ -4,6 +4,7 @@ from sift_backend.ai.context_pack import (
     RecentTurn,
     build_concept_turn_context_pack,
     concept_turn_response_format,
+    initial_concept_response_format,
 )
 from sift_backend.schemas.common import (
     CaptureStatus,
@@ -91,7 +92,29 @@ def test_response_format_contains_strict_patch_contract() -> None:
     patch_schema = schema["properties"]["autoPatch"]["items"]
     operations = {
         option["properties"]["operation"]["const"]
-        for option in patch_schema["oneOf"]
+        for option in patch_schema["anyOf"]
     }
     assert operations == {"append", "replace", "addRelation"}
 
+
+def test_response_formats_make_strict_required_fields_explicit() -> None:
+    turn_schema = concept_turn_response_format()["json_schema"]["schema"]
+    assert set(turn_schema["required"]) == set(turn_schema["properties"])
+    assert set(turn_schema["properties"]["answerSource"]["required"]) == set(
+        turn_schema["properties"]["answerSource"]["properties"]
+    )
+    assert set(turn_schema["properties"]["memoryPatch"]["required"]) == set(
+        turn_schema["properties"]["memoryPatch"]["properties"]
+    )
+    assert set(turn_schema["properties"]["modelMeta"]["required"]) == set(
+        turn_schema["properties"]["modelMeta"]["properties"]
+    )
+
+    initial_schema = initial_concept_response_format()["json_schema"]["schema"]
+    assert set(initial_schema["required"]) == set(initial_schema["properties"])
+    assert set(initial_schema["properties"]["answerSource"]["required"]) == set(
+        initial_schema["properties"]["answerSource"]["properties"]
+    )
+    assert set(initial_schema["properties"]["modelMeta"]["required"]) == set(
+        initial_schema["properties"]["modelMeta"]["properties"]
+    )

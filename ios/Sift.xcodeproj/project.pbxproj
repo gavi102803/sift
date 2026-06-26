@@ -1,0 +1,566 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		100000000000000000000101 /* MockSiftAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000001 /* MockSiftAPIClient.swift */; };
+		100000000000000000000102 /* SiftAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000002 /* SiftAPIClient.swift */; };
+		100000000000000000000103 /* SiftDTOs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000003 /* SiftDTOs.swift */; };
+		100000000000000000000104 /* AppServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000004 /* AppServices.swift */; };
+		100000000000000000000105 /* AppTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000005 /* AppTab.swift */; };
+		100000000000000000000106 /* AppView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000006 /* AppView.swift */; };
+		100000000000000000000113 /* InlineErrorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000013 /* InlineErrorView.swift */; };
+		100000000000000000000117 /* SiftTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000017 /* SiftTheme.swift */; };
+		100000000000000000000118 /* SiftLogo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000018 /* SiftLogo.swift */; };
+		100000000000000000000107 /* ConceptDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000007 /* ConceptDetailView.swift */; };
+		100000000000000000000108 /* ConceptLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000008 /* ConceptLibraryView.swift */; };
+		100000000000000000000114 /* ConceptSearchIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000014 /* ConceptSearchIndex.swift */; };
+		100000000000000000000109 /* ConceptLocalStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000009 /* ConceptLocalStore.swift */; };
+		100000000000000000000115 /* ConceptStatusRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000015 /* ConceptStatusRules.swift */; };
+		10000000000000000000010A /* AuditModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000000A /* AuditModels.swift */; };
+		10000000000000000000010B /* ConceptModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000000B /* ConceptModels.swift */; };
+		10000000000000000000010C /* ConversationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000000C /* ConversationModels.swift */; };
+		10000000000000000000010D /* OrganizationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000000D /* OrganizationModels.swift */; };
+		10000000000000000000010E /* ProposalModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000000E /* ProposalModels.swift */; };
+		10000000000000000000010F /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000000F /* ProfileView.swift */; };
+		100000000000000000000110 /* CaptureFlowService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000010 /* CaptureFlowService.swift */; };
+		100000000000000000000111 /* RecordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000011 /* RecordView.swift */; };
+		100000000000000000000112 /* SiftApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000012 /* SiftApp.swift */; };
+		100000000000000000000116 /* SpeechCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000016 /* SpeechCaptureService.swift */; };
+		200000000000000000000101 /* ConceptLocalStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000001 /* ConceptLocalStoreTests.swift */; };
+		300000000000000000000101 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 300000000000000000000001 /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		200000000000000000000901 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 100000000000000000000901 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 100000000000000000000501;
+			remoteInfo = Sift;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		100000000000000000000001 /* MockSiftAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = API/MockSiftAPIClient.swift; sourceTree = "<group>"; };
+		100000000000000000000002 /* SiftAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = API/SiftAPIClient.swift; sourceTree = "<group>"; };
+		100000000000000000000003 /* SiftDTOs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = API/SiftDTOs.swift; sourceTree = "<group>"; };
+		100000000000000000000004 /* AppServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/AppServices.swift; sourceTree = "<group>"; };
+		100000000000000000000005 /* AppTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/AppTab.swift; sourceTree = "<group>"; };
+		100000000000000000000006 /* AppView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/AppView.swift; sourceTree = "<group>"; };
+		100000000000000000000013 /* InlineErrorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/InlineErrorView.swift; sourceTree = "<group>"; };
+		100000000000000000000017 /* SiftTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/SiftTheme.swift; sourceTree = "<group>"; };
+		100000000000000000000018 /* SiftLogo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/SiftLogo.swift; sourceTree = "<group>"; };
+		100000000000000000000007 /* ConceptDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConceptDetail/ConceptDetailView.swift; sourceTree = "<group>"; };
+		100000000000000000000008 /* ConceptLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Library/ConceptLibraryView.swift; sourceTree = "<group>"; };
+		100000000000000000000014 /* ConceptSearchIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Library/ConceptSearchIndex.swift; sourceTree = "<group>"; };
+		100000000000000000000009 /* ConceptLocalStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence/ConceptLocalStore.swift; sourceTree = "<group>"; };
+		100000000000000000000015 /* ConceptStatusRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence/ConceptStatusRules.swift; sourceTree = "<group>"; };
+		10000000000000000000000A /* AuditModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence/Models/AuditModels.swift; sourceTree = "<group>"; };
+		10000000000000000000000B /* ConceptModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence/Models/ConceptModels.swift; sourceTree = "<group>"; };
+		10000000000000000000000C /* ConversationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence/Models/ConversationModels.swift; sourceTree = "<group>"; };
+		10000000000000000000000D /* OrganizationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence/Models/OrganizationModels.swift; sourceTree = "<group>"; };
+		10000000000000000000000E /* ProposalModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence/Models/ProposalModels.swift; sourceTree = "<group>"; };
+		10000000000000000000000F /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Profile/ProfileView.swift; sourceTree = "<group>"; };
+		100000000000000000000010 /* CaptureFlowService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Record/CaptureFlowService.swift; sourceTree = "<group>"; };
+		100000000000000000000011 /* RecordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Record/RecordView.swift; sourceTree = "<group>"; };
+		100000000000000000000012 /* SiftApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SiftApp.swift; sourceTree = "<group>"; };
+		100000000000000000000016 /* SpeechCaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Record/SpeechCaptureService.swift; sourceTree = "<group>"; };
+		100000000000000000000201 /* Sift.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Sift.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		200000000000000000000001 /* ConceptLocalStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConceptLocalStoreTests.swift; sourceTree = "<group>"; };
+		200000000000000000000201 /* SiftTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SiftTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		300000000000000000000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		100000000000000000000301 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		200000000000000000000301 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		100000000000000000000401 = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000402 /* Sift */,
+				200000000000000000000402 /* SiftTests */,
+				100000000000000000000403 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		100000000000000000000402 /* Sift */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000001 /* MockSiftAPIClient.swift */,
+				100000000000000000000002 /* SiftAPIClient.swift */,
+				100000000000000000000003 /* SiftDTOs.swift */,
+				100000000000000000000004 /* AppServices.swift */,
+				100000000000000000000005 /* AppTab.swift */,
+				100000000000000000000006 /* AppView.swift */,
+				100000000000000000000013 /* InlineErrorView.swift */,
+				100000000000000000000017 /* SiftTheme.swift */,
+				100000000000000000000018 /* SiftLogo.swift */,
+				100000000000000000000007 /* ConceptDetailView.swift */,
+				100000000000000000000008 /* ConceptLibraryView.swift */,
+				100000000000000000000014 /* ConceptSearchIndex.swift */,
+				100000000000000000000009 /* ConceptLocalStore.swift */,
+				100000000000000000000015 /* ConceptStatusRules.swift */,
+				10000000000000000000000A /* AuditModels.swift */,
+				10000000000000000000000B /* ConceptModels.swift */,
+				10000000000000000000000C /* ConversationModels.swift */,
+				10000000000000000000000D /* OrganizationModels.swift */,
+				10000000000000000000000E /* ProposalModels.swift */,
+				10000000000000000000000F /* ProfileView.swift */,
+				100000000000000000000010 /* CaptureFlowService.swift */,
+				100000000000000000000011 /* RecordView.swift */,
+				100000000000000000000016 /* SpeechCaptureService.swift */,
+				100000000000000000000012 /* SiftApp.swift */,
+				300000000000000000000001 /* Assets.xcassets */,
+			);
+			path = Sift;
+			sourceTree = "<group>";
+		};
+		100000000000000000000403 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				100000000000000000000201 /* Sift.app */,
+				200000000000000000000201 /* SiftTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		200000000000000000000402 /* SiftTests */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000001 /* ConceptLocalStoreTests.swift */,
+			);
+			path = SiftTests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		100000000000000000000501 /* Sift */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 100000000000000000000701 /* Build configuration list for PBXNativeTarget "Sift" */;
+			buildPhases = (
+				100000000000000000000601 /* Sources */,
+				100000000000000000000301 /* Frameworks */,
+				100000000000000000000302 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Sift;
+			productName = Sift;
+			productReference = 100000000000000000000201 /* Sift.app */;
+			productType = "com.apple.product-type.application";
+		};
+		200000000000000000000501 /* SiftTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 200000000000000000000701 /* Build configuration list for PBXNativeTarget "SiftTests" */;
+			buildPhases = (
+				200000000000000000000601 /* Sources */,
+				200000000000000000000301 /* Frameworks */,
+				200000000000000000000302 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				200000000000000000000902 /* PBXTargetDependency */,
+			);
+			name = SiftTests;
+			productName = SiftTests;
+			productReference = 200000000000000000000201 /* SiftTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		100000000000000000000901 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2650;
+				LastUpgradeCheck = 2650;
+				TargetAttributes = {
+					100000000000000000000501 = {
+						CreatedOnToolsVersion = 26.5;
+					};
+					200000000000000000000501 = {
+						CreatedOnToolsVersion = 26.5;
+						TestTargetID = 100000000000000000000501;
+					};
+				};
+			};
+			buildConfigurationList = 100000000000000000000700 /* Build configuration list for PBXProject "Sift" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 100000000000000000000401;
+			productRefGroup = 100000000000000000000403 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				100000000000000000000501 /* Sift */,
+				200000000000000000000501 /* SiftTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		100000000000000000000302 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				300000000000000000000101 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		200000000000000000000302 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		100000000000000000000601 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000101 /* MockSiftAPIClient.swift in Sources */,
+				100000000000000000000102 /* SiftAPIClient.swift in Sources */,
+				100000000000000000000103 /* SiftDTOs.swift in Sources */,
+				100000000000000000000104 /* AppServices.swift in Sources */,
+				100000000000000000000105 /* AppTab.swift in Sources */,
+				100000000000000000000106 /* AppView.swift in Sources */,
+				100000000000000000000113 /* InlineErrorView.swift in Sources */,
+				100000000000000000000117 /* SiftTheme.swift in Sources */,
+				100000000000000000000118 /* SiftLogo.swift in Sources */,
+				100000000000000000000107 /* ConceptDetailView.swift in Sources */,
+				100000000000000000000108 /* ConceptLibraryView.swift in Sources */,
+				100000000000000000000114 /* ConceptSearchIndex.swift in Sources */,
+				100000000000000000000109 /* ConceptLocalStore.swift in Sources */,
+				100000000000000000000115 /* ConceptStatusRules.swift in Sources */,
+				10000000000000000000010A /* AuditModels.swift in Sources */,
+				10000000000000000000010B /* ConceptModels.swift in Sources */,
+				10000000000000000000010C /* ConversationModels.swift in Sources */,
+				10000000000000000000010D /* OrganizationModels.swift in Sources */,
+				10000000000000000000010E /* ProposalModels.swift in Sources */,
+				10000000000000000000010F /* ProfileView.swift in Sources */,
+				100000000000000000000110 /* CaptureFlowService.swift in Sources */,
+				100000000000000000000111 /* RecordView.swift in Sources */,
+				100000000000000000000116 /* SpeechCaptureService.swift in Sources */,
+				100000000000000000000112 /* SiftApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		200000000000000000000601 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				200000000000000000000101 /* ConceptLocalStoreTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		200000000000000000000902 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 100000000000000000000501 /* Sift */;
+			targetProxy = 200000000000000000000901 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		100000000000000000000801 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		100000000000000000000802 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		100000000000000000000803 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Sift;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Sift uses the microphone to transcribe spoken concepts into the capture field.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Sift uses speech recognition to turn voice capture into text.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.sift.Sift;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		100000000000000000000804 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Sift;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Sift uses the microphone to transcribe spoken concepts into the capture field.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Sift uses speech recognition to turn voice capture into text.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.sift.Sift;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		200000000000000000000803 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.sift.SiftTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Sift.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Sift";
+			};
+			name = Debug;
+		};
+		200000000000000000000804 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.sift.SiftTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Sift.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Sift";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		100000000000000000000700 /* Build configuration list for PBXProject "Sift" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				100000000000000000000801 /* Debug */,
+				100000000000000000000802 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		100000000000000000000701 /* Build configuration list for PBXNativeTarget "Sift" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				100000000000000000000803 /* Debug */,
+				100000000000000000000804 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		200000000000000000000701 /* Build configuration list for PBXNativeTarget "SiftTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				200000000000000000000803 /* Debug */,
+				200000000000000000000804 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 100000000000000000000901 /* Project object */;
+}

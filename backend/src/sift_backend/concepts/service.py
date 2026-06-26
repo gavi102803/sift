@@ -1,42 +1,87 @@
+import json
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
 
 from sift_backend.ai.context_pack import RecentTurn
-from sift_backend.ai.model_gateway import ConceptModelGateway, ConceptModelGatewayError
 from sift_backend.notes.patch_engine import (
     NoteSnapshot,
     PatchApplicationError,
+    PatchErrorCode,
     apply_patch_operations,
     content_hash,
 )
+from sift_backend.runtime.concept_runtime import (
+    ConceptRuntimeDelta,
+    ConceptRuntimeResult,
+    LightweightHermesRuntime,
+)
+from sift_backend.runtime.types import SiftRuntimeError
 from sift_backend.schemas.common import (
     AnswerSourceType,
+    CandidateUpdateOperation,
     CaptureStatus,
+    ClaimType,
     ConceptMaturity,
+    EvidenceStatus,
+    LearningStateField,
+    LearningStateOrigin,
     NoteBlockSource,
     NoteBlockType,
     ProposalStatus,
+    SourceType,
+    TimeSensitivity,
     UpdateMode,
 )
 from sift_backend.schemas.concepts import (
     AnswerSourceDTO,
+    ClaimDTO,
     ConceptDTO,
     ConceptHistoryTurnDTO,
+    ConceptRelationDTO,
     ConceptTurnRequest,
     ConceptTurnResponse,
+    CreateConceptRelationRequest,
     CreateConceptRequest,
+    LearningStateDTO,
+    LearningStateEntryDTO,
+    LearningStateUpdateDTO,
     NoteBlockDTO,
+    SourceDTO,
+    UpdateConceptOrganizationRequest,
+    UpdateConceptSummaryRequest,
     UpdateDecisionDTO,
+    UpdateNoteBlockRequest,
     UpdateProposalDTO,
 )
 from sift_backend.schemas.model_outputs import (
+    CandidateUpdate,
     ConceptTurnResult,
     MemoryPatch,
     ModelMeta,
     ModelUpdateProposal,
 )
-from sift_backend.schemas.patches import AppendPatchOperation, ReplacePatchOperation
+from sift_backend.schemas.patches import (
+    AddRelationPatchOperation,
+    AppendPatchOperation,
+    ReplacePatchOperation,
+)
+
+
+@dataclass(frozen=True)
+class ConceptTurnStreamDelta:
+    content: str
+
+
+@dataclass(frozen=True)
+class ConceptTurnStreamResult:
+    response: ConceptTurnResponse
+
+
+ConceptTurnStreamEvent = ConceptTurnStreamDelta | ConceptTurnStreamResult
 
 
 class InMemoryConceptStore:
@@ -44,25 +89,136 @@ class InMemoryConceptStore:
 
     def __init__(self) -> None:
         self.concepts: dict[UUID, ConceptDTO] = {}
+        self.relations: dict[UUID, ConceptRelationDTO] = {}
         self.proposals: dict[UUID, UpdateProposalDTO] = {}
         self.proposal_concept_ids: dict[UUID, UUID] = {}
         self.turns: dict[UUID, list[RecentTurn]] = {}
 
     def save_concept(self, concept: ConceptDTO) -> ConceptDTO:
-        self.concepts[concept.id] = concept
-        return concept
+        self.concepts[concept.id] = concept.model_copy(update={"relations": []})
+        return self.get_concept(concept.id)
+
+    def add_sources(self, concept_id: UUID, sources: list[SourceDTO]) -> list[SourceDTO]:
+        concept = self.get_concept(concept_id)
+        existing = {source.id: source for source in concept.sources}
+        for source in sources:
+            existing[source.id] = source
+        self.concepts[concept_id] = concept.model_copy(
+            update={"sources": list(existing.values()), "relations": []}
+        )
+        return self.concepts[concept_id].sources
+
+    def add_claims(self, concept_id: UUID, claims: list[ClaimDTO]) -> list[ClaimDTO]:
+        concept = self.get_concept(concept_id)
+        existing = {claim.id: claim for claim in concept.claims}
+        for claim in claims:
+            existing[claim.id] = claim
+        self.concepts[concept_id] = concept.model_copy(
+            update={"claims": list(existing.values()), "relations": []}
+        )
+        return self.concepts[concept_id].claims
+
+    def add_learning_state_updates(
+        self,
+        concept_id: UUID,
+        updates: list[LearningStateUpdateDTO],
+    ) -> LearningStateDTO:
+        concept = self.get_concept(concept_id)
+        learning_state = concept.learning_state or LearningStateDTO(conceptId=concept_id)
+        data = learning_state.model_copy(deep=True)
+        targets = {
+            LearningStateField.user_context: data.user_context,
+            LearningStateField.confirmed_understanding: data.confirmed_understanding,
+            LearningStateField.open_questions: data.open_questions,
+            LearningStateField.recurring_confusions: data.recurring_confusions,
+        }
+        for update in updates:
+            normalized = update.content.strip()
+            if not normalized:
+                continue
+            target = targets[update.field]
+            if any(existing.content == normalized for existing in target):
+                continue
+            target.append(LearningStateEntryDTO(content=normalized, origin=update.origin))
+        self.concepts[concept_id] = concept.model_copy(
+            update={"learning_state": data, "relations": []}
+        )
+        return data
 
     def list_concepts(self) -> list[ConceptDTO]:
-        return list(self.concepts.values())
+        return [self._concept_with_relations(concept) for concept in self.concepts.values()]
 
     def get_concept(self, concept_id: UUID) -> ConceptDTO:
         try:
-            return self.concepts[concept_id]
+            return self._concept_with_relations(self.concepts[concept_id])
         except KeyError as error:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Concept not found.",
             ) from error
+
+    def add_relation(
+        self,
+        source_concept_id: UUID,
+        target_concept_id: UUID,
+        relation_type: str = "related",
+    ) -> ConceptDTO:
+        relation_type = relation_type.strip()
+        if not relation_type:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Relation type cannot be empty.",
+            )
+        if source_concept_id == target_concept_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="A concept cannot relate to itself.",
+            )
+        self.get_concept(source_concept_id)
+        self.get_concept(target_concept_id)
+
+        for relation in self.relations.values():
+            if (
+                relation.source_concept_id == source_concept_id
+                and relation.target_concept_id == target_concept_id
+                and relation.relation_type == relation_type
+            ):
+                return self.get_concept(source_concept_id)
+
+        relation = ConceptRelationDTO(
+            id=uuid4(),
+            sourceConceptId=source_concept_id,
+            targetConceptId=target_concept_id,
+            relationType=relation_type,
+            status="accepted",
+            confidence=1,
+            source="user",
+        )
+        self.relations[relation.id] = relation
+        return self.get_concept(source_concept_id)
+
+    def remove_relation(self, concept_id: UUID, relation_id: UUID) -> ConceptDTO:
+        self.get_concept(concept_id)
+        relation = self.relations.get(relation_id)
+        if relation is None or concept_id not in {
+            relation.source_concept_id,
+            relation.target_concept_id,
+        }:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Concept relation not found.",
+            )
+        del self.relations[relation_id]
+        return self.get_concept(concept_id)
+
+    def record_note_audit(
+        self,
+        concept_id: UUID,
+        event_type: str,
+        actor: str,
+        proposal_id: UUID | None = None,
+    ) -> None:
+        self.get_concept(concept_id)
 
     def save_proposal(
         self,
@@ -95,12 +251,26 @@ class InMemoryConceptStore:
     def get_recent_turns(self, concept_id: UUID, limit: int = 10) -> list[RecentTurn]:
         return self.turns.get(concept_id, [])[-limit:]
 
-    def append_turn_pair(self, concept_id: UUID, user_query: str, answer: str) -> None:
+    def append_turn_pair(
+        self,
+        concept_id: UUID,
+        user_query: str,
+        answer: str,
+        answer_source: AnswerSourceDTO | None = None,
+    ) -> None:
         concept_turns = self.turns.setdefault(concept_id, [])
         concept_turns.extend(
             [
                 RecentTurn(role="user", content=user_query),
-                RecentTurn(role="assistant", content=answer),
+                RecentTurn(
+                    role="assistant",
+                    content=answer,
+                    answer_source_json=(
+                        answer_source.model_dump_json(by_alias=True)
+                        if answer_source is not None
+                        else None
+                    ),
+                ),
             ]
         )
 
@@ -108,9 +278,24 @@ class InMemoryConceptStore:
         self.get_concept(concept_id)
         return self.turns.get(concept_id, [])
 
+    def _concept_with_relations(self, concept: ConceptDTO) -> ConceptDTO:
+        relations = [
+            relation
+            for relation in self.relations.values()
+            if concept.id in {relation.source_concept_id, relation.target_concept_id}
+        ]
+        return concept.model_copy(update={"relations": relations})
+
 
 class MockConceptModelService:
-    """Deterministic stand-in for LiteLLM-backed generation while service wiring lands."""
+    """Deterministic stand-in for the Sift runtime while local configuration is absent."""
+
+    async def create_initial_concept(
+        self,
+        title: str,
+        locale: str,
+    ) -> ConceptDTO:
+        return _fallback_initial_concept(title)
 
     def initial_blocks(self, title: str) -> list[NoteBlockDTO]:
         return [
@@ -201,21 +386,47 @@ class MockConceptModelService:
             modelMeta=model_meta,
         )
 
+    async def stream_turn_answer(
+        self,
+        concept: ConceptDTO,
+        request: ConceptTurnRequest,
+        recent_turns: list[RecentTurn] | None = None,
+        card_memory: str = "",
+    ) -> AsyncIterator[ConceptRuntimeDelta | ConceptRuntimeResult]:
+        result = await self.answer_turn(
+            concept=concept,
+            request=request,
+            recent_turns=recent_turns,
+            card_memory=card_memory,
+        )
+        for chunk in _chunk_text(result.answer):
+            yield ConceptRuntimeDelta(chunk)
+        yield ConceptRuntimeResult(result)
 
-class LiteLLMConceptModelService:
-    """Concept model service backed by Sift's LiteLLM model gateway."""
+
+class SiftRuntimeConceptModelService:
+    """Concept model service backed by Sift's lightweight Hermes-style runtime."""
 
     def __init__(
         self,
-        gateway: ConceptModelGateway,
-        model_alias: str,
+        runtime: LightweightHermesRuntime,
     ) -> None:
-        self.gateway = gateway
-        self.model_alias = model_alias
+        self.runtime = runtime
         self._fallback_initial_blocks = MockConceptModelService()
 
     def initial_blocks(self, title: str) -> list[NoteBlockDTO]:
         return self._fallback_initial_blocks.initial_blocks(title)
+
+    async def create_initial_concept(
+        self,
+        title: str,
+        locale: str,
+    ) -> ConceptDTO:
+        result = await self.runtime.generate_initial_concept(
+            raw_capture=title,
+            locale=locale,
+        )
+        return _concept_from_initial_result(title, result)
 
     async def answer_turn(
         self,
@@ -224,37 +435,67 @@ class LiteLLMConceptModelService:
         recent_turns: list[RecentTurn] | None = None,
         card_memory: str = "",
     ) -> ConceptTurnResult:
-        return await self.gateway.answer_concept_turn(
+        return await self.runtime.answer_concept_turn(
             concept=concept,
             card_memory=card_memory,
             recent_turns=recent_turns or [],
             user_query=request.question,
-            model_alias=self.model_alias,
         )
+
+    async def stream_turn_answer(
+        self,
+        concept: ConceptDTO,
+        request: ConceptTurnRequest,
+        recent_turns: list[RecentTurn] | None = None,
+        card_memory: str = "",
+    ) -> AsyncIterator[ConceptRuntimeDelta | ConceptRuntimeResult]:
+        async for event in self.runtime.stream_concept_turn_answer(
+            concept=concept,
+            card_memory=card_memory,
+            recent_turns=recent_turns or [],
+            user_query=request.question,
+        ):
+            yield event
 
 
 class ConceptService:
     def __init__(
         self,
-        store: InMemoryConceptStore | None = None,
-        model_service: MockConceptModelService | LiteLLMConceptModelService | None = None,
+        store: Any | None = None,
+        model_service: (
+            MockConceptModelService
+            | SiftRuntimeConceptModelService
+            | None
+        ) = None,
     ) -> None:
         self.store = store or InMemoryConceptStore()
         self.model_service = model_service or MockConceptModelService()
 
     def create_concept(self, request: CreateConceptRequest) -> ConceptDTO:
         title = request.raw_capture.strip()
-        concept = ConceptDTO(
-            id=uuid4(),
-            canonicalTitle=title,
-            displayTitle=title,
-            oneLineExplanation=f"{title} captured as a draft concept.",
-            maturity=ConceptMaturity.initial,
-            captureStatus=CaptureStatus.ready,
-            noteRevision=1,
-            blocks=self.model_service.initial_blocks(title),
+        return self._save_concept_with_audit(
+            _fallback_initial_concept(title),
+            event_type="initialGeneration",
+            actor="ai",
         )
-        return self.store.save_concept(concept)
+
+    async def create_concept_async(self, request: CreateConceptRequest) -> ConceptDTO:
+        title = request.raw_capture.strip()
+        try:
+            concept = await self.model_service.create_initial_concept(
+                title=title,
+                locale=request.locale,
+            )
+        except SiftRuntimeError as error:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"code": error.code, "message": str(error)},
+            ) from error
+        return self._save_concept_with_audit(
+            concept,
+            event_type="initialGeneration",
+            actor="ai",
+        )
 
     def list_concepts(self) -> list[ConceptDTO]:
         return self.store.list_concepts()
@@ -262,9 +503,123 @@ class ConceptService:
     def get_concept(self, concept_id: UUID) -> ConceptDTO:
         return self.store.get_concept(concept_id)
 
+    def update_concept_summary(
+        self,
+        concept_id: UUID,
+        request: UpdateConceptSummaryRequest,
+    ) -> ConceptDTO:
+        concept = self.store.get_concept(concept_id)
+        display_title = request.display_title.strip()
+        if not display_title:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Concept title cannot be empty.",
+            )
+
+        updated = concept.model_copy(
+            update={
+                "canonical_title": display_title,
+                "display_title": display_title,
+                "one_line_explanation": request.one_line_explanation.strip(),
+                "note_revision": concept.note_revision + 1,
+            }
+        )
+        return self._save_concept_with_audit(
+            updated,
+            event_type="manualEdit",
+            actor="user",
+        )
+
+    def update_note_block(
+        self,
+        concept_id: UUID,
+        block_id: UUID,
+        request: UpdateNoteBlockRequest,
+    ) -> ConceptDTO:
+        concept = self.store.get_concept(concept_id)
+        content = request.content.strip()
+        if not content:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Note block content cannot be empty.",
+            )
+
+        found = False
+        blocks: list[NoteBlockDTO] = []
+        for block in concept.blocks:
+            if block.id == block_id:
+                found = True
+                blocks.append(
+                    block.model_copy(
+                        update={
+                            "content": content,
+                            "source": NoteBlockSource.user,
+                            "is_user_locked": True,
+                        }
+                    )
+                )
+            else:
+                blocks.append(block)
+
+        if not found:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Note block not found.",
+            )
+
+        updated = concept.model_copy(
+            update={
+                "maturity": ConceptMaturity.growing,
+                "note_revision": concept.note_revision + 1,
+                "blocks": blocks,
+            }
+        )
+        return self._save_concept_with_audit(
+            updated,
+            event_type="manualEdit",
+            actor="user",
+        )
+
+    def update_concept_organization(
+        self,
+        concept_id: UUID,
+        request: UpdateConceptOrganizationRequest,
+    ) -> ConceptDTO:
+        concept = self.store.get_concept(concept_id)
+        updated = concept.model_copy(
+            update={
+                "tags": _normalized_names(request.tags),
+                "topics": _normalized_names(request.topics),
+                "note_revision": concept.note_revision + 1,
+            }
+        )
+        return self._save_concept_with_audit(
+            updated,
+            event_type="manualEdit",
+            actor="user",
+        )
+
+    def add_relation(
+        self,
+        concept_id: UUID,
+        request: CreateConceptRelationRequest,
+    ) -> ConceptDTO:
+        return self.store.add_relation(
+            source_concept_id=concept_id,
+            target_concept_id=request.target_concept_id,
+            relation_type=request.relation_type,
+        )
+
+    def remove_relation(self, concept_id: UUID, relation_id: UUID) -> ConceptDTO:
+        return self.store.remove_relation(concept_id, relation_id)
+
     def list_turns(self, concept_id: UUID) -> list[ConceptHistoryTurnDTO]:
         return [
-            ConceptHistoryTurnDTO(role=turn.role, content=turn.content)
+            ConceptHistoryTurnDTO(
+                role=turn.role,
+                content=turn.content,
+                answerSource=_answer_source_from_recent_turn(turn),
+            )
             for turn in self.store.list_turns(concept_id)
         ]
 
@@ -281,29 +636,46 @@ class ConceptService:
                 request,
                 recent_turns=recent_turns,
             )
-        except ConceptModelGatewayError as error:
+        except SiftRuntimeError as error:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail={"code": error.code, "message": str(error)},
             ) from error
 
-        if result.update_mode == UpdateMode.auto_merge and result.auto_patch:
-            concept = self._apply_auto_patch(concept, result.auto_patch)
-            proposal = None
-        elif result.update_mode == UpdateMode.needs_confirmation and result.proposal:
-            proposal = self._create_update_proposal(concept.id, result)
-        else:
-            proposal = None
+        return self._finalize_turn_response(concept, request, result)
 
-        self.store.append_turn_pair(concept.id, request.question, result.answer)
+    async def submit_turn_stream(
+        self,
+        concept_id: UUID,
+        request: ConceptTurnRequest,
+    ) -> AsyncIterator[ConceptTurnStreamEvent]:
+        concept = self.store.get_concept(concept_id)
+        recent_turns = self.store.get_recent_turns(concept.id)
+        final_result: ConceptTurnResult | None = None
+        try:
+            async for event in self.model_service.stream_turn_answer(
+                concept,
+                request,
+                recent_turns=recent_turns,
+            ):
+                if isinstance(event, ConceptRuntimeDelta):
+                    yield ConceptTurnStreamDelta(event.content)
+                if isinstance(event, ConceptRuntimeResult):
+                    final_result = event.result
+        except SiftRuntimeError as error:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"code": error.code, "message": str(error)},
+            ) from error
 
-        return ConceptTurnResponse(
-            answer=result.answer,
-            answerSource=result.answer_source,
-            updateMode=result.update_mode,
-            concept=concept,
-            proposal=proposal,
-        )
+        if final_result is None:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"code": "stream_incomplete", "message": "Model stream ended early."},
+            )
+
+        response = self._finalize_turn_response(concept, request, final_result)
+        yield ConceptTurnStreamResult(response)
 
     def merge_proposal(self, proposal_id: UUID) -> ConceptDTO:
         proposal = self.store.get_proposal(proposal_id)
@@ -319,6 +691,9 @@ class ConceptService:
                 concept,
                 proposal.base_note_revision,
                 proposal.patch_operations,
+                event_type="confirmedMerge",
+                actor="user",
+                proposal_id=proposal.id,
             )
         except PatchApplicationError as error:
             self.store.save_proposal(proposal.model_copy(update={"status": ProposalStatus.stale}))
@@ -334,13 +709,115 @@ class ConceptService:
         proposal = self.store.get_proposal(proposal_id)
         self.store.save_proposal(proposal.model_copy(update={"status": ProposalStatus.dismissed}))
 
+    def _finalize_turn_response(
+        self,
+        concept: ConceptDTO,
+        request: ConceptTurnRequest,
+        result: ConceptTurnResult,
+    ) -> ConceptTurnResponse:
+        concept, candidate_proposal, candidate_claims = self._apply_candidate_updates(
+            concept,
+            result,
+        )
+        if result.update_mode == UpdateMode.auto_merge and result.auto_patch:
+            concept = self._apply_auto_patch(concept, result.auto_patch)
+            proposal = None
+        elif result.update_mode == UpdateMode.needs_confirmation and result.proposal:
+            proposal = self._create_update_proposal(concept.id, result)
+        else:
+            proposal = candidate_proposal
+
+        if candidate_claims and hasattr(self.store, "add_claims"):
+            self.store.add_claims(concept.id, candidate_claims)
+        self._persist_turn_knowledge(concept, result)
+
+        self.store.append_turn_pair(
+            concept.id,
+            request.question,
+            result.answer,
+            answer_source=result.answer_source,
+        )
+
+        return ConceptTurnResponse(
+            answer=result.answer,
+            answerSource=result.answer_source,
+            updateMode=result.update_mode,
+            concept=concept,
+            proposal=proposal,
+        )
+
+    def _persist_turn_knowledge(
+        self,
+        concept: ConceptDTO,
+        result: ConceptTurnResult,
+    ) -> None:
+        sources = _sources_from_answer_source(concept.id, result.answer_source)
+        if sources and hasattr(self.store, "add_sources"):
+            self.store.add_sources(concept.id, sources)
+        learning_updates = [
+            *result.learning_state_updates,
+            *_learning_updates_from_memory_patch(result.memory_patch),
+        ]
+        if learning_updates and hasattr(self.store, "add_learning_state_updates"):
+            self.store.add_learning_state_updates(concept.id, learning_updates)
+
+    def _apply_candidate_updates(
+        self,
+        concept: ConceptDTO,
+        result: ConceptTurnResult,
+    ) -> tuple[ConceptDTO, UpdateProposalDTO | None, list[ClaimDTO]]:
+        if not result.candidate_updates:
+            return concept, None, []
+        auto_operations: list[Any] = []
+        claims: list[ClaimDTO] = []
+        proposal_operations: list[Any] = []
+        proposal_rationales: list[str] = []
+
+        for update in result.candidate_updates:
+            decision = _candidate_decision(concept, update)
+            if decision == "drop":
+                continue
+            if decision == "proposal":
+                operation = _candidate_to_patch_operation(update, concept)
+                if operation is not None:
+                    proposal_operations.append(operation)
+                    proposal_rationales.append(_candidate_rationale(update))
+                continue
+            if update.operation == CandidateUpdateOperation.add_claim and update.content:
+                claims.append(_claim_from_candidate(concept.id, update))
+                continue
+            operation = _candidate_to_patch_operation(update, concept)
+            if operation is not None:
+                auto_operations.append(operation)
+
+        if auto_operations:
+            concept = self._apply_auto_patch(concept, auto_operations)
+        proposal = None
+        if proposal_operations:
+            proposal = UpdateProposalDTO(
+                id=uuid4(),
+                baseNoteRevision=concept.note_revision,
+                patchOperations=proposal_operations,
+                rationale=" ".join(proposal_rationales) or "Suggested durable knowledge update.",
+                confidence=result.answer_source.confidence,
+                status=ProposalStatus.proposed,
+            )
+            self.store.save_proposal(proposal, concept_id=concept.id)
+        return concept, proposal, claims
+
     def _apply_auto_patch(
         self,
         concept: ConceptDTO,
         operations: list,
     ) -> ConceptDTO:
         try:
-            return self._apply_patch_operations(concept, concept.note_revision, operations)
+            return self._apply_patch_operations(
+                concept,
+                concept.note_revision,
+                operations,
+                event_type="autoMerge",
+                actor="ai",
+            )
         except PatchApplicationError:
             return concept
 
@@ -349,12 +826,16 @@ class ConceptService:
         concept: ConceptDTO,
         base_revision: int,
         operations: list,
+        event_type: str,
+        actor: str,
+        proposal_id: UUID | None = None,
     ) -> ConceptDTO:
         result = apply_patch_operations(
             NoteSnapshot(revision=concept.note_revision, blocks=tuple(concept.blocks)),
             base_revision=base_revision,
             operations=operations,
         )
+        self._validate_relation_operations(concept, result.relation_operations)
         updated = concept.model_copy(
             update={
                 "maturity": ConceptMaturity.growing,
@@ -362,7 +843,56 @@ class ConceptService:
                 "blocks": list(result.blocks),
             }
         )
-        return self.store.save_concept(updated)
+        saved = self._save_concept_with_audit(
+            updated,
+            event_type=event_type,
+            actor=actor,
+            proposal_id=proposal_id,
+        )
+        for operation in result.relation_operations:
+            saved = self.store.add_relation(
+                source_concept_id=saved.id,
+                target_concept_id=operation.target_concept_id,
+                relation_type=operation.relation_type,
+            )
+        return saved
+
+    def _save_concept_with_audit(
+        self,
+        concept: ConceptDTO,
+        event_type: str,
+        actor: str,
+        proposal_id: UUID | None = None,
+    ) -> ConceptDTO:
+        saved = self.store.save_concept(concept)
+        self.store.record_note_audit(
+            saved.id,
+            event_type=event_type,
+            actor=actor,
+            proposal_id=proposal_id,
+        )
+        return saved
+
+    def _validate_relation_operations(
+        self,
+        concept: ConceptDTO,
+        operations: tuple[AddRelationPatchOperation, ...],
+    ) -> None:
+        for operation in operations:
+            if operation.target_concept_id == concept.id:
+                raise PatchApplicationError(
+                    PatchErrorCode.unsupported_operation,
+                    "Patch cannot relate a concept to itself.",
+                )
+            try:
+                self.store.get_concept(operation.target_concept_id)
+            except HTTPException as error:
+                if error.status_code == status.HTTP_404_NOT_FOUND:
+                    raise PatchApplicationError(
+                        PatchErrorCode.missing_concept,
+                        "Patch relation target concept does not exist.",
+                    ) from error
+                raise
 
     def _create_update_proposal(
         self,
@@ -383,3 +913,256 @@ class ConceptService:
         # keeping concept id in an in-memory side table once the repository layer lands.
         self.store.save_proposal(proposal, concept_id=concept_id)
         return proposal
+
+
+def should_use_web_search(question: str) -> bool:
+    normalized = question.casefold()
+    freshness_markers = (
+        "latest",
+        "current",
+        "recent",
+        "today",
+        "yesterday",
+        "this week",
+        "this month",
+        "2025",
+        "2026",
+        "version",
+        "release",
+        "changelog",
+        "price",
+        "pricing",
+        "policy",
+        "news",
+        "now",
+        "最新版",
+        "最新",
+        "当前",
+        "今天",
+        "最近",
+        "价格",
+        "版本",
+        "政策",
+        "新闻",
+    )
+    return any(marker in normalized for marker in freshness_markers)
+
+
+def _fallback_initial_concept(title: str) -> ConceptDTO:
+    return ConceptDTO(
+        id=uuid4(),
+        canonicalTitle=title,
+        displayTitle=title,
+        oneLineExplanation=f"{title} captured as a draft concept.",
+        maturity=ConceptMaturity.initial,
+        captureStatus=CaptureStatus.ready,
+        noteRevision=1,
+        blocks=MockConceptModelService().initial_blocks(title),
+        answerSource=AnswerSourceDTO(
+            sourceType=AnswerSourceType.model_knowledge,
+            confidence=0.5,
+            uncertaintyNote="Mock backend response; no external sources cited.",
+        ),
+    )
+
+
+def _concept_from_initial_result(title: str, result) -> ConceptDTO:
+    display_title = result.display_title.strip() or title
+    canonical_title = result.canonical_title.strip() or display_title
+    return ConceptDTO(
+        id=uuid4(),
+        canonicalTitle=canonical_title,
+        displayTitle=display_title,
+        oneLineExplanation=result.one_line_explanation.strip(),
+        maturity=ConceptMaturity.initial,
+        captureStatus=CaptureStatus.ready,
+        noteRevision=1,
+        blocks=[
+            NoteBlockDTO(
+                id=uuid4(),
+                blockType=block.block_type,
+                content=block.content.strip(),
+                source=NoteBlockSource.ai,
+                isUserLocked=False,
+            )
+            for block in result.blocks
+            if block.content.strip()
+        ],
+        tags=_names_from_suggestions(result.suggested_tags),
+        topics=_names_from_suggestions(result.suggested_topics),
+        answerSource=result.answer_source,
+    )
+
+
+def _sources_from_answer_source(
+    concept_id: UUID,
+    answer_source: AnswerSourceDTO,
+) -> list[SourceDTO]:
+    if answer_source.source_type != AnswerSourceType.web_verified:
+        return []
+    return [
+        SourceDTO(
+            id=uuid4(),
+            conceptId=concept_id,
+            title=citation.title,
+            url=citation.url,
+            sourceType=SourceType.secondary,
+        )
+        for citation in answer_source.citations
+    ]
+
+
+def _learning_updates_from_memory_patch(memory_patch: MemoryPatch) -> list[LearningStateUpdateDTO]:
+    updates: list[LearningStateUpdateDTO] = []
+    updates.extend(
+        LearningStateUpdateDTO(
+            field=LearningStateField.confirmed_understanding,
+            content=item,
+            origin=LearningStateOrigin.assistant_inference,
+        )
+        for item in memory_patch.confirmed_understanding
+    )
+    updates.extend(
+        LearningStateUpdateDTO(
+            field=LearningStateField.open_questions,
+            content=item,
+            origin=LearningStateOrigin.assistant_inference,
+        )
+        for item in memory_patch.open_questions
+    )
+    return updates
+
+
+def _candidate_decision(concept: ConceptDTO, update: CandidateUpdate) -> str:
+    if not update.content and update.operation not in {CandidateUpdateOperation.add_relation}:
+        return "drop"
+    if (
+        update.evidence_status != EvidenceStatus.source_backed
+        and update.time_sensitivity == TimeSensitivity.time_sensitive
+    ):
+        return "drop"
+    if update.operation in {
+        CandidateUpdateOperation.replace_block,
+        CandidateUpdateOperation.replace_claim,
+    }:
+        return "proposal"
+    if update.operation == CandidateUpdateOperation.append_block and update.target_block_id:
+        block = _block_by_id(concept, update.target_block_id)
+        if block is None:
+            return "drop"
+        if block.source != NoteBlockSource.ai or block.is_user_locked:
+            return "proposal"
+    return "auto"
+
+
+def _candidate_to_patch_operation(
+    update: CandidateUpdate,
+    concept: ConceptDTO,
+) -> AppendPatchOperation | ReplacePatchOperation | AddRelationPatchOperation | None:
+    if update.operation == CandidateUpdateOperation.add_relation:
+        if update.target_concept_id is None:
+            return None
+        return AddRelationPatchOperation(
+            operation="addRelation",
+            targetConceptId=update.target_concept_id,
+            relationType=update.relation_type or "related",
+        )
+    if update.operation in {
+        CandidateUpdateOperation.append_block,
+        CandidateUpdateOperation.add_open_question,
+    }:
+        content = update.content or ""
+        target_block_id = update.target_block_id or _append_target_block_id(concept, update)
+        if target_block_id is None:
+            return None
+        return AppendPatchOperation(
+            operation="append",
+            targetBlockId=target_block_id,
+            content=content,
+        )
+    if update.operation == CandidateUpdateOperation.replace_block:
+        if update.target_block_id is None or not update.content:
+            return None
+        block = _block_by_id(concept, update.target_block_id)
+        if block is None:
+            return None
+        return ReplacePatchOperation(
+            operation="replace",
+            targetBlockId=block.id,
+            oldValueHash=content_hash(block.content),
+            newContent=update.content,
+        )
+    return None
+
+
+def _append_target_block_id(concept: ConceptDTO, update: CandidateUpdate) -> UUID | None:
+    if update.operation == CandidateUpdateOperation.add_open_question:
+        block_type = NoteBlockType.open_question
+    else:
+        block_type = update.block_type or NoteBlockType.user_takeaways
+    for block in concept.blocks:
+        if block.block_type == block_type and block.source == NoteBlockSource.ai:
+            return block.id
+    if not concept.blocks:
+        return None
+    return concept.blocks[-1].id
+
+
+def _claim_from_candidate(concept_id: UUID, update: CandidateUpdate) -> ClaimDTO:
+    return ClaimDTO(
+        id=uuid4(),
+        conceptId=concept_id,
+        statement=update.content or "",
+        type=update.claim_type or ClaimType.fact,
+        evidenceStatus=update.evidence_status,
+        timeSensitivity=update.time_sensitivity,
+        sourceIds=update.source_ids,
+    )
+
+
+def _candidate_rationale(update: CandidateUpdate) -> str:
+    if update.operation == CandidateUpdateOperation.replace_block:
+        return "Suggested update modifies existing card content."
+    if update.operation == CandidateUpdateOperation.replace_claim:
+        return "Suggested update replaces an existing claim."
+    return "Suggested update requires confirmation."
+
+
+def _block_by_id(concept: ConceptDTO, block_id: UUID) -> NoteBlockDTO | None:
+    for block in concept.blocks:
+        if block.id == block_id:
+            return block
+    return None
+
+
+def _answer_source_from_recent_turn(turn: RecentTurn) -> AnswerSourceDTO | None:
+    if turn.answer_source_json is None:
+        return None
+    try:
+        payload = json.loads(turn.answer_source_json)
+    except json.JSONDecodeError:
+        return None
+    return AnswerSourceDTO.model_validate(payload)
+
+
+def _names_from_suggestions(suggestions: list) -> list[str]:
+    return _normalized_names([suggestion.name for suggestion in suggestions])
+
+
+def _normalized_names(names: list[str]) -> list[str]:
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for raw_name in names:
+        name = raw_name.strip()
+        if not name:
+            continue
+        key = name.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(name[:80])
+    return normalized
+
+
+def _chunk_text(text: str, size: int = 12) -> list[str]:
+    return [text[index : index + size] for index in range(0, len(text), size)]

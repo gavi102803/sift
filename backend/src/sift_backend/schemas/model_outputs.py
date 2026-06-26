@@ -3,8 +3,15 @@ from uuid import UUID
 from pydantic import Field
 
 from sift_backend.schemas.base import SiftBaseModel
-from sift_backend.schemas.common import UpdateMode
-from sift_backend.schemas.concepts import AnswerSourceDTO, UpdateDecisionDTO
+from sift_backend.schemas.common import (
+    CandidateUpdateOperation,
+    ClaimType,
+    EvidenceStatus,
+    NoteBlockType,
+    TimeSensitivity,
+    UpdateMode,
+)
+from sift_backend.schemas.concepts import AnswerSourceDTO, LearningStateUpdateDTO, UpdateDecisionDTO
 from sift_backend.schemas.patches import PatchOperation
 
 
@@ -48,12 +55,62 @@ class ModelUpdateProposal(SiftBaseModel):
     rationale: str
 
 
+class CandidateUpdate(SiftBaseModel):
+    operation: CandidateUpdateOperation
+    target_block_id: UUID | None = Field(default=None, alias="targetBlockId")
+    target_claim_id: UUID | None = Field(default=None, alias="targetClaimId")
+    target_concept_id: UUID | None = Field(default=None, alias="targetConceptId")
+    relation_type: str | None = Field(default=None, alias="relationType")
+    block_type: NoteBlockType | None = Field(default=None, alias="blockType")
+    claim_type: ClaimType | None = Field(default=None, alias="claimType")
+    content: str | None = None
+    evidence_status: EvidenceStatus = Field(
+        default=EvidenceStatus.model_explanation,
+        alias="evidenceStatus",
+    )
+    time_sensitivity: TimeSensitivity = Field(
+        default=TimeSensitivity.stable,
+        alias="timeSensitivity",
+    )
+    source_ids: list[UUID] = Field(default_factory=list, alias="sourceIds")
+
+
+class InitialNoteBlockOutput(SiftBaseModel):
+    block_type: NoteBlockType = Field(alias="blockType")
+    content: str
+
+
+class ConceptInitialResult(SiftBaseModel):
+    canonical_title: str = Field(alias="canonicalTitle")
+    display_title: str = Field(alias="displayTitle")
+    one_line_explanation: str = Field(alias="oneLineExplanation")
+    blocks: list[InitialNoteBlockOutput]
+    suggested_tags: list[TagSuggestion] = Field(
+        default_factory=list,
+        alias="suggestedTags",
+    )
+    suggested_topics: list[TopicSuggestion] = Field(
+        default_factory=list,
+        alias="suggestedTopics",
+    )
+    answer_source: AnswerSourceDTO = Field(alias="answerSource")
+    model_meta: ModelMeta = Field(alias="modelMeta")
+
+
 class ConceptTurnResult(SiftBaseModel):
     answer: str
     answer_source: AnswerSourceDTO = Field(alias="answerSource")
     update_decision: UpdateDecisionDTO = Field(alias="updateDecision")
     auto_patch: list[PatchOperation] = Field(default_factory=list, alias="autoPatch")
     proposal: ModelUpdateProposal | None = None
+    candidate_updates: list[CandidateUpdate] = Field(
+        default_factory=list,
+        alias="candidateUpdates",
+    )
+    learning_state_updates: list[LearningStateUpdateDTO] = Field(
+        default_factory=list,
+        alias="learningStateUpdates",
+    )
     relations: list[ConceptRelationSuggestion] = Field(default_factory=list)
     suggested_tags: list[TagSuggestion] = Field(
         default_factory=list,
@@ -72,4 +129,3 @@ class ConceptTurnResult(SiftBaseModel):
     @property
     def update_mode(self) -> UpdateMode:
         return self.update_decision.mode
-

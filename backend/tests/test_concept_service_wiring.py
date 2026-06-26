@@ -1,20 +1,45 @@
 import json
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import HTTPException
 
 from sift_backend.ai.context_pack import RecentTurn
-from sift_backend.ai.litellm_client import LiteLLMCompletionRequest, LiteLLMCompletionResponse
-from sift_backend.ai.model_gateway import ConceptModelGateway, ConceptModelGatewayError
 from sift_backend.api.concepts import build_concept_service
 from sift_backend.concepts.service import (
     ConceptService,
-    LiteLLMConceptModelService,
+    InMemoryConceptStore,
     MockConceptModelService,
+    SiftRuntimeConceptModelService,
 )
 from sift_backend.config import Settings
-from sift_backend.schemas.common import AnswerSourceType, UpdateMode
-from sift_backend.schemas.concepts import ConceptDTO, ConceptTurnRequest, CreateConceptRequest
+from sift_backend.runtime.concept_runtime import LightweightHermesRuntime
+from sift_backend.runtime.tools import DisabledWebSearchTool
+from sift_backend.runtime.types import (
+    RuntimeModelCompleted,
+    RuntimeModelDelta,
+    RuntimeModelRequest,
+    RuntimeModelResponse,
+    SiftRuntimeError,
+)
+from sift_backend.schemas.common import (
+    AnswerSourceType,
+    CandidateUpdateOperation,
+    EvidenceStatus,
+    LearningStateField,
+    LearningStateOrigin,
+    NoteBlockSource,
+    NoteBlockType,
+    UpdateMode,
+)
+from sift_backend.schemas.concepts import (
+    ConceptDTO,
+    ConceptTurnRequest,
+    CreateConceptRequest,
+    NoteBlockDTO,
+)
+from sift_backend.schemas.model_outputs import ConceptTurnResult, ModelMeta, ModelUpdateProposal
+from sift_backend.schemas.patches import AddRelationPatchOperation, AppendPatchOperation
 
 
 class FailingModelService(MockConceptModelService):
@@ -25,20 +50,179 @@ class FailingModelService(MockConceptModelService):
         recent_turns: list[RecentTurn] | None = None,
         card_memory: str = "",
     ):
-        raise ConceptModelGatewayError("invalid_schema", "Bad structured output.")
+        raise SiftRuntimeError("invalid_schema", "Bad structured output.")
 
 
-class RecordingLiteLLMClient:
-    def __init__(self, responses: list[LiteLLMCompletionResponse]) -> None:
-        self.responses = responses
-        self.requests: list[LiteLLMCompletionRequest] = []
-
-    async def create_chat_completion(
+class InitialConceptModelService(MockConceptModelService):
+    async def create_initial_concept(
         self,
-        request: LiteLLMCompletionRequest,
-    ) -> LiteLLMCompletionResponse:
+        title: str,
+        locale: str,
+    ) -> ConceptDTO:
+        return ConceptDTO(
+            id="00000000-0000-0000-0000-000000000123",
+            canonicalTitle="Retrieval-Augmented Generation",
+            displayTitle="RAG",
+            oneLineExplanation="RAG grounds answers in retrieved context.",
+            maturity="initial",
+            captureStatus="ready",
+            noteRevision=1,
+            blocks=[
+                NoteBlockDTO(
+                    id="00000000-0000-0000-0000-000000000124",
+                    blockType=NoteBlockType.what_it_is,
+                    content="RAG retrieves context before generation.",
+                    source=NoteBlockSource.ai,
+                    isUserLocked=False,
+                )
+            ],
+            tags=["AI", "Retrieval"],
+            topics=["Machine Learning"],
+            answerSource={
+                "sourceType": AnswerSourceType.model_knowledge,
+                "confidence": 0.82,
+            },
+        )
+
+
+class RelationProposalModelService(MockConceptModelService):
+    def __init__(self, target_concept_id: UUID) -> None:
+        self.target_concept_id = target_concept_id
+
+    async def answer_turn(
+        self,
+        concept: ConceptDTO,
+        request: ConceptTurnRequest,
+        recent_turns: list[RecentTurn] | None = None,
+        card_memory: str = "",
+    ) -> ConceptTurnResult:
+        return ConceptTurnResult(
+            answer="This should be linked to the related concept.",
+            answerSource={
+                "sourceType": AnswerSourceType.model_knowledge,
+                "confidence": 0.8,
+            },
+            updateDecision={
+                "mode": UpdateMode.needs_confirmation,
+                "reason": "A durable relation should be confirmed.",
+            },
+            proposal=ModelUpdateProposal(
+                baseNoteRevision=concept.note_revision,
+                patchOperations=[
+                    AddRelationPatchOperation(
+                        operation="addRelation",
+                        targetConceptId=self.target_concept_id,
+                        relationType="related",
+                    )
+                ],
+                rationale="Connects related concepts.",
+            ),
+            modelMeta=ModelMeta(provider="test", model="relation-test"),
+        )
+
+
+class CandidateUpdateModelService(MockConceptModelService):
+    async def answer_turn(
+        self,
+        concept: ConceptDTO,
+        request: ConceptTurnRequest,
+        recent_turns: list[RecentTurn] | None = None,
+        card_memory: str = "",
+    ) -> ConceptTurnResult:
+        return ConceptTurnResult(
+            answer="MCP is often compared with function calling.",
+            answerSource={
+                "sourceType": AnswerSourceType.model_knowledge,
+                "confidence": 0.8,
+            },
+            updateDecision={
+                "mode": UpdateMode.none,
+                "reason": "Candidate policy decides durable changes.",
+            },
+            candidateUpdates=[
+                {
+                    "operation": CandidateUpdateOperation.add_open_question,
+                    "content": "How is MCP different from function calling?",
+                    "evidenceStatus": EvidenceStatus.model_explanation,
+                },
+                {
+                    "operation": CandidateUpdateOperation.add_claim,
+                    "content": "MCP is a protocol for connecting AI apps to tools and data.",
+                    "claimType": "definition",
+                    "evidenceStatus": EvidenceStatus.model_explanation,
+                    "timeSensitivity": "stable",
+                },
+            ],
+            learningStateUpdates=[
+                {
+                    "field": LearningStateField.open_questions,
+                    "content": "How is MCP different from function calling?",
+                    "origin": LearningStateOrigin.assistant_inference,
+                }
+            ],
+            modelMeta=ModelMeta(provider="test", model="candidate-test"),
+        )
+
+
+class CandidateAndAutoPatchModelService(MockConceptModelService):
+    async def answer_turn(
+        self,
+        concept: ConceptDTO,
+        request: ConceptTurnRequest,
+        recent_turns: list[RecentTurn] | None = None,
+        card_memory: str = "",
+    ) -> ConceptTurnResult:
+        return ConceptTurnResult(
+            answer="The distinction is now clearer.",
+            answerSource={
+                "sourceType": AnswerSourceType.model_knowledge,
+                "confidence": 0.8,
+            },
+            updateDecision={
+                "mode": UpdateMode.auto_merge,
+                "reason": "Append a small clarification.",
+            },
+            autoPatch=[
+                AppendPatchOperation(
+                    operation="append",
+                    targetBlockId=concept.blocks[0].id,
+                    content=" It grounds answers in retrieved context.",
+                )
+            ],
+            candidateUpdates=[
+                {
+                    "operation": CandidateUpdateOperation.add_claim,
+                    "content": "RAG combines retrieval with generation.",
+                    "claimType": "definition",
+                    "evidenceStatus": EvidenceStatus.model_explanation,
+                    "timeSensitivity": "stable",
+                }
+            ],
+            modelMeta=ModelMeta(provider="test", model="candidate-auto-test"),
+        )
+
+
+class RecordingRuntimeProvider:
+    provider_name = "test-runtime"
+
+    def __init__(self, responses: list[RuntimeModelResponse]) -> None:
+        self.responses = responses
+        self.requests: list[RuntimeModelRequest] = []
+
+    async def complete(
+        self,
+        request: RuntimeModelRequest,
+    ) -> RuntimeModelResponse:
         self.requests.append(request)
         return self.responses.pop(0)
+
+    async def stream(self, request: RuntimeModelRequest):
+        response = await self.complete(request)
+        yield RuntimeModelDelta(response.content)
+        yield RuntimeModelCompleted(response)
+
+    async def list_models(self) -> list[str]:
+        return ["test-model"]
 
 
 def valid_model_content(answer: str) -> str:
@@ -66,29 +250,50 @@ def valid_model_content(answer: str) -> str:
     )
 
 
-def test_build_concept_service_uses_mock_when_litellm_key_is_missing() -> None:
+def test_build_concept_service_uses_mock_when_runtime_key_is_missing() -> None:
     service = build_concept_service(
-        Settings(litellm_api_key="", litellm_base_url="http://localhost:4000")
+        Settings(runtime_api_key=""),
+        store=InMemoryConceptStore(),
     )
 
     assert isinstance(service.model_service, MockConceptModelService)
 
 
-def test_build_concept_service_uses_litellm_when_key_is_present() -> None:
+def test_build_concept_service_uses_runtime_when_key_is_present() -> None:
     service = build_concept_service(
         Settings(
-            litellm_api_key="test-key",
-            litellm_base_url="http://localhost:4000",
-            model_explain="sift-explain-test",
-        )
+            runtime_api_key="test-key",
+            runtime_base_url="https://runtime.test/v1",
+            runtime_model="sift-explain-test",
+            runtime_web_search_enabled=True,
+            web_search_api_key="tavily-key",
+        ),
+        store=InMemoryConceptStore(),
     )
 
-    assert isinstance(service.model_service, LiteLLMConceptModelService)
-    assert service.model_service.model_alias == "sift-explain-test"
+    assert isinstance(service.model_service, SiftRuntimeConceptModelService)
+    assert service.model_service.runtime.model == "sift-explain-test"
+    assert service.model_service.runtime.web_search_enabled is True
 
 
 @pytest.mark.asyncio
-async def test_submit_turn_maps_model_gateway_error_to_bad_gateway() -> None:
+async def test_create_concept_async_uses_model_generated_card() -> None:
+    service = ConceptService(model_service=InitialConceptModelService())
+
+    concept = await service.create_concept_async(CreateConceptRequest(rawCapture="RAG"))
+
+    assert concept.display_title == "RAG"
+    assert concept.one_line_explanation == "RAG grounds answers in retrieved context."
+    assert concept.blocks[0].content == "RAG retrieves context before generation."
+    assert concept.tags == ["AI", "Retrieval"]
+    assert concept.topics == ["Machine Learning"]
+    assert concept.answer_source is not None
+    assert concept.answer_source.confidence == 0.82
+    assert service.get_concept(concept.id).display_title == "RAG"
+
+
+@pytest.mark.asyncio
+async def test_submit_turn_maps_runtime_error_to_bad_gateway() -> None:
     service = ConceptService(model_service=FailingModelService())
     concept = service.create_concept(CreateConceptRequest(rawCapture="RAG"))
 
@@ -103,17 +308,53 @@ async def test_submit_turn_maps_model_gateway_error_to_bad_gateway() -> None:
 
 
 @pytest.mark.asyncio
+async def test_submit_turn_applies_candidate_updates_to_knowledge_layers() -> None:
+    service = ConceptService(model_service=CandidateUpdateModelService())
+    concept = service.create_concept(CreateConceptRequest(rawCapture="MCP"))
+
+    response = await service.submit_turn(
+        concept.id,
+        ConceptTurnRequest(question="Compare it with function calling."),
+    )
+    updated = service.get_concept(concept.id)
+
+    assert response.proposal is None
+    assert response.update_mode == UpdateMode.none
+    assert "How is MCP different from function calling?" in updated.blocks[-1].content
+    assert updated.claims[0].statement == (
+        "MCP is a protocol for connecting AI apps to tools and data."
+    )
+    assert updated.learning_state is not None
+    assert updated.learning_state.open_questions[0].origin == "assistantInference"
+
+
+@pytest.mark.asyncio
+async def test_submit_turn_keeps_candidate_claim_when_auto_patch_also_saves() -> None:
+    service = ConceptService(model_service=CandidateAndAutoPatchModelService())
+    concept = service.create_concept(CreateConceptRequest(rawCapture="RAG"))
+
+    await service.submit_turn(
+        concept.id,
+        ConceptTurnRequest(question="Clarify the definition."),
+    )
+    updated = service.get_concept(concept.id)
+
+    assert "retrieved context" in updated.blocks[0].content
+    assert updated.claims[0].statement == "RAG combines retrieval with generation."
+
+
+@pytest.mark.asyncio
 async def test_submit_turn_reuses_recent_turns_for_same_concept_card() -> None:
-    client = RecordingLiteLLMClient(
+    provider = RecordingRuntimeProvider(
         responses=[
-            LiteLLMCompletionResponse(
+            RuntimeModelResponse(
                 content=valid_model_content("First answer."),
                 provider="test",
                 model="test-model",
                 input_tokens=None,
                 output_tokens=None,
             ),
-            LiteLLMCompletionResponse(
+            RuntimeModelResponse(
                 content=valid_model_content("Second answer."),
                 provider="test",
                 model="test-model",
@@ -122,18 +363,70 @@ async def test_submit_turn_reuses_recent_turns_for_same_concept_card() -> None:
             ),
         ]
     )
+    runtime = LightweightHermesRuntime(
+        model_provider=provider,
+        model="sift-explain-test",
+        web_search_tool=DisabledWebSearchTool(),
+        web_search_enabled=False,
+    )
     service = ConceptService(
-        model_service=LiteLLMConceptModelService(
-            gateway=ConceptModelGateway(client),
-            model_alias="sift-explain-test",
-        )
+        model_service=SiftRuntimeConceptModelService(runtime)
     )
     concept = service.create_concept(CreateConceptRequest(rawCapture="RAG"))
 
     await service.submit_turn(concept.id, ConceptTurnRequest(question="What is RAG?"))
     await service.submit_turn(concept.id, ConceptTurnRequest(question="Give me an example."))
 
-    second_request_contents = [message.content for message in client.requests[1].messages]
+    second_request_contents = [message.content for message in provider.requests[1].messages]
     assert "What is RAG?" in second_request_contents
     assert "First answer." in second_request_contents
     assert second_request_contents[-1] == "Give me an example."
+
+
+@pytest.mark.asyncio
+async def test_merge_relation_proposal_persists_concept_relation() -> None:
+    target_id = uuid4()
+    model_service = RelationProposalModelService(target_id)
+    service = ConceptService(model_service=model_service)
+    source = service.create_concept(CreateConceptRequest(rawCapture="RAG"))
+    target = service.create_concept(CreateConceptRequest(rawCapture="Embedding"))
+    model_service.target_concept_id = target.id
+
+    response = await service.submit_turn(
+        source.id,
+        ConceptTurnRequest(question="Is this related to embeddings?"),
+    )
+
+    assert response.proposal is not None
+    merged = service.merge_proposal(response.proposal.id)
+
+    assert merged.note_revision == 2
+    assert len(merged.relations) == 1
+    relation = merged.relations[0]
+    assert relation.source_concept_id == source.id
+    assert relation.target_concept_id == target.id
+    assert relation.relation_type == "related"
+
+    target_with_relation = service.get_concept(target.id)
+    assert target_with_relation.relations[0].id == relation.id
+
+
+@pytest.mark.asyncio
+async def test_merge_relation_proposal_rejects_missing_target_concept() -> None:
+    missing_target_id = uuid4()
+    service = ConceptService(model_service=RelationProposalModelService(missing_target_id))
+    source = service.create_concept(CreateConceptRequest(rawCapture="RAG"))
+
+    response = await service.submit_turn(
+        source.id,
+        ConceptTurnRequest(question="Is this related to another concept?"),
+    )
+
+    assert response.proposal is not None
+    with pytest.raises(HTTPException) as error:
+        service.merge_proposal(response.proposal.id)
+
+    assert error.value.status_code == 409
+    assert error.value.detail["code"] == "missingConcept"
+    assert service.store.get_proposal(response.proposal.id).status == "stale"
+    assert service.get_concept(source.id).relations == []

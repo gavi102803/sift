@@ -16,6 +16,7 @@ from sift_backend.schemas.patches import (
 class PatchErrorCode(StrEnum):
     stale_revision = "staleRevision"
     missing_block = "missingBlock"
+    missing_concept = "missingConcept"
     locked_block = "lockedBlock"
     hash_mismatch = "hashMismatch"
     unsupported_operation = "unsupportedOperation"
@@ -66,6 +67,7 @@ def apply_patch_operations(
                     "content": _append_content(block.content, operation.content),
                     "source": NoteBlockSource.merged,
                     "is_user_locked": block.is_user_locked,
+                    "revision": block.revision + 1,
                 }
             )
         elif isinstance(operation, ReplacePatchOperation):
@@ -80,6 +82,7 @@ def apply_patch_operations(
                     "content": operation.new_content,
                     "source": NoteBlockSource.merged,
                     "is_user_locked": block.is_user_locked,
+                    "revision": block.revision + 1,
                 }
             )
         elif isinstance(operation, AddRelationPatchOperation):
@@ -117,4 +120,3 @@ def _append_content(existing: str, addition: str) -> str:
     if not existing:
         return addition
     return f"{existing}\n\n{addition}"
-

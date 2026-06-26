@@ -12,6 +12,7 @@ final class Concept {
     var maturity: String
     var captureStatus: String
     var noteRevision: Int
+    var answerSourceJSON: String?
     var createdAt: Date
     var updatedAt: Date
 
@@ -31,6 +32,7 @@ final class Concept {
         maturity: String = ConceptMaturity.initial.rawValue,
         captureStatus: String = CaptureStatus.draft.rawValue,
         noteRevision: Int = 0,
+        answerSourceJSON: String? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now
     ) {
@@ -43,6 +45,7 @@ final class Concept {
         self.maturity = maturity
         self.captureStatus = captureStatus
         self.noteRevision = noteRevision
+        self.answerSourceJSON = answerSourceJSON
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -140,4 +143,3 @@ enum NoteBlockSource: String, Codable, CaseIterable {
     case user
     case merged
 }
-

@@ -17,6 +17,39 @@ struct ConceptLocalStore {
         return concept
     }
 
+    func findCaptureMatch(rawCapture: String) throws -> CaptureMatchResult {
+        let normalizedCapture = normalizedLookupKey(rawCapture)
+        guard !normalizedCapture.isEmpty else { return .none }
+
+        let concepts = try modelContext.fetch(FetchDescriptor<Concept>())
+            .filter { $0.captureStatus != CaptureStatus.archived.rawValue }
+        let exactMatches = concepts.filter { concept in
+            lookupKeys(for: concept).contains(normalizedCapture)
+        }
+        if let exactMatch = exactMatches.sorted(by: { $0.updatedAt > $1.updatedAt }).first {
+            return .exact(exactMatch)
+        }
+
+        let ambiguousMatches = concepts.filter { concept in
+            lookupKeys(for: concept).contains { key in
+                key.contains(normalizedCapture) || normalizedCapture.contains(key)
+            }
+        }
+        if ambiguousMatches.count > 1 {
+            return .ambiguous(ambiguousMatches)
+        }
+
+        return .none
+    }
+
+    func createDisambiguationDraft(rawCapture: String, locale: String = Locale.current.identifier) -> Concept {
+        let concept = createDraft(rawCapture: rawCapture, locale: locale)
+        concept.captureStatus = CaptureStatus.needsDisambiguation.rawValue
+        concept.oneLineExplanation = "Review possible existing concepts before generating."
+        concept.updatedAt = .now
+        return concept
+    }
+
     func upsertConcept(from dto: ConceptDTO) throws -> Concept {
         let existingConcept = try fetchConcept(id: dto.id)
         let concept = existingConcept ?? Concept(
@@ -31,6 +64,7 @@ struct ConceptLocalStore {
         concept.maturity = dto.maturity
         concept.captureStatus = dto.captureStatus
         concept.noteRevision = dto.noteRevision
+        concept.answerSourceJSON = encodeAnswerSource(dto.answerSource)
         concept.updatedAt = .now
 
         if existingConcept == nil {
@@ -56,12 +90,187 @@ struct ConceptLocalStore {
             )
         }
 
+        try replaceConceptTags(conceptId: concept.id, names: dto.tags)
+        try replaceConceptTopics(conceptId: concept.id, names: dto.topics)
+        try replaceConceptRelations(conceptId: concept.id, relations: dto.relations)
+
         return concept
     }
 
     func upsertConcepts(from dtos: [ConceptDTO]) throws {
         for dto in dtos {
             _ = try upsertConcept(from: dto)
+        }
+    }
+
+    func pruneLocalMirrorsMissingFromRemote(keeping remoteIds: Set<UUID>) throws {
+        let concepts = try modelContext.fetch(FetchDescriptor<Concept>())
+        let localOnlyMirrors = concepts.filter { concept in
+            !remoteIds.contains(concept.id)
+                && !ConceptStatusRules.isLocalOnly(concept.captureStatus)
+        }
+        for concept in localOnlyMirrors {
+            modelContext.delete(concept)
+        }
+    }
+
+    func deleteConcept(_ concept: Concept) {
+        modelContext.delete(concept)
+    }
+
+    func archiveConcept(_ concept: Concept) {
+        concept.captureStatus = CaptureStatus.archived.rawValue
+        concept.updatedAt = .now
+    }
+
+    func updateConceptSummary(
+        _ concept: Concept,
+        displayTitle: String,
+        oneLineExplanation: String
+    ) throws {
+        let title = displayTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        concept.displayTitle = title.isEmpty ? concept.displayTitle : title
+        concept.canonicalTitle = title.isEmpty ? concept.canonicalTitle : title
+        concept.oneLineExplanation = oneLineExplanation.trimmingCharacters(in: .whitespacesAndNewlines)
+        concept.updatedAt = .now
+        try recordManualEdit(for: concept)
+    }
+
+    func updateNoteBlock(_ block: NoteBlock, content: String) throws {
+        guard let note = block.note, let concept = note.concept else { return }
+        block.content = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        block.source = NoteBlockSource.user.rawValue
+        block.isUserLocked = true
+        block.lastEditedBy = UpdateActor.user.rawValue
+        block.updatedAt = .now
+        try recordManualEdit(for: concept)
+    }
+
+    func replaceConceptTags(conceptId: UUID, names: [String]) throws {
+        let existingAssignments = try modelContext.fetch(FetchDescriptor<ConceptTag>())
+            .filter { $0.conceptId == conceptId }
+        for assignment in existingAssignments {
+            modelContext.delete(assignment)
+        }
+
+        for name in normalizedNames(names) {
+            let tag = try findOrCreateTag(named: name)
+            modelContext.insert(ConceptTag(conceptId: conceptId, tagId: tag.id, source: UpdateActor.user.rawValue))
+        }
+    }
+
+    func replaceConceptTopics(conceptId: UUID, names: [String]) throws {
+        let existingAssignments = try modelContext.fetch(FetchDescriptor<ConceptTopic>())
+            .filter { $0.conceptId == conceptId }
+        for assignment in existingAssignments {
+            modelContext.delete(assignment)
+        }
+
+        for name in normalizedNames(names) {
+            let topic = try findOrCreateTopic(named: name)
+            modelContext.insert(ConceptTopic(conceptId: conceptId, topicId: topic.id, source: UpdateActor.user.rawValue))
+        }
+    }
+
+    func addRelation(
+        sourceConceptId: UUID,
+        targetConceptId: UUID,
+        relationType: String = "related"
+    ) throws {
+        guard sourceConceptId != targetConceptId else { return }
+        let existingRelations = try modelContext.fetch(FetchDescriptor<ConceptRelation>())
+        if existingRelations.contains(where: { relation in
+            relation.sourceConceptId == sourceConceptId
+                && relation.targetConceptId == targetConceptId
+                && relation.relationType == relationType
+        }) {
+            return
+        }
+        modelContext.insert(
+            ConceptRelation(
+                sourceConceptId: sourceConceptId,
+                targetConceptId: targetConceptId,
+                relationType: relationType,
+                status: "accepted",
+                confidence: 1,
+                source: UpdateActor.user.rawValue
+            )
+        )
+    }
+
+    func replaceConceptRelations(conceptId: UUID, relations: [ConceptRelationDTO]) throws {
+        let existingRelations = try modelContext.fetch(FetchDescriptor<ConceptRelation>())
+            .filter { relation in
+                relation.sourceConceptId == conceptId || relation.targetConceptId == conceptId
+            }
+        for relation in existingRelations {
+            modelContext.delete(relation)
+        }
+
+        for dto in relations {
+            modelContext.insert(
+                ConceptRelation(
+                    id: dto.id,
+                    sourceConceptId: dto.sourceConceptId,
+                    targetConceptId: dto.targetConceptId,
+                    relationType: dto.relationType,
+                    status: dto.status,
+                    confidence: dto.confidence,
+                    source: dto.source
+                )
+            )
+        }
+    }
+
+    func removeRelation(_ relation: ConceptRelation) {
+        modelContext.delete(relation)
+    }
+
+    func recordFailedFollowUpDraft(concept: Concept, question: String) {
+        let trimmedQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuestion.isEmpty else { return }
+        let conversation = ensureConversation(for: concept)
+        conversation.updatedAt = .now
+        if conversation.messages.contains(where: { message in
+            message.role == ConversationRole.user.rawValue
+                && message.content == trimmedQuestion
+                && message.updateMode == failedFollowUpUpdateMode
+        }) {
+            return
+        }
+        modelContext.insert(
+            ConversationMessage(
+                role: ConversationRole.user.rawValue,
+                content: trimmedQuestion,
+                createdAt: .now,
+                updateMode: failedFollowUpUpdateMode,
+                conversation: conversation
+            )
+        )
+    }
+
+    func latestFailedFollowUpDraft(for concept: Concept) -> String? {
+        let conversation = ensureConversation(for: concept)
+        return conversation.messages
+            .filter { message in
+                message.role == ConversationRole.user.rawValue
+                    && message.updateMode == failedFollowUpUpdateMode
+            }
+            .sorted { $0.createdAt > $1.createdAt }
+            .first?
+            .content
+    }
+
+    func clearFailedFollowUpDrafts(for concept: Concept, matching question: String? = nil) {
+        let conversation = ensureConversation(for: concept)
+        let trimmedQuestion = question?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let drafts = conversation.messages.filter { message in
+            message.role == ConversationRole.user.rawValue
+                && message.updateMode == failedFollowUpUpdateMode
+                && (trimmedQuestion == nil || message.content == trimmedQuestion)
+        }
+        for draft in drafts {
+            modelContext.delete(draft)
         }
     }
 
@@ -125,4 +334,138 @@ struct ConceptLocalStore {
         let data = try JSONEncoder().encode(operations)
         return String(data: data, encoding: .utf8) ?? "[]"
     }
+
+    private func encodeAnswerSource(_ answerSource: AnswerSourceDTO?) -> String? {
+        guard let answerSource,
+              let data = try? JSONEncoder().encode(answerSource) else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private func ensureConversation(for concept: Concept) -> Conversation {
+        if let conversation = concept.conversation {
+            return conversation
+        }
+        let conversation = Conversation(
+            initialQuery: concept.displayTitle,
+            concept: concept
+        )
+        concept.conversation = conversation
+        modelContext.insert(conversation)
+        return conversation
+    }
+
+    private func recordManualEdit(for concept: Concept) throws {
+        let nextRevision = concept.noteRevision + 1
+        concept.noteRevision = nextRevision
+        concept.updatedAt = .now
+        if let note = concept.note {
+            note.revision = nextRevision
+            note.updatedAt = .now
+            note.updatedBy = UpdateActor.user.rawValue
+        }
+
+        modelContext.insert(
+            NoteRevision(
+                conceptId: concept.id,
+                revision: nextRevision,
+                snapshotJSON: snapshotJSON(for: concept),
+                mergeMode: UpdateEventType.manualEdit.rawValue
+            )
+        )
+        modelContext.insert(
+            UpdateEvent(
+                conceptId: concept.id,
+                noteRevision: nextRevision,
+                eventType: UpdateEventType.manualEdit.rawValue,
+                actor: UpdateActor.user.rawValue
+            )
+        )
+    }
+
+    private func snapshotJSON(for concept: Concept) -> String {
+        let blocks = (concept.note?.blocks ?? []).map { block in
+            [
+                "id": block.id.uuidString,
+                "blockType": block.blockType,
+                "content": block.content,
+                "source": block.source,
+                "isUserLocked": block.isUserLocked ? "true" : "false"
+            ]
+        }
+        let snapshot: [String: Any] = [
+            "conceptId": concept.id.uuidString,
+            "displayTitle": concept.displayTitle,
+            "oneLineExplanation": concept.oneLineExplanation,
+            "noteRevision": concept.noteRevision,
+            "blocks": blocks
+        ]
+        guard JSONSerialization.isValidJSONObject(snapshot),
+              let data = try? JSONSerialization.data(withJSONObject: snapshot),
+              let json = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return json
+    }
+
+    private func normalizedNames(_ names: [String]) -> [String] {
+        var seen = Set<String>()
+        return names.compactMap { rawName in
+            let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return nil }
+            let key = name.lowercased()
+            guard !seen.contains(key) else { return nil }
+            seen.insert(key)
+            return name
+        }
+    }
+
+    private func findOrCreateTag(named name: String) throws -> Tag {
+        let tags = try modelContext.fetch(FetchDescriptor<Tag>())
+        if let existing = tags.first(where: { $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame }) {
+            return existing
+        }
+        let tag = Tag(name: name, source: UpdateActor.user.rawValue)
+        modelContext.insert(tag)
+        return tag
+    }
+
+    private func findOrCreateTopic(named name: String) throws -> Topic {
+        let topics = try modelContext.fetch(FetchDescriptor<Topic>())
+        if let existing = topics.first(where: { $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame }) {
+            return existing
+        }
+        let topic = Topic(name: name, source: UpdateActor.user.rawValue)
+        modelContext.insert(topic)
+        return topic
+    }
+
+    private func lookupKeys(for concept: Concept) -> Set<String> {
+        let aliases = concept.aliasesText.split { character in
+            character == "," || character == "\n" || character == "，"
+        }
+        return Set(
+            ([concept.canonicalTitle, concept.displayTitle] + aliases.map(String.init))
+                .map(normalizedLookupKey)
+                .filter { !$0.isEmpty }
+        )
+    }
+
+    private func normalizedLookupKey(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+    }
+
+    private var failedFollowUpUpdateMode: String {
+        "failed"
+    }
+}
+
+enum CaptureMatchResult {
+    case none
+    case exact(Concept)
+    case ambiguous([Concept])
 }

@@ -1,3 +1,5 @@
 .DS_Store
 .ruff_cache/
-
+.build/
+.xcodebuildmcp/
+.data/

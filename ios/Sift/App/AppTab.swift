@@ -7,27 +7,14 @@ enum AppTab: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    @ViewBuilder
-    var content: some View {
-        switch self {
-        case .record:
-            RecordView()
-        case .library:
-            ConceptLibraryView()
-        case .profile:
-            ProfileView()
-        }
-    }
-
     var label: some View {
         switch self {
         case .record:
-            Label("Record", systemImage: "square.and.pencil")
+            Label("Capture", systemImage: "plus.circle")
         case .library:
-            Label("Library", systemImage: "rectangle.stack")
+            Label("Library", systemImage: "books.vertical")
         case .profile:
-            Label("Profile", systemImage: "person")
+            Label("Profile", systemImage: "person.fill")
         }
     }
 }
-

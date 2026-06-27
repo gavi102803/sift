@@ -4,10 +4,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from sift_backend.credential_store import (
+    credential_ref,
+    credential_store_for_settings_path,
+    legacy_credential_ref,
+)
+
 
 @dataclass(frozen=True)
 class Settings:
     env: str = "development"
+    user_id: str = "local-dev"
     log_level: str = "INFO"
     database_url: str = "sqlite:///./.data/sift.db"
     runtime_provider: str = "custom"
@@ -23,58 +30,29 @@ class Settings:
 
 def load_settings(env_file: str | Path | None = None) -> Settings:
     env = _load_env_file(env_file)
+    settings_path = _resolved_provider_settings_path(env)
+    credential_store = credential_store_for_settings_path(settings_path)
     stored = _load_provider_settings_file(env)
-    web_search_api_key = _setting_value(
-        "SIFT_WEB_SEARCH_API_KEY",
-        "web_search_api_key",
-        Settings.web_search_api_key,
-        env,
+    runtime_provider = _stored_str(stored, "runtime_provider", Settings.runtime_provider)
+    runtime_base_url = _stored_str(stored, "runtime_base_url", Settings.runtime_base_url)
+    runtime_api_key = _stored_str(stored, "runtime_api_key", Settings.runtime_api_key)
+    runtime_model = _stored_str(stored, "runtime_model", Settings.runtime_model)
+    web_search_provider = _stored_str(
         stored,
-    )
-    web_search_provider = _setting_value(
-        "SIFT_WEB_SEARCH_PROVIDER",
         "web_search_provider",
         Settings.web_search_provider,
-        env,
-        stored,
     )
-    runtime_provider = _setting_value(
-        "SIFT_RUNTIME_PROVIDER",
-        "runtime_provider",
-        Settings.runtime_provider,
-        env,
+    web_search_api_key = _stored_str(
         stored,
-        legacy_env_names=("SIFT_MODEL_PROVIDER",),
-        legacy_stored_names=("model_provider",),
-    )
-    runtime_base_url = _setting_value(
-        "SIFT_RUNTIME_BASE_URL",
-        "runtime_base_url",
-        Settings.runtime_base_url,
-        env,
-        stored,
-        legacy_env_names=("SIFT_OPENAI_COMPATIBLE_BASE_URL", "SIFT_OPENAI_BASE_URL"),
-        legacy_stored_names=("openai_compatible_base_url", "openai_base_url"),
-    )
-    runtime_api_key = _setting_value(
-        "SIFT_RUNTIME_API_KEY",
-        "runtime_api_key",
-        Settings.runtime_api_key,
-        env,
-        stored,
-        legacy_env_names=("SIFT_OPENAI_COMPATIBLE_API_KEY", "SIFT_OPENAI_API_KEY"),
-        legacy_stored_names=("openai_compatible_api_key", "openai_api_key"),
-    )
-    runtime_model = _setting_value(
-        "SIFT_RUNTIME_MODEL",
-        "runtime_model",
-        Settings.runtime_model,
-        env,
-        stored,
-        legacy_env_names=("SIFT_MODEL_EXPLAIN",),
-        legacy_stored_names=("model_explain",),
+        "web_search_api_key",
+        Settings.web_search_api_key,
     )
     runtime_provider_settings = _setting_map("runtime_provider_settings", stored)
+    runtime_provider_settings = _resolve_provider_credentials(
+        runtime_provider_settings,
+        credential_store,
+        kind="runtime",
+    )
     runtime_provider_settings = _merge_provider_config(
         runtime_provider_settings,
         runtime_provider,
@@ -85,6 +63,11 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         },
     )
     web_provider_settings = _setting_map("web_provider_settings", stored)
+    web_provider_settings = _resolve_provider_credentials(
+        web_provider_settings,
+        credential_store,
+        kind="web",
+    )
     web_provider_settings = _merge_provider_config(
         web_provider_settings,
         web_search_provider,
@@ -94,20 +77,17 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
     web_selected = web_provider_settings.get(web_search_provider, {})
     return Settings(
         env=_env_value("SIFT_ENV", Settings.env, env),
+        user_id=_env_value("SIFT_USER_ID", Settings.user_id, env),
         log_level=_env_value("SIFT_LOG_LEVEL", Settings.log_level, env),
         database_url=_env_value("SIFT_DATABASE_URL", Settings.database_url, env),
         runtime_provider=runtime_provider,
         runtime_base_url=runtime_selected.get("base_url", runtime_base_url),
         runtime_api_key=runtime_selected.get("api_key", runtime_api_key),
         runtime_model=runtime_selected.get("model", runtime_model),
-        runtime_web_search_enabled=_setting_bool(
-            "SIFT_RUNTIME_WEB_SEARCH_ENABLED",
+        runtime_web_search_enabled=_stored_bool(
+            stored,
             "runtime_web_search_enabled",
             Settings.runtime_web_search_enabled,
-            env,
-            stored,
-            legacy_env_names=("SIFT_ENABLE_WEB_SEARCH",),
-            legacy_stored_names=("enable_web_search",),
         ),
         web_search_provider=_normalize_web_search_provider(
             web_search_provider,
@@ -128,18 +108,29 @@ def provider_settings_path() -> Path:
 def write_provider_settings(settings: Settings) -> None:
     path = provider_settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    credential_store = credential_store_for_settings_path(path)
+    runtime_provider_settings = _settings_with_credential_refs(
+        settings.runtime_provider_settings,
+        credential_store,
+        kind="runtime",
+        user_id=settings.user_id,
+    )
+    web_provider_settings = _settings_with_credential_refs(
+        settings.web_provider_settings,
+        credential_store,
+        kind="web",
+        user_id=settings.user_id,
+    )
     path.write_text(
         json.dumps(
             {
                 "runtime_provider": settings.runtime_provider,
                 "runtime_base_url": settings.runtime_base_url,
-                "runtime_api_key": settings.runtime_api_key,
                 "runtime_model": settings.runtime_model,
                 "runtime_web_search_enabled": settings.runtime_web_search_enabled,
                 "web_search_provider": settings.web_search_provider,
-                "web_search_api_key": settings.web_search_api_key,
-                "runtime_provider_settings": settings.runtime_provider_settings,
-                "web_provider_settings": settings.web_provider_settings,
+                "runtime_provider_settings": runtime_provider_settings,
+                "web_provider_settings": web_provider_settings,
             },
             indent=2,
         ),
@@ -153,52 +144,17 @@ def _env_value(name: str, default: str, env_file_values: dict[str, str]) -> str:
     return env_file_values.get(name, default)
 
 
-def _setting_value(
-    env_name: str,
-    stored_name: str,
-    default: str,
-    env_file_values: dict[str, str],
-    stored_values: dict[str, str],
-    legacy_env_names: tuple[str, ...] = (),
-    legacy_stored_names: tuple[str, ...] = (),
-) -> str:
-    if env_name in os.environ:
-        return os.environ[env_name]
-    if env_name in env_file_values:
-        return env_file_values[env_name]
-    for legacy_name in legacy_env_names:
-        if legacy_name in os.environ:
-            return os.environ[legacy_name]
-        if legacy_name in env_file_values:
-            return env_file_values[legacy_name]
-    if stored_name in stored_values:
-        return stored_values[stored_name]
-    for legacy_name in legacy_stored_names:
-        if legacy_name in stored_values:
-            return stored_values[legacy_name]
-    return default
+def _stored_str(stored_values: dict[str, Any], name: str, default: str) -> str:
+    value = stored_values.get(name)
+    return value if isinstance(value, str) else default
 
 
-def _setting_bool(
-    env_name: str,
+def _stored_bool(
+    stored_values: dict[str, Any],
     stored_name: str,
     default: bool,
-    env_file_values: dict[str, str],
-    stored_values: dict[str, str],
-    legacy_env_names: tuple[str, ...] = (),
-    legacy_stored_names: tuple[str, ...] = (),
 ) -> bool:
-    if env_name in os.environ or env_name in env_file_values:
-        return _env_bool(env_name, default, env_file_values)
-    for legacy_name in legacy_env_names:
-        if legacy_name in os.environ or legacy_name in env_file_values:
-            return _env_bool(legacy_name, default, env_file_values)
     value = stored_values.get(stored_name)
-    if value is None:
-        for legacy_name in legacy_stored_names:
-            if legacy_name in stored_values:
-                value = stored_values[legacy_name]
-                break
     if value is None:
         return default
     if isinstance(value, bool):
@@ -211,13 +167,6 @@ def _normalize_web_search_provider(provider: str, api_key: str) -> str:
     if normalized == "tavily" and not api_key.strip():
         return "ddgs"
     return normalized or Settings.web_search_provider
-
-
-def _env_bool(name: str, default: bool, env_file_values: dict[str, str]) -> bool:
-    value = os.environ[name] if name in os.environ else env_file_values.get(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _load_env_file(env_file: str | Path | None) -> dict[str, str]:
@@ -274,23 +223,88 @@ def _merge_provider_config(
     configs: dict[str, dict[str, str]],
     provider: str,
     config: dict[str, str],
+    overwrite_keys: set[str] | None = None,
 ) -> dict[str, dict[str, str]]:
     normalized = provider.strip().lower()
     if not normalized:
         return configs
     merged = {key: dict(value) for key, value in configs.items()}
     existing = merged.get(normalized, {})
+    overwrite_keys = overwrite_keys or set()
     for key, value in config.items():
-        if value:
+        if value and (key not in existing or key in overwrite_keys):
             existing[key] = value
     if existing:
         merged[normalized] = existing
     return merged
 
 
+def _resolve_provider_credentials(
+    configs: dict[str, dict[str, str]],
+    credential_store,
+    *,
+    kind: str,
+) -> dict[str, dict[str, str]]:
+    resolved: dict[str, dict[str, str]] = {}
+    for provider, config in configs.items():
+        next_config = dict(config)
+        if not next_config.get("api_key"):
+            api_key = _resolve_configured_api_key(
+                provider,
+                next_config,
+                credential_store,
+                kind=kind,
+            )
+            if api_key:
+                next_config["api_key"] = api_key
+        resolved[provider] = next_config
+    return resolved
+
+
+def _resolve_configured_api_key(
+    provider: str,
+    config: dict[str, str],
+    credential_store,
+    *,
+    kind: str,
+) -> str:
+    if config.get("api_key_ref"):
+        api_key = credential_store.get(config["api_key_ref"])
+        if api_key:
+            return api_key
+    return credential_store.get(legacy_credential_ref(kind, provider))
+
+
+def _settings_with_credential_refs(
+    configs: dict[str, dict[str, str]],
+    credential_store,
+    *,
+    kind: str,
+    user_id: str,
+) -> dict[str, dict[str, str]]:
+    serialized: dict[str, dict[str, str]] = {}
+    for provider, config in configs.items():
+        next_config = {
+            key: value
+            for key, value in config.items()
+            if key not in {"api_key", "api_key_ref"}
+        }
+        api_key = config.get("api_key", "")
+        if api_key:
+            ref = config.get("api_key_ref")
+            if ref and not ref.startswith("user:"):
+                ref = credential_ref(kind, provider, user_id=user_id)
+            ref = ref or credential_ref(kind, provider, user_id=user_id)
+            credential_store.set(ref, api_key)
+            next_config["api_key_ref"] = ref
+        elif config.get("api_key_ref"):
+            next_config["api_key_ref"] = config["api_key_ref"]
+        serialized[provider] = next_config
+    return serialized
+
+
 def _load_provider_settings_file(env_file_values: dict[str, str]) -> dict[str, Any]:
-    raw_path = _env_value("SIFT_PROVIDER_SETTINGS_PATH", "", env_file_values)
-    path = Path(raw_path) if raw_path else provider_settings_path()
+    path = _resolved_provider_settings_path(env_file_values)
     if not path.exists():
         return {}
     try:
@@ -308,6 +322,11 @@ def _load_provider_settings_file(env_file_values: dict[str, str]) -> dict[str, A
         if isinstance(key, str) and isinstance(value, dict):
             values[key] = value
     return values
+
+
+def _resolved_provider_settings_path(env_file_values: dict[str, str]) -> Path:
+    raw_path = _env_value("SIFT_PROVIDER_SETTINGS_PATH", "", env_file_values)
+    return Path(raw_path) if raw_path else provider_settings_path()
 
 
 def _strip_optional_quotes(value: str) -> str:

@@ -58,6 +58,10 @@ struct MockSiftAPIClient: SiftAPIClient {
                     name: "DeepSeek",
                     description: "DeepSeek via OpenAI-compatible chat completions.",
                     adapter: "openai_compatible",
+                    apiMode: "chat_completions",
+                    protocolDriver: "ChatCompletionsDriver",
+                    hermesPluginPath: "plugins/model-providers/deepseek/__init__.py",
+                    exposureTier: "plannedStable",
                     defaultBaseURL: "https://api.deepseek.com/v1",
                     defaultModel: "deepseek-chat",
                     requiresApiKey: true,
@@ -68,14 +72,18 @@ struct MockSiftAPIClient: SiftAPIClient {
                 RuntimeProviderOptionDTO(
                     id: "anthropic",
                     name: "Anthropic",
-                    description: "Claude native API provider.",
-                    adapter: "not_implemented",
-                    defaultBaseURL: "",
-                    defaultModel: "",
+                    description: "Claude native Messages API provider.",
+                    adapter: "anthropic_messages",
+                    apiMode: "anthropic_messages",
+                    protocolDriver: "AnthropicMessagesDriver",
+                    hermesPluginPath: "plugins/model-providers/anthropic/__init__.py",
+                    exposureTier: "plannedStable",
+                    defaultBaseURL: "https://api.anthropic.com",
+                    defaultModel: "claude-haiku-4-5-20251001",
                     requiresApiKey: true,
-                    supportsModelListing: false,
-                    status: "comingSoon",
-                    isAdvanced: true
+                    supportsModelListing: true,
+                    status: "available",
+                    isAdvanced: false
                 )
             ]
         )

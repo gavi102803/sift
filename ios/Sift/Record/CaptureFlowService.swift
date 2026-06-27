@@ -23,7 +23,9 @@ struct CaptureFlowService {
             let draft = localStore.createDisambiguationDraft(rawCapture: trimmed)
             return .needsDisambiguation(draft, matches: matches)
         case .none:
-            return .newDraft(localStore.createDraft(rawCapture: trimmed))
+            let draft = localStore.createDraft(rawCapture: trimmed)
+            localStore.recordInitialCaptureQuestion(concept: draft, question: trimmed)
+            return .newDraft(draft)
         }
     }
 
@@ -37,6 +39,11 @@ struct CaptureFlowService {
                 CreateConceptRequest(rawCapture: draft.displayTitle, locale: draft.language)
             )
             let concept = try localStore.upsertConcept(from: dto)
+            localStore.recordInitialGenerationAnswer(
+                concept: concept,
+                question: draft.displayTitle,
+                answer: dto.oneLineExplanation
+            )
             if draft.id != concept.id {
                 localStore.deleteConcept(draft)
             }
@@ -44,6 +51,7 @@ struct CaptureFlowService {
         } catch {
             draft.captureStatus = CaptureStatus.generationFailed.rawValue
             draft.updatedAt = .now
+            localStore.recordInitialGenerationFailure(concept: draft, error: error)
             throw error
         }
     }

@@ -40,6 +40,10 @@ struct RuntimeProviderOptionDTO: Codable, Identifiable {
     var name: String
     var description: String
     var adapter: String
+    var apiMode: String? = nil
+    var protocolDriver: String? = nil
+    var hermesPluginPath: String? = nil
+    var exposureTier: String? = nil
     var defaultBaseURL: String
     var defaultModel: String
     var requiresApiKey: Bool

@@ -53,6 +53,13 @@ class RuntimeWebProvider(Protocol):
         ...
 
 
+class RuntimeExtractProvider(Protocol):
+    name: str
+
+    async def extract(self, urls: list[str]) -> list[RuntimeExtractedDocument]:
+        ...
+
+
 @dataclass(frozen=True)
 class RuntimeToolDefinition:
     name: str
@@ -95,8 +102,13 @@ class RuntimeToolRegistry:
         return [self._definitions[name] for name in sorted(self._definitions)]
 
 
-def build_runtime_tool_registry(web_provider: RuntimeWebProvider) -> RuntimeToolRegistry:
+def build_runtime_tool_registry(
+    web_provider: RuntimeWebProvider,
+    *,
+    extract_provider: RuntimeExtractProvider | None = None,
+) -> RuntimeToolRegistry:
     registry = RuntimeToolRegistry()
+    resolved_extract_provider = extract_provider or web_provider
 
     async def web_search(arguments: dict[str, Any]) -> list[RuntimeCitation]:
         query = arguments.get("query")
@@ -108,7 +120,7 @@ def build_runtime_tool_registry(web_provider: RuntimeWebProvider) -> RuntimeTool
         urls = arguments.get("urls")
         if not isinstance(urls, list) or not all(isinstance(url, str) for url in urls):
             raise SiftRuntimeError("tool_invalid_arguments", "web.extract requires URL strings.")
-        return await web_provider.extract(urls)
+        return await resolved_extract_provider.extract(urls)
 
     registry.register(
         RuntimeToolDefinition(

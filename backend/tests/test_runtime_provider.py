@@ -1,8 +1,11 @@
 import httpx
 import pytest
 
+from sift_backend.runtime.anthropic_messages_driver import AnthropicMessagesDriver
+from sift_backend.runtime.gemini_driver import GeminiDriver
 from sift_backend.runtime.providers import (
     AnthropicMessagesRuntimeProvider,
+    ChatCompletionsDriver,
     OpenAICompatibleRuntimeProvider,
     build_model_provider_registry,
     build_runtime_model_provider,
@@ -41,6 +44,7 @@ async def test_runtime_provider_posts_chat_completion_and_parses_response() -> N
         provider = OpenAICompatibleRuntimeProvider(
             base_url="https://runtime.test/v1",
             api_key="runtime-key",
+            provider_name="openai",
         )
         provider._request = _request_with_client(http, provider)  # type: ignore[method-assign]
 
@@ -56,10 +60,47 @@ async def test_runtime_provider_posts_chat_completion_and_parses_response() -> N
     assert captured["authorization"] == "Bearer runtime-key"
     assert captured["payload"]["model"] == "sift-model"
     assert captured["payload"]["response_format"] == {"type": "json_object"}
+    assert "temperature" not in captured["payload"]
     assert response.content == "ok"
     assert response.model == "runtime-model"
     assert response.input_tokens == 7
     assert response.output_tokens == 2
+
+
+@pytest.mark.asyncio
+async def test_custom_runtime_provider_prompt_validates_until_probe_cache_exists() -> None:
+    captured: dict = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json_payload(request)
+        return httpx.Response(
+            200,
+            json={"model": "local-model", "choices": [{"message": {"content": "{}"}}]},
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="https://runtime.test/v1") as http:
+        provider = OpenAICompatibleRuntimeProvider(
+            base_url="https://runtime.test/v1",
+            api_key="runtime-key",
+            provider_name="custom",
+        )
+        provider._request = _request_with_client(http, provider)  # type: ignore[method-assign]
+
+        await provider.complete(
+            RuntimeModelRequest(
+                model="local-model",
+                messages=(RuntimeMessage(role="user", content="Explain RAG"),),
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {"name": "answer", "schema": {"type": "object"}},
+                },
+            )
+        )
+
+    assert "response_format" not in captured["payload"]
+    assert captured["payload"]["messages"][-1]["role"] == "system"
+    assert "Return only valid JSON" in captured["payload"]["messages"][-1]["content"]
 
 
 @pytest.mark.asyncio
@@ -85,6 +126,110 @@ async def test_runtime_provider_maps_http_errors() -> None:
 
 
 @pytest.mark.asyncio
+async def test_deepseek_runtime_provider_preserves_json_object_response_format() -> None:
+    captured: dict = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json_payload(request)
+        return httpx.Response(
+            200,
+            json={"model": "deepseek-chat", "choices": [{"message": {"content": "{}"}}]},
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="https://runtime.test/v1") as http:
+        provider = OpenAICompatibleRuntimeProvider(
+            base_url="https://runtime.test/v1",
+            api_key="runtime-key",
+            provider_name="deepseek",
+        )
+        provider._request = _request_with_client(http, provider)  # type: ignore[method-assign]
+
+        await provider.complete(
+            RuntimeModelRequest(
+                model="deepseek-chat",
+                messages=(RuntimeMessage(role="user", content="Explain RAG"),),
+                response_format={"type": "json_object"},
+            )
+        )
+
+    assert captured["payload"]["response_format"] == {"type": "json_object"}
+    assert captured["payload"]["messages"] == [
+        {"role": "user", "content": "Explain RAG"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_deepseek_runtime_provider_downgrades_json_schema_to_json_object() -> None:
+    captured: dict = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json_payload(request)
+        return httpx.Response(
+            200,
+            json={"model": "deepseek-chat", "choices": [{"message": {"content": "{}"}}]},
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="https://runtime.test/v1") as http:
+        provider = OpenAICompatibleRuntimeProvider(
+            base_url="https://runtime.test/v1",
+            api_key="runtime-key",
+            provider_name="deepseek",
+        )
+        provider._request = _request_with_client(http, provider)  # type: ignore[method-assign]
+
+        await provider.complete(
+            RuntimeModelRequest(
+                model="deepseek-chat",
+                messages=(RuntimeMessage(role="user", content="Explain RAG"),),
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {"name": "answer", "schema": {"type": "object"}},
+                },
+            )
+        )
+
+    assert captured["payload"]["response_format"] == {"type": "json_object"}
+    assert captured["payload"]["messages"][0] == {"role": "user", "content": "Explain RAG"}
+    assert captured["payload"]["messages"][-1]["role"] == "system"
+    assert "must match this exact schema" in captured["payload"]["messages"][-1]["content"]
+    assert '"type": "object"' in captured["payload"]["messages"][-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_kimi_runtime_provider_omits_temperature_by_policy() -> None:
+    captured: dict = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json_payload(request)
+        return httpx.Response(
+            200,
+            json={"model": "kimi-k2", "choices": [{"message": {"content": "ok"}}]},
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="https://runtime.test/v1") as http:
+        provider = ChatCompletionsDriver(
+            base_url="https://runtime.test/v1",
+            api_key="runtime-key",
+            provider_name="kimi",
+        )
+        provider._request = _request_with_client(http, provider)  # type: ignore[method-assign]
+
+        await provider.complete(
+            RuntimeModelRequest(
+                model="kimi-k2",
+                messages=(RuntimeMessage(role="user", content="Explain RAG"),),
+                temperature=0.7,
+            )
+        )
+
+    assert "temperature" not in captured["payload"]
+    assert captured["payload"]["thinking"] == {"type": "enabled"}
+
+
+@pytest.mark.asyncio
 async def test_anthropic_messages_provider_posts_messages_and_parses_response() -> None:
     captured: dict = {}
 
@@ -104,7 +249,7 @@ async def test_anthropic_messages_provider_posts_messages_and_parses_response() 
 
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(transport=transport, base_url="https://runtime.test") as http:
-        provider = AnthropicMessagesRuntimeProvider(
+        provider = AnthropicMessagesDriver(
             base_url="https://runtime.test",
             api_key="anthropic-key",
         )
@@ -279,6 +424,18 @@ def test_model_provider_registry_creates_anthropic_messages_provider() -> None:
     assert provider.base_url == "https://api.anthropic.com"
 
 
+def test_model_provider_registry_creates_native_gemini_provider() -> None:
+    provider = build_runtime_model_provider(
+        "gemini",
+        base_url="",
+        api_key="gemini-key",
+    )
+
+    assert isinstance(provider, GeminiDriver)
+    assert provider.provider_name == "gemini"
+    assert provider.base_url == "https://generativelanguage.googleapis.com/v1beta"
+
+
 def test_model_provider_registry_lists_canonical_profiles() -> None:
     registry = build_model_provider_registry()
 
@@ -290,4 +447,4 @@ def test_model_provider_registry_lists_canonical_profiles() -> None:
     assert registry.profile("deepseek").status == "available"
     assert registry.profile("anthropic").status == "available"
     assert registry.profile("minimax").adapter == "anthropic_messages"
-    assert registry.profile("gemini").adapter == "openai_compatible"
+    assert registry.profile("gemini").adapter == "gemini"

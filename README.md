@@ -32,28 +32,22 @@ python3 -m venv .venv
 ./.venv/bin/python -m uvicorn sift_backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Optional provider-backed concept generation and follow-up turns, with no-key DuckDuckGo
-retrieval by default:
+Optional provider-backed concept generation and follow-up turns are configured from
+the iOS Profile screen, with no-key DuckDuckGo retrieval by default:
 
 ```bash
 cp backend/.env.example backend/.env
-# then edit backend/.env:
-SIFT_RUNTIME_PROVIDER=deepseek
-SIFT_RUNTIME_BASE_URL=https://api.deepseek.com/v1
-SIFT_RUNTIME_API_KEY=your-provider-key
-SIFT_RUNTIME_MODEL=deepseek-chat
-SIFT_RUNTIME_WEB_SEARCH_ENABLED=true
-SIFT_WEB_SEARCH_PROVIDER=ddgs
-SIFT_WEB_SEARCH_API_KEY=
 ```
 
-Process environment variables still override `backend/.env` for one-off runs.
+`.env` is now limited to local infrastructure settings such as environment, log level,
+and database URL. Runtime provider profiles, model choices, API keys, and web providers
+are stored in `.data/model-provider.json` by the Profile UI.
 
 If no provider key is configured, concept creation and follow-up turns use the mock model service.
 
 When web search is enabled, Sift retrieves source context before concept generation and
-follow-up answers. `ddgs` does not require a separate web search API key; `tavily` remains
-available when `SIFT_WEB_SEARCH_API_KEY` is configured.
+follow-up answers. `ddgs` does not require a separate web search API key; API-key
+web providers are configured from the Profile UI.
 
 Run checks:
 

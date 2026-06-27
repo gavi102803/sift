@@ -243,6 +243,21 @@ async def test_runtime_tool_registry_dispatches_web_tools() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_tool_registry_can_split_search_and_extract_providers() -> None:
+    search_provider = RecordingWebProvider()
+    extract_provider = RecordingWebProvider()
+    registry = build_runtime_tool_registry(search_provider, extract_provider=extract_provider)
+
+    await registry.dispatch("web.search", {"query": "agent runtime"})
+    await registry.dispatch("web.extract", {"urls": ["https://example.com/runtime"]})
+
+    assert search_provider.queries == ["agent runtime"]
+    assert search_provider.extracted_urls == []
+    assert extract_provider.queries == []
+    assert extract_provider.extracted_urls == [["https://example.com/runtime"]]
+
+
+@pytest.mark.asyncio
 async def test_runtime_tool_registry_rejects_unregistered_tools() -> None:
     registry = build_runtime_tool_registry(DisabledWebProvider())
 

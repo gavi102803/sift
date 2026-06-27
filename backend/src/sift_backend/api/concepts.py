@@ -16,6 +16,7 @@ from sift_backend.persistence.concept_store import PersistentConceptStore
 from sift_backend.persistence.database import create_session_factory
 from sift_backend.runtime.concept_runtime import LightweightHermesRuntime
 from sift_backend.runtime.providers import build_runtime_model_provider, resolve_runtime_model
+from sift_backend.runtime.research_stack import SiftReadabilityExtractProvider
 from sift_backend.runtime.tools import RuntimeWebProvider, build_web_provider_registry
 from sift_backend.schemas.concepts import (
     ConceptDTO,
@@ -58,6 +59,7 @@ def build_concept_service(
         model_provider=provider,
         model=resolve_runtime_model(resolved.runtime_provider, resolved.runtime_model),
         web_search_tool=_build_web_provider(resolved),
+        web_extract_tool=SiftReadabilityExtractProvider(),
         web_search_enabled=resolved.runtime_web_search_enabled,
     )
     return ConceptService(

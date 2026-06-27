@@ -5,8 +5,11 @@ import pytest
 from sift_backend.api.concepts import build_concept_service
 from sift_backend.concepts.service import InMemoryConceptStore
 from sift_backend.config import Settings
+from sift_backend.runtime.concept_runtime import LightweightHermesRuntime
 from sift_backend.runtime.providers import OpenAICompatibleRuntimeProvider
-from sift_backend.runtime.tools import TavilyWebProvider
+from sift_backend.runtime.research_stack import SiftReadabilityExtractProvider
+from sift_backend.runtime.tools import RuntimeCitation, RuntimeExtractedDocument, TavilyWebProvider
+from sift_backend.runtime.types import RuntimeModelRequest, RuntimeModelResponse
 from sift_backend.schemas.common import AnswerSourceType
 from sift_backend.schemas.concepts import ConceptTurnRequest, CreateConceptRequest
 
@@ -32,7 +35,11 @@ async def test_runtime_service_uses_provider_profile_tool_dispatch_and_web_retri
         messages = payload["messages"]
         assert any("Runtime retrieval results" in message["content"] for message in messages)
 
-        user_message = messages[-1]["content"]
+        user_message = next(
+            message["content"]
+            for message in reversed(messages)
+            if message["role"] == "user"
+        )
         if "Create a Sift concept card" in user_message:
             content = _initial_concept_payload()
         else:
@@ -61,8 +68,22 @@ async def test_runtime_service_uses_provider_profile_tool_dispatch_and_web_retri
             ]
         }
 
+    async def fake_readability_extract(
+        self: SiftReadabilityExtractProvider,
+        urls: list[str],
+    ) -> list[RuntimeExtractedDocument]:
+        assert urls == ["https://example.com/a2a"]
+        return [
+            RuntimeExtractedDocument(
+                url="https://example.com/a2a",
+                title="A2A Protocol",
+                content="A2A is verified extracted source text.",
+            )
+        ]
+
     monkeypatch.setattr(OpenAICompatibleRuntimeProvider, "_request", fake_model_request)
     monkeypatch.setattr(TavilyWebProvider, "_request", fake_tavily_request)
+    monkeypatch.setattr(SiftReadabilityExtractProvider, "extract", fake_readability_extract)
 
     service = build_concept_service(
         Settings(
@@ -94,12 +115,29 @@ async def test_runtime_service_uses_provider_profile_tool_dispatch_and_web_retri
         "How does A2A differ from MCP?",
     ]
     assert concept.answer_source is not None
-    assert concept.answer_source.source_type == AnswerSourceType.web_verified
+    assert concept.answer_source.source_type == AnswerSourceType.source_verified
     assert concept.answer_source.retrieval_used is True
     assert concept.answer_source.citations[0].url == "https://example.com/a2a"
-    assert turn.answer_source.source_type == AnswerSourceType.web_verified
+    assert turn.answer_source.source_type == AnswerSourceType.source_verified
     assert turn.answer_source.retrieval_used is True
     assert turn.answer_source.citations[0].title == "A2A Protocol"
+
+
+@pytest.mark.asyncio
+async def test_runtime_search_only_results_are_not_promoted_to_verified_sources() -> None:
+    runtime = LightweightHermesRuntime(
+        model_provider=PayloadModelProvider(_initial_concept_payload()),
+        model="test-model",
+        web_search_tool=SearchOnlyProvider(),
+        web_extract_tool=FailingExtractProvider(),
+        web_search_enabled=True,
+    )
+
+    result = await runtime.generate_initial_concept("What is A2A protocol?", "en")
+
+    assert result.answer_source.source_type == AnswerSourceType.search_discovered
+    assert result.answer_source.retrieval_used is True
+    assert result.answer_source.citations[0].url == "https://example.com/a2a"
 
 
 def _initial_concept_payload() -> str:
@@ -170,3 +208,50 @@ def _turn_payload() -> str:
             },
         }
     )
+
+
+class PayloadModelProvider:
+    provider_name = "test"
+
+    def __init__(self, payload: str) -> None:
+        self.payload = payload
+
+    async def complete(self, request: RuntimeModelRequest) -> RuntimeModelResponse:
+        return RuntimeModelResponse(
+            content=self.payload,
+            provider=self.provider_name,
+            model=request.model,
+        )
+
+    async def stream(self, request: RuntimeModelRequest):
+        raise NotImplementedError
+
+    async def list_models(self) -> list[str]:
+        return ["test-model"]
+
+
+class SearchOnlyProvider:
+    name = "search-only"
+    display_name = "Search Only"
+
+    def is_available(self) -> bool:
+        return True
+
+    async def search(self, query: str) -> list[RuntimeCitation]:
+        return [
+            RuntimeCitation(
+                title="A2A Protocol",
+                url="https://example.com/a2a",
+                snippet="Search snippet only.",
+            )
+        ]
+
+    async def extract(self, urls: list[str]) -> list[RuntimeExtractedDocument]:
+        return []
+
+
+class FailingExtractProvider:
+    name = "failing-extract"
+
+    async def extract(self, urls: list[str]) -> list[RuntimeExtractedDocument]:
+        raise RuntimeError("extract failed")

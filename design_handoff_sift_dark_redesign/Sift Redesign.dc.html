@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/xai-design-system-3a53defe-ec2f-4ce9-9457-fac32d25cfa0/styles.css">
+<script src="_ds/xai-design-system-3a53defe-ec2f-4ce9-9457-fac32d25cfa0/_ds_bundle.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+  @keyframes siftblink { 0%,49%{opacity:1} 50%,100%{opacity:0} }
+  .gm { font-family:'Geist Mono',ui-monospace,monospace; }
+</style>
+</helmet>
+
+<div style="--accent: {{ accent }}; position:relative; width:3580px; height:1060px; font-family:'Geist',system-ui,-apple-system,sans-serif;">
+
+  <!-- ░░░░ 1 · RECORD ░░░░ -->
+  <div style="position:absolute; left:0px; top:0px; width:413px;">
+    <div data-drags-parent="1" style="display:flex; align-items:baseline; gap:10px; margin-bottom:14px;">
+      <span class="gm" style="font-size:12px; color:#5b5e63;">01 · RECORD</span>
+      <span style="font-size:12px; color:#74787e;">Capture</span>
+    </div>
+    <div style="width:413px; padding:9px; background:#040405; border-radius:54px; box-shadow:0 40px 80px -30px rgba(0,0,0,.7);">
+      <div style="position:relative; width:395px; height:852px; background:#0a0b0d; border-radius:46px; overflow:hidden;">
+        <div style="height:54px; display:flex; align-items:flex-end; justify-content:space-between; padding:0 30px 9px; color:#fff;">
+          <span style="font-size:15px; font-weight:600; letter-spacing:-.2px;">9:41</span>
+          <span style="display:flex; align-items:center; gap:7px;">
+            <svg width="18" height="12" viewBox="0 0 18 12" fill="#fff"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="4.5" width="3" height="7.5" rx="1"/><rect x="10" y="2" width="3" height="10" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1" opacity=".4"/></svg>
+            <svg width="17" height="12" viewBox="0 0 17 12"><path d="M8.5 11.5 0.6 3.3a11 11 0 0 1 15.8 0L8.5 11.5Z" fill="#fff"/></svg>
+            <svg width="26" height="13" viewBox="0 0 26 13" fill="none"><rect x="0.5" y="0.5" width="21" height="12" rx="3.2" stroke="#fff" opacity=".4"/><rect x="2" y="2" width="17" height="9" rx="1.8" fill="#fff"/><rect x="23" y="4.5" width="2" height="4" rx="1" fill="#fff" opacity=".5"/></svg>
+          </span>
+        </div>
+        <div style="position:absolute; top:13px; left:50%; transform:translateX(-50%); width:88px; height:27px; background:#000; border-radius:16px;"></div>
+
+        <div style="position:absolute; top:54px; left:0; right:0; bottom:102px; display:flex; flex-direction:column; padding:0 24px;">
+          <div style="display:flex; align-items:center; gap:9px; padding:12px 0 4px;">
+            <svg viewBox="0 0 100 100" width="25" height="25" fill="none"><rect x="39.5" y="74.5" width="17" height="17" rx="4.8" fill="var(--accent,#3D7FFF)"/><circle cx="31" cy="10" r="1.6" fill="var(--accent,#3D7FFF)"/><circle cx="49" cy="8" r="2.1" fill="var(--accent,#3D7FFF)"/><circle cx="63" cy="15" r="1.6" fill="#4a4d52"/><rect x="69.75" y="20.75" width="4.5" height="4.5" rx="1.4" fill="var(--accent,#3D7FFF)" transform="rotate(50 72 23)"/><circle cx="27" cy="23" r="2.4" fill="#4a4d52"/><circle cx="40" cy="25" r="2.65" fill="#4a4d52"/><circle cx="55" cy="30" r="1.9" fill="var(--accent,#3D7FFF)"/><circle cx="66" cy="38" r="1.6" fill="#4a4d52"/><rect x="41.4" y="37.4" width="7.2" height="7.2" rx="1.6" fill="#4a4d52" transform="rotate(31 45 41)"/><rect x="28.35" y="46.35" width="5.3" height="5.3" rx="1.5" fill="var(--accent,#3D7FFF)" transform="rotate(63 31 49)"/><circle cx="39" cy="58" r="1.75" fill="#4a4d52"/><circle cx="51" cy="61" r="2.1" fill="var(--accent,#3D7FFF)"/><circle cx="61" cy="66" r="1.8" fill="#4a4d52"/><circle cx="57" cy="73" r="1.55" fill="var(--accent,#3D7FFF)"/><circle cx="48" cy="75" r="1.4" fill="#4a4d52"/></svg>
+            <span style="font-size:20px; font-weight:600; color:#f3f4f5; letter-spacing:-.3px;">Sift</span>
+          </div>
+          <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:26px;">
+            <svg viewBox="0 0 100 100" width="98" height="98" fill="none"><rect x="39.5" y="74.5" width="17" height="17" rx="4.8" fill="var(--accent,#3D7FFF)"/><circle cx="31" cy="10" r="1.6" fill="var(--accent,#3D7FFF)"/><circle cx="49" cy="8" r="2.1" fill="var(--accent,#3D7FFF)"/><circle cx="63" cy="15" r="1.6" fill="#4a4d52"/><rect x="69.75" y="20.75" width="4.5" height="4.5" rx="1.4" fill="var(--accent,#3D7FFF)" transform="rotate(50 72 23)"/><circle cx="27" cy="23" r="2.4" fill="#4a4d52"/><circle cx="40" cy="25" r="2.65" fill="#4a4d52"/><circle cx="55" cy="30" r="1.9" fill="var(--accent,#3D7FFF)"/><circle cx="66" cy="38" r="1.6" fill="#4a4d52"/><rect x="41.4" y="37.4" width="7.2" height="7.2" rx="1.6" fill="#4a4d52" transform="rotate(31 45 41)"/><rect x="28.35" y="46.35" width="5.3" height="5.3" rx="1.5" fill="var(--accent,#3D7FFF)" transform="rotate(63 31 49)"/><circle cx="39" cy="58" r="1.75" fill="#4a4d52"/><circle cx="51" cy="61" r="2.1" fill="var(--accent,#3D7FFF)"/><circle cx="61" cy="66" r="1.8" fill="#4a4d52"/><circle cx="57" cy="73" r="1.55" fill="var(--accent,#3D7FFF)"/><circle cx="48" cy="75" r="1.4" fill="#4a4d52"/></svg>
+            <div>
+              <div style="font-size:26px; line-height:33px; color:#f3f4f5; letter-spacing:-.5px; font-weight:600;">What new concept<br>did you hear?</div>
+              <div style="font-size:15px; line-height:23px; color:#74787e; margin-top:14px;">Capture it now. Deepen it later.</div>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px; padding:8px 8px 8px 16px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.09); border-radius:18px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#74787e" stroke-width="1.7"><path d="M12 5v14M5 12h14"/></svg>
+            <span style="flex:1; font-size:15px; color:#5e6166;">Capture a concept…</span>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9a9da2" stroke-width="1.6"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+            <div style="width:40px; height:40px; border-radius:12px; background:var(--accent,#3D7FFF); display:flex; align-items:center; justify-content:center;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4"><path d="M12 19V5M6 11l6-6 6 6"/></svg></div>
+          </div>
+        </div>
+
+        <div style="position:absolute; bottom:18px; left:16px; right:16px; height:66px; background:rgba(20,22,26,.72); backdrop-filter:blur(20px) saturate(150%); -webkit-backdrop-filter:blur(20px) saturate(150%); border:1px solid rgba(255,255,255,.08); border-radius:26px; box-shadow:0 10px 34px -12px rgba(0,0,0,.7); display:flex; align-items:center; padding:6px; gap:4px;">
+          <div style="flex:1; height:54px; border-radius:20px; background:rgba(255,255,255,.07); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px;">
+            <div style="width:30px; height:30px; border-radius:10px; background:var(--accent,#3D7FFF); display:flex; align-items:center; justify-content:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6"><path d="M12 5v14M5 12h14"/></svg></div>
+            <span style="font-size:10px; font-weight:500; color:#f3f4f5;">Capture</span>
+          </div>
+          <div style="flex:1; height:54px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#71757c" stroke-width="1.7"><path d="M4 19V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14M4 19a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2M4 19h16M9 7h6"/></svg>
+            <span style="font-size:10px; color:#71757c;">Library</span>
+          </div>
+          <div style="flex:1; height:54px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#71757c" stroke-width="1.7"><circle cx="12" cy="8" r="3.6"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg>
+            <span style="font-size:10px; color:#71757c;">Profile</span>
+          </div>
+        </div>
+        <div style="position:absolute; bottom:7px; left:50%; transform:translateX(-50%); width:128px; height:5px; border-radius:9999px; background:#fff; opacity:.5;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░░░ 2 · LIBRARY ░░░░ -->
+  <div style="position:absolute; left:523px; top:0px; width:413px;">
+    <div data-drags-parent="1" style="display:flex; align-items:baseline; gap:10px; margin-bottom:14px;">
+      <span class="gm" style="font-size:12px; color:#5b5e63;">02 · LIBRARY</span>
+      <span style="font-size:12px; color:#74787e;">Concepts</span>
+    </div>
+    <div style="width:413px; padding:9px; background:#040405; border-radius:54px; box-shadow:0 40px 80px -30px rgba(0,0,0,.7);">
+      <div style="position:relative; width:395px; height:852px; background:#0a0b0d; border-radius:46px; overflow:hidden;">
+        <div style="height:54px; display:flex; align-items:flex-end; justify-content:space-between; padding:0 30px 9px; color:#fff;">
+          <span style="font-size:15px; font-weight:600; letter-spacing:-.2px;">9:41</span>
+          <span style="display:flex; align-items:center; gap:7px;">
+            <svg width="18" height="12" viewBox="0 0 18 12" fill="#fff"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="4.5" width="3" height="7.5" rx="1"/><rect x="10" y="2" width="3" height="10" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1" opacity=".4"/></svg>
+            <svg width="17" height="12" viewBox="0 0 17 12"><path d="M8.5 11.5 0.6 3.3a11 11 0 0 1 15.8 0L8.5 11.5Z" fill="#fff"/></svg>
+            <svg width="26" height="13" viewBox="0 0 26 13" fill="none"><rect x="0.5" y="0.5" width="21" height="12" rx="3.2" stroke="#fff" opacity=".4"/><rect x="2" y="2" width="17" height="9" rx="1.8" fill="#fff"/><rect x="23" y="4.5" width="2" height="4" rx="1" fill="#fff" opacity=".5"/></svg>
+          </span>
+        </div>
+        <div style="position:absolute; top:13px; left:50%; transform:translateX(-50%); width:88px; height:27px; background:#000; border-radius:16px;"></div>
+
+        <div style="position:absolute; top:54px; left:0; right:0; bottom:84px; overflow:hidden; padding:0 20px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 0 16px;">
+            <div style="font-size:30px; font-weight:700; color:#f3f4f5; letter-spacing:-.8px;">Library</div>
+            <div style="width:38px; height:38px; border-radius:12px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.08); display:flex; align-items:center; justify-content:center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c7cace" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg></div>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px; padding:11px 14px; background:rgba(255,255,255,.045); border:1px solid rgba(255,255,255,.07); border-radius:12px; margin-bottom:18px;">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#71757c" stroke-width="1.7"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg>
+            <span style="font-size:14px; color:#5e6166;">Search concepts &amp; tags</span>
+          </div>
+          <div style="display:flex; gap:8px; margin-bottom:18px;">
+            <span style="font-size:13px; font-weight:500; color:#fff; background:var(--accent,#3D7FFF); padding:6px 14px; border-radius:9px;">All</span>
+            <span style="font-size:13px; color:#abafb6; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.07); padding:6px 14px; border-radius:9px;">Workflow</span>
+            <span style="font-size:13px; color:#abafb6; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.07); padding:6px 14px; border-radius:9px;">Research</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px; padding-left:2px;">
+            <span class="gm" style="font-size:11px; letter-spacing:.6px; color:#71757c;">ALL CONCEPTS</span>
+            <span style="font-size:11px; color:#4f5258;">30</span>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:10px;">
+            <div style="display:flex; gap:13px; padding:14px; background:#16181c; border:1px solid rgba(255,255,255,.07); border-radius:16px; box-shadow:0 1px 2px -1px rgba(0,0,0,.5),0 6px 16px -10px rgba(0,0,0,.5);">
+              <div style="width:38px; height:38px; flex:none; border-radius:11px; background:rgba(61,127,255,.13); border:1px solid rgba(61,127,255,.22); display:flex; align-items:center; justify-content:center;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--accent,#3D7FFF)" stroke-width="1.7"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg></div>
+              <div style="flex:1; min-width:0;">
+                <div style="display:flex; align-items:baseline; justify-content:space-between; gap:8px;"><span style="font-size:15px; font-weight:600; color:#f3f4f5;">Semantic Cache</span><span class="gm" style="font-size:10px; color:#4f5258;">NOW</span></div>
+                <div style="font-size:13px; line-height:18px; color:#8b8f96; margin-top:3px;">A caching strategy that stores and retrieves responses by meaning.</div>
+                <div style="display:flex; gap:6px; margin-top:10px;"><span style="font-size:11px; color:#abafb6; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.07); padding:3px 9px; border-radius:7px;">AI</span><span style="font-size:11px; color:#abafb6; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.07); padding:3px 9px; border-radius:7px;">caching</span><span style="font-size:11px; color:#abafb6; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.07); padding:3px 9px; border-radius:7px;">LLM</span></div>
+              </div>
+            </div>
+            <div style="display:flex; gap:13px; padding:14px; background:#16181c; border:1px solid rgba(255,255,255,.07); border-radius:16px; box-shadow:0 1px 2px -1px rgba(0,0,0,.5),0 6px 16px -10px rgba(0,0,0,.5);">
+              <div style="width:38px; height:38px; flex:none; border-radius:11px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.08); display:flex; align-items:center; justify-content:center;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#9a9da2" stroke-width="1.7"><path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></svg></div>
+              <div style="flex:1; min-width:0;">
+                <div style="display:flex; align-items:baseline; justify-content:space-between; gap:8px;"><span style="font-size:15px; font-weight:600; color:#f3f4f5;">Vector Database Indexing</span><span class="gm" style="font-size:10px; color:#4f5258;">NOW</span></div>
+                <div style="font-size:13px; line-height:18px; color:#8b8f96; margin-top:3px;">Organizing embeddings to enable fast nearest-neighbor search.</div>
+                <div style="display:flex; gap:6px; margin-top:10px;"><span style="font-size:11px; color:#abafb6; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.07); padding:3px 9px; border-radius:7px;">Database</span><span style="font-size:11px; color:#abafb6; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.07); padding:3px 9px; border-radius:7px;">Retrieval</span></div>
+              </div>
+            </div>
+            <div style="display:flex; gap:13px; padding:14px; background:#16181c; border:1px solid rgba(255,255,255,.07); border-radius:16px; box-shadow:0 1px 2px -1px rgba(0,0,0,.5),0 6px 16px -10px rgba(0,0,0,.5);">
+              <div style="width:38px; height:38px; flex:none; border-radius:11px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.08); display:flex; align-items:center; justify-content:center;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#9a9da2" stroke-width="1.7"><path d="m17 3 4 4-4 4M21 7H7M7 21l-4-4 4-4M3 17h14"/></svg></div>
+              <div style="flex:1; min-width:0;">
+                <div style="display:flex; align-items:baseline; justify-content:space-between; gap:8px;"><span style="font-size:15px; font-weight:600; color:#f3f4f5;">Reranking</span><span class="gm" style="font-size:10px; color:#4f5258;">2D</span></div>
+                <div style="font-size:13px; line-height:18px; color:#8b8f96; margin-top:3px;">Re-scoring retrieved passages with a cross-encoder before generation.</div>
+                <div style="display:flex; gap:6px; margin-top:10px;"><span style="font-size:11px; color:#abafb6; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.07); padding:3px 9px; border-radius:7px;">Search</span><span style="font-size:11px; color:#abafb6; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.07); padding:3px 9px; border-radius:7px;">RAG</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="position:absolute; bottom:18px; left:16px; right:16px; height:66px; background:rgba(20,22,26,.72); backdrop-filter:blur(20px) saturate(150%); -webkit-backdrop-filter:blur(20px) saturate(150%); border:1px solid rgba(255,255,255,.08); border-radius:26px; box-shadow:0 10px 34px -12px rgba(0,0,0,.7); display:flex; align-items:center; padding:6px; gap:4px;">
+          <div style="flex:1; height:54px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px;">
+            <div style="width:30px; height:30px; border-radius:10px; background:var(--accent,#3D7FFF); display:flex; align-items:center; justify-content:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6"><path d="M12 5v14M5 12h14"/></svg></div>
+            <span style="font-size:10px; color:#71757c;">Capture</span>
+          </div>
+          <div style="flex:1; height:54px; border-radius:20px; background:rgba(255,255,255,.07); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#f3f4f5" stroke-width="1.8"><path d="M4 19V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14M4 19a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2M4 19h16M9 7h6"/></svg>
+            <span style="font-size:10px; font-weight:500; color:#f3f4f5;">Library</span>
+          </div>
+          <div style="flex:1; height:54px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#71757c" stroke-width="1.7"><circle cx="12" cy="8" r="3.6"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg>
+            <span style="font-size:10px; color:#71757c;">Profile</span>
+          </div>
+        </div>
+        <div style="position:absolute; bottom:7px; left:50%; transform:translateX(-50%); width:128px; height:5px; border-radius:9999px; background:#fff; opacity:.5;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░░░ 3 · CONCEPT · CHAT ░░░░ -->
+  <div style="position:absolute; left:1046px; top:0px; width:413px;">
+    <div data-drags-parent="1" style="display:flex; align-items:baseline; gap:10px; margin-bottom:14px;">
+      <span class="gm" style="font-size:12px; color:#5b5e63;">03 · CONCEPT · CHAT</span>
+      <span style="font-size:12px; color:#74787e;">One conversation per card</span>
+    </div>
+    <div style="width:413px; padding:9px; background:#040405; border-radius:54px; box-shadow:0 40px 80px -30px rgba(0,0,0,.7);">
+      <div style="position:relative; width:395px; height:852px; background:#0a0b0d; border-radius:46px; overflow:hidden;">
+        <div style="height:54px; display:flex; align-items:flex-end; justify-content:space-between; padding:0 30px 9px; color:#fff;">
+          <span style="font-size:15px; font-weight:600; letter-spacing:-.2px;">9:41</span>
+          <span style="display:flex; align-items:center; gap:7px;">
+            <svg width="18" height="12" viewBox="0 0 18 12" fill="#fff"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="4.5" width="3" height="7.5" rx="1"/><rect x="10" y="2" width="3" height="10" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1" opacity=".4"/></svg>
+            <svg width="17" height="12" viewBox="0 0 17 12"><path d="M8.5 11.5 0.6 3.3a11 11 0 0 1 15.8 0L8.5 11.5Z" fill="#fff"/></svg>
+            <svg width="26" height="13" viewBox="0 0 26 13" fill="none"><rect x="0.5" y="0.5" width="21" height="12" rx="3.2" stroke="#fff" opacity=".4"/><rect x="2" y="2" width="17" height="9" rx="1.8" fill="#fff"/><rect x="23" y="4.5" width="2" height="4" rx="1" fill="#fff" opacity=".5"/></svg>
+          </span>
+        </div>
+        <div style="position:absolute; top:13px; left:50%; transform:translateX(-50%); width:88px; height:27px; background:#000; border-radius:16px;"></div>
+
+        <div style="position:absolute; top:54px; left:0; right:0; height:50px; display:flex; align-items:center; justify-content:space-between; padding:0 16px; background:#0a0b0d; z-index:3;">
+          <div style="width:36px; height:36px; border-radius:11px; background:rgba(255,255,255,.05); display:flex; align-items:center; justify-content:center;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#c7cace" stroke-width="1.8"><path d="m15 5-7 7 7 7"/></svg></div>
+          <span style="font-size:16px; font-weight:600; color:#f3f4f5; letter-spacing:-.3px;">Semantic Cache</span>
+          <div style="width:36px; height:36px; border-radius:11px; background:rgba(255,255,255,.05); display:flex; align-items:center; justify-content:center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c7cace" stroke-width="1.8"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></div>
+        </div>
+
+        <div style="position:absolute; top:104px; left:0; right:0; bottom:78px; overflow:hidden; padding:6px 18px 0;">
+          <div style="display:inline-flex; align-items:center; gap:8px; padding:7px 12px 7px 9px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.08); border-radius:12px; margin-bottom:24px;">
+            <svg viewBox="0 0 100 100" width="15" height="15" fill="none"><rect x="39.5" y="74.5" width="17" height="17" rx="4.8" fill="var(--accent,#3D7FFF)"/><circle cx="40" cy="25" r="2.65" fill="#6f7279"/><rect x="41.4" y="37.4" width="7.2" height="7.2" rx="1.6" fill="#6f7279" transform="rotate(31 45 41)"/><rect x="28.35" y="46.35" width="5.3" height="5.3" rx="1.5" fill="var(--accent,#3D7FFF)" transform="rotate(63 31 49)"/><circle cx="51" cy="61" r="2.1" fill="var(--accent,#3D7FFF)"/><circle cx="55" cy="30" r="1.9" fill="var(--accent,#3D7FFF)"/></svg>
+            <span style="font-size:13px; font-weight:500; color:#dadbdf;">deepseek · sift-explain</span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#74787e" stroke-width="2.4"><path d="m6 9 6 6 6-6"/></svg>
+          </div>
+
+          <div style="display:flex; justify-content:flex-end; margin-bottom:28px;">
+            <div style="max-width:80%; font-size:15px; line-height:22px; color:#f3f4f5; background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.05); border-radius:16px; padding:11px 15px;">How is it different from an exact-match cache?</div>
+          </div>
+
+          <div>
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px; padding-left:2px;">
+              <svg viewBox="0 0 100 100" width="18" height="18" fill="none"><rect x="39.5" y="74.5" width="17" height="17" rx="4.8" fill="var(--accent,#3D7FFF)"/><circle cx="49" cy="8" r="2.1" fill="var(--accent,#3D7FFF)"/><circle cx="40" cy="25" r="2.65" fill="#6f7279"/><rect x="41.4" y="37.4" width="7.2" height="7.2" rx="1.6" fill="#6f7279" transform="rotate(31 45 41)"/><rect x="28.35" y="46.35" width="5.3" height="5.3" rx="1.5" fill="var(--accent,#3D7FFF)" transform="rotate(63 31 49)"/><circle cx="51" cy="61" r="2.1" fill="var(--accent,#3D7FFF)"/><circle cx="55" cy="30" r="1.9" fill="var(--accent,#3D7FFF)"/></svg>
+              <span style="font-size:13px; font-weight:600; color:#dadbdf;">Sift</span>
+              <span style="color:#4f5258;">·</span>
+              <span class="gm" style="font-size:11px; color:#71757c;">deepseek-v4-flash</span>
+            </div>
+            <div style="font-size:15px; line-height:25px; color:#d4d6da;">An exact-match cache only reuses an answer when the new request is a byte-for-byte match — so <span style="color:#abafb6;">"capital of France?"</span> and <span style="color:#abafb6;">"France's capital?"</span> miss and trigger a fresh call. A semantic cache embeds the query and reuses a stored answer when the <span style="color:var(--accent,#3D7FFF);">meaning</span> is close enough, measured by vector similarity<span style="display:inline-block; width:8px; height:17px; background:var(--accent,#3D7FFF); border-radius:2px; vertical-align:-3px; margin-left:3px; animation:siftblink 1s steps(1) infinite;"></span></div>
+            <div style="display:inline-flex; align-items:center; gap:7px; margin-top:16px; padding:6px 12px; background:rgba(61,127,255,.12); border:1px solid rgba(61,127,255,.2); border-radius:10px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent,#3D7FFF)" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg>
+              <span style="font-size:12px; font-weight:500; color:#9cc0ff;">Saved to note</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="position:absolute; bottom:94px; left:0; right:0; padding:8px 16px; background:linear-gradient(to top, #0a0b0d 64%, transparent);">
+          <div style="display:flex; align-items:center; gap:10px; padding:7px 7px 7px 15px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.09); border-radius:18px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#74787e" stroke-width="1.7"><path d="M12 5v14M5 12h14"/></svg>
+            <span style="flex:1; font-size:15px; color:#5e6166;">Reply to Sift…</span>
+            <div style="width:38px; height:38px; border-radius:12px; background:var(--accent,#3D7FFF); display:flex; align-items:center; justify-content:center;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6"><path d="M12 19V5M6 11l6-6 6 6"/></svg></div>
+          </div>
+        </div>
+
+        <div style="position:absolute; bottom:18px; left:16px; right:16px; height:66px; background:rgba(20,22,26,.78); backdrop-filter:blur(20px) saturate(150%); -webkit-backdrop-filter:blur(20px) saturate(150%); border:1px solid rgba(255,255,255,.08); border-radius:26px; display:flex; align-items:center; padding:6px; gap:4px;">
+          <div style="flex:1; height:54px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px;">
+            <div style="width:30px; height:30px; border-radius:10px; background:var(--accent,#3D7FFF); display:flex; align-items:center; justify-content:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6"><path d="M12 5v14M5 12h14"/></svg></div>
+            <span style="font-size:10px; color:#71757c;">Capture</span>
+          </div>
+          <div style="flex:1; height:54px; border-radius:20px; background:rgba(255,255,255,.07); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#f3f4f5" stroke-width="1.8"><path d="M4 19V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14M4 19a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2M4 19h16M9 7h6"/></svg>
+            <span style="font-size:10px; font-weight:500; color:#f3f4f5;">Library</span>
+          </div>
+          <div style="flex:1; height:54px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#71757c" stroke-width="1.7"><circle cx="12" cy="8" r="3.6"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg>
+            <span style="font-size:10px; color:#71757c;">Profile</span>
+          </div>
+        </div>
+        <div style="position:absolute; bottom:7px; left:50%; transform:translateX(-50%); width:128px; height:5px; border-radius:9999px; background:#fff; opacity:.5;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░░░ 4 · CONCEPT · NOTE ░░░░ -->
+  <div style="position:absolute; left:1569px; top:0px; width:413px;">
+    <div data-drags-parent="1" style="display:flex; align-items:baseline; gap:10px; margin-bottom:14px;">
+      <span class="gm" style="font-size:12px; color:#5b5e63;">04 · CONCEPT · NOTE</span>
+      <span style="font-size:12px; color:#74787e;">Note &amp; organization</span>
+    </div>
+    <div style="width:413px; padding:9px; background:#040405; border-radius:54px; box-shadow:0 40px 80px -30px rgba(0,0,0,.7);">
+      <div style="position:relative; width:395px; height:852px; background:#0a0b0d; border-radius:46px; overflow:hidden;">
+        <div style="height:54px; display:flex; align-items:flex-end; justify-content:space-between; padding:0 30px 9px; color:#fff;">
+          <span style="font-size:15px; font-weight:600; letter-spacing:-.2px;">9:41</span>
+          <span style="display:flex; align-items:center; gap:7px;">
+            <svg width="18" height="12" viewBox="0 0 18 12" fill="#fff"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="4.5" width="3" height="7.5" rx="1"/><rect x="10" y="2" width="3" height="10" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1" opacity=".4"/></svg>
+            <svg width="17" height="12" viewBox="0 0 17 12"><path d="M8.5 11.5 0.6 3.3a11 11 0 0 1 15.8 0L8.5 11.5Z" fill="#fff"/></svg>
+            <svg width="26" height="13" viewBox="0 0 26 13" fill="none"><rect x="0.5" y="0.5" width="21" height="12" rx="3.2" stroke="#fff" opacity=".4"/><rect x="2" y="2" width="17" height="9" rx="1.8" fill="#fff"/><rect x="23" y="4.5" width="2" height="4" rx="1" fill="#fff" opacity=".5"/></svg>
+          </span>
+        </div>
+        <div style="position:absolute; top:13px; left:50%; transform:translateX(-50%); width:88px; height:27px; background:#000; border-radius:16px;"></div>
+
+        <div style="position:absolute; top:54px; left:0; right:0; height:50px; display:flex; align-items:center; justify-content:space-between; padding:0 16px; background:#0a0b0d; z-index:3;">
+          <div style="width:36px; height:36px; border-radius:11px; background:rgba(255,255,255,.05); display:flex; align-items:center; justify-content:center;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#c7cace" stroke-width="1.8"><path d="m15 5-7 7 7 7"/></svg></div>
+          <div style="display:flex; gap:8px;">
+            <div style="width:36px; height:36px; border-radius:11px; background:rgba(255,255,255,.05); display:flex; align-items:center; justify-content:center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c7cace" stroke-width="1.7"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13"/></svg></div>
+            <div style="width:36px; height:36px; border-radius:11px; background:rgba(255,255,255,.05); display:flex; align-items:center; justify-content:center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="#c7cace"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></div>
+          </div>
+        </div>
+
+        <div style="position:absolute; top:104px; left:0; right:0; bottom:78px; overflow:hidden; padding:4px 20px 0;">
+          <div style="width:48px; height:48px; border-radius:14px; background:rgba(61,127,255,.13); border:1px solid rgba(61,127,255,.22); display:flex; align-items:center; justify-content:center; margin-bottom:14px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent,#3D7FFF)" stroke-width="1.7"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg></div>
+          <div style="font-size:27px; font-weight:700; color:#f3f4f5; letter-spacing:-.6px; margin-bottom:18px;">Semantic Cache</div>
+
+          <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:18px;">
+            <div style="display:flex; align-items:center; gap:12px;">
+              <span style="display:flex; align-items:center; gap:7px; width:88px; color:#74787e; font-size:13px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#74787e" stroke-width="1.8"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Maturity</span>
+              <span style="font-size:13px; color:#9cc0ff; background:rgba(61,127,255,.12); border:1px solid rgba(61,127,255,.2); padding:3px 10px; border-radius:8px;">Growing</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:12px;">
+              <span style="display:flex; align-items:center; gap:7px; width:88px; color:#74787e; font-size:13px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#74787e" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>Status</span>
+              <span style="font-size:13px; color:#abafb6; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.08); padding:3px 10px; border-radius:8px;">Ready</span>
+            </div>
+            <div style="display:flex; align-items:flex-start; gap:12px;">
+              <span style="display:flex; align-items:center; gap:7px; width:88px; color:#74787e; font-size:13px; padding-top:3px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#74787e" stroke-width="1.7"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>Topics</span>
+              <span style="display:flex; flex-wrap:wrap; gap:6px;"><span style="font-size:13px; color:#abafb6; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.08); padding:3px 10px; border-radius:8px;">Artificial Intelligence</span><span style="font-size:13px; color:#abafb6; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.08); padding:3px 10px; border-radius:8px;">Computer Science</span></span>
+            </div>
+            <div style="display:flex; align-items:flex-start; gap:12px;">
+              <span style="display:flex; align-items:center; gap:7px; width:88px; color:#74787e; font-size:13px; padding-top:3px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#74787e" stroke-width="1.7"><path d="M12 2 2 12l8 8 10-10V4a2 2 0 0 0-2-2Z"/></svg>Tags</span>
+              <span style="display:flex; flex-wrap:wrap; gap:6px;"><span style="font-size:13px; color:#abafb6; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.08); padding:3px 10px; border-radius:8px;">AI</span><span style="font-size:13px; color:#abafb6; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.08); padding:3px 10px; border-radius:8px;">caching</span><span style="font-size:13px; color:#abafb6; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.08); padding:3px 10px; border-radius:8px;">RAG</span></span>
+            </div>
+          </div>
+
+          <div style="display:flex; gap:11px; padding:14px; background:#16181c; border:1px solid rgba(255,255,255,.07); border-radius:14px; margin-bottom:20px; box-shadow:0 1px 2px -1px rgba(0,0,0,.5),0 6px 16px -10px rgba(0,0,0,.5);">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent,#3D7FFF)" stroke-width="1.7" style="flex:none; margin-top:1px;"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V18h6v-1.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2Z"/></svg>
+            <span style="font-size:14px; line-height:21px; color:#c7cace;">A caching strategy that stores and retrieves responses based on the semantic meaning of queries, not exact wording.</span>
+          </div>
+
+          <div style="font-size:17px; font-weight:600; color:#f3f4f5; margin-bottom:8px;">Why it matters</div>
+          <div style="font-size:15px; line-height:24px; color:#bcbfc5; margin-bottom:18px;">It cuts repeated model calls and latency for paraphrased questions — a big lever for cost and speed in production RAG systems.</div>
+
+          <div style="display:flex; align-items:center; gap:8px; padding:11px 13px; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.06); border-radius:12px;">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--accent,#3D7FFF)" stroke-width="1.7"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>
+            <span style="font-size:14px; color:#dadbdf;">Vector Database Indexing</span>
+            <span style="flex:1;"></span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#71757c" stroke-width="1.8"><path d="m9 6 6 6-6 6"/></svg>
+          </div>
+        </div>
+
+        <div style="position:absolute; bottom:18px; left:16px; right:16px; height:66px; background:rgba(20,22,26,.78); backdrop-filter:blur(20px) saturate(150%); -webkit-backdrop-filter:blur(20px) saturate(150%); border:1px solid rgba(255,255,255,.08); border-radius:26px; display:flex; align-items:center; padding:6px; gap:4px;">
+          <div style="flex:1; height:54px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px;">
+            <div style="width:30px; height:30px; border-radius:10px; background:var(--accent,#3D7FFF); display:flex; align-items:center; justify-content:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6"><path d="M12 5v14M5 12h14"/></svg></div>
+            <span style="font-size:10px; color:#71757c;">Capture</span>
+          </div>
+          <div style="flex:1; height:54px; border-radius:20px; background:rgba(255,255,255,.07); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#f3f4f5" stroke-width="1.8"><path d="M4 19V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14M4 19a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2M4 19h16M9 7h6"/></svg>
+            <span style="font-size:10px; font-weight:500; color:#f3f4f5;">Library</span>
+          </div>
+          <div style="flex:1; height:54px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#71757c" stroke-width="1.7"><circle cx="12" cy="8" r="3.6"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg>
+            <span style="font-size:10px; color:#71757c;">Profile</span>
+          </div>
+        </div>
+        <div style="position:absolute; bottom:7px; left:50%; transform:translateX(-50%); width:128px; height:5px; border-radius:9999px; background:#fff; opacity:.5;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░░░ 5 · PROFILE ░░░░ -->
+  <div style="position:absolute; left:2092px; top:0px; width:413px;">
+    <div data-drags-parent="1" style="display:flex; align-items:baseline; gap:10px; margin-bottom:14px;">
+      <span class="gm" style="font-size:12px; color:#5b5e63;">05 · PROFILE</span>
+      <span style="font-size:12px; color:#74787e;">Runtime &amp; diagnostics</span>
+    </div>
+    <div style="width:413px; padding:9px; background:#040405; border-radius:54px; box-shadow:0 40px 80px -30px rgba(0,0,0,.7);">
+      <div style="position:relative; width:395px; height:852px; background:#0a0b0d; border-radius:46px; overflow:hidden;">
+        <div style="height:54px; display:flex; align-items:flex-end; justify-content:space-between; padding:0 30px 9px; color:#fff;">
+          <span style="font-size:15px; font-weight:600; letter-spacing:-.2px;">9:41</span>
+          <span style="display:flex; align-items:center; gap:7px;">
+            <svg width="18" height="12" viewBox="0 0 18 12" fill="#fff"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="4.5" width="3" height="7.5" rx="1"/><rect x="10" y="2" width="3" height="10" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1" opacity=".4"/></svg>
+            <svg width="17" height="12" viewBox="0 0 17 12"><path d="M8.5 11.5 0.6 3.3a11 11 0 0 1 15.8 0L8.5 11.5Z" fill="#fff"/></svg>
+            <svg width="26" height="13" viewBox="0 0 26 13" fill="none"><rect x="0.5" y="0.5" width="21" height="12" rx="3.2" stroke="#fff" opacity=".4"/><rect x="2" y="2" width="17" height="9" rx="1.8" fill="#fff"/><rect x="23" y="4.5" width="2" height="4" rx="1" fill="#fff" opacity=".5"/></svg>
+          </span>
+        </div>
+        <div style="position:absolute; top:13px; left:50%; transform:translateX(-50%); width:88px; height:27px; background:#000; border-radius:16px;"></div>
+
+        <div style="position:absolute; top:54px; left:0; right:0; bottom:84px; overflow:hidden; padding:0 20px;">
+          <div style="font-size:30px; font-weight:700; color:#f3f4f5; letter-spacing:-.8px; padding:10px 0 18px;">Profile</div>
+
+          <div style="display:flex; align-items:center; gap:13px; padding:14px; background:#16181c; border:1px solid rgba(255,255,255,.07); border-radius:16px; margin-bottom:24px; box-shadow:0 1px 2px -1px rgba(0,0,0,.5),0 6px 16px -10px rgba(0,0,0,.5);">
+            <div style="width:46px; height:46px; flex:none; border-radius:13px; background:rgba(61,127,255,.12); border:1px solid rgba(61,127,255,.2); display:flex; align-items:center; justify-content:center;"><svg viewBox="0 0 100 100" width="25" height="25" fill="none"><rect x="39.5" y="74.5" width="17" height="17" rx="4.8" fill="var(--accent,#3D7FFF)"/><circle cx="49" cy="8" r="2.1" fill="var(--accent,#3D7FFF)"/><circle cx="40" cy="25" r="2.65" fill="#7f95c4"/><rect x="41.4" y="37.4" width="7.2" height="7.2" rx="1.6" fill="#7f95c4" transform="rotate(31 45 41)"/><rect x="28.35" y="46.35" width="5.3" height="5.3" rx="1.5" fill="var(--accent,#3D7FFF)" transform="rotate(63 31 49)"/><circle cx="51" cy="61" r="2.1" fill="var(--accent,#3D7FFF)"/><circle cx="55" cy="30" r="1.9" fill="var(--accent,#3D7FFF)"/></svg></div>
+            <div style="flex:1;">
+              <div style="font-size:16px; font-weight:600; color:#f3f4f5;">Sift User</div>
+              <div style="font-size:13px; color:#74787e; margin-top:1px;">development</div>
+            </div>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5b5e63" stroke-width="1.8"><path d="m9 6 6 6-6 6"/></svg>
+          </div>
+
+          <div class="gm" style="font-size:11px; letter-spacing:.6px; color:#71757c; margin-bottom:9px; padding-left:2px;">RUNTIME</div>
+          <div style="background:#16181c; border:1px solid rgba(255,255,255,.07); border-radius:16px; overflow:hidden; margin-bottom:24px; box-shadow:0 1px 2px -1px rgba(0,0,0,.5),0 6px 16px -10px rgba(0,0,0,.5);">
+            <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 16px;">
+              <span style="display:flex; align-items:center; gap:11px;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#9a9da2" stroke-width="1.7"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg><span style="font-size:15px; color:#f3f4f5;">Model Provider</span></span>
+              <span style="display:flex; align-items:center; gap:7px;"><span style="width:18px; height:18px; border-radius:5px; background:#fff; display:flex; align-items:center; justify-content:center;"><svg width="12" height="12" viewBox="0 0 24 24"><path d="M23.748 4.482c-.254-.124-.364.113-.512.234-.051.039-.094.09-.137.136-.372.397-.806.657-1.373.626-.829-.046-1.537.214-2.163.848-.133-.782-.575-1.248-1.247-1.548-.352-.156-.708-.311-.955-.65-.172-.241-.219-.51-.305-.774-.055-.16-.11-.323-.293-.35-.2-.031-.278.136-.356.276-.313.572-.434 1.202-.422 1.84.027 1.436.633 2.58 1.838 3.393.137.093.172.187.129.323-.082.28-.18.552-.266.833-.055.179-.137.217-.329.14a5.526 5.526 0 01-1.736-1.18c-.857-.828-1.631-1.742-2.597-2.458a11.365 11.365 0 00-.689-.471c-.985-.957.13-1.743.388-1.836.27-.098.093-.432-.779-.428-.872.004-1.67.295-2.687.684a3.055 3.055 0 01-.465.137 9.597 9.597 0 00-2.883-.102c-1.885.21-3.39 1.102-4.497 2.623C.082 8.606-.231 10.684.152 12.85c.403 2.284 1.569 4.175 3.36 5.653 1.858 1.533 3.997 2.284 6.438 2.14 1.482-.085 3.133-.284 4.994-1.86.47.234.962.327 1.78.397.63.059 1.236-.03 1.705-.128.735-.156.684-.837.419-.961-2.155-1.004-1.682-.595-2.113-.926 1.096-1.296 2.746-2.642 3.392-7.003.05-.347.007-.565 0-.845-.004-.17.035-.237.23-.256a4.173 4.173 0 001.545-.475c1.396-.763 1.96-2.015 2.093-3.517.02-.23-.004-.467-.247-.588zM11.581 18c-2.089-1.642-3.102-2.183-3.52-2.16-.392.024-.321.471-.235.763.09.288.207.486.371.739.114.167.192.416-.113.603-.673.416-1.842-.14-1.897-.167-1.361-.802-2.5-1.86-3.301-3.307-.774-1.393-1.224-2.887-1.298-4.482-.02-.386.093-.522.477-.592a4.696 4.696 0 011.529-.039c2.132.312 3.946 1.265 5.468 2.774.868.86 1.525 1.887 2.202 2.891.72 1.066 1.494 2.082 2.48 2.914.348.292.625.514.891.677-.802.09-2.14.11-3.054-.614zm1-6.44a.306.306 0 01.415-.287.302.302 0 01.2.288.306.306 0 01-.31.307.303.303 0 01-.304-.308zm3.11 1.596c-.2.081-.399.151-.59.16a1.245 1.245 0 01-.798-.254c-.274-.23-.47-.358-.552-.758a1.73 1.73 0 01.016-.588c.07-.327-.008-.537-.239-.727-.187-.156-.426-.199-.688-.199a.559.559 0 01-.254-.078c-.11-.054-.2-.19-.114-.358.028-.054.16-.186.192-.21.356-.202.767-.136 1.146.016.352.144.618.408 1.001.782.391.451.462.576.685.914.176.265.336.537.445.848.067.195-.019.354-.25.452z" fill="#4D6BFE"/></svg></span><span class="gm" style="font-size:12px; color:#9a9da2;">deepseek</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5b5e63" stroke-width="1.8"><path d="m9 6 6 6-6 6"/></svg></span>
+            </div>
+            <div style="height:1px; background:rgba(255,255,255,.06); margin:0 16px;"></div>
+            <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 16px;">
+              <span style="display:flex; align-items:center; gap:11px;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#9a9da2" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18Z"/></svg><span style="font-size:15px; color:#f3f4f5;">Web Search</span></span>
+              <span style="display:flex; align-items:center; gap:7px;"><span class="gm" style="font-size:12px; color:#9a9da2;">ddgs</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5b5e63" stroke-width="1.8"><path d="m9 6 6 6-6 6"/></svg></span>
+            </div>
+          </div>
+
+          <div class="gm" style="font-size:11px; letter-spacing:.6px; color:#71757c; margin-bottom:9px; padding-left:2px;">DIAGNOSTICS</div>
+          <div style="display:flex; gap:10px; margin-bottom:12px;">
+            <div style="flex:1; display:flex; align-items:center; justify-content:center; gap:8px; height:44px; background:var(--accent,#3D7FFF); border-radius:12px;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.9"><path d="M5 3v6a5 5 0 0 0 10 0V3M9 21a3 3 0 0 0 3-3v-3"/><circle cx="18.5" cy="16" r="2.5"/></svg><span style="font-size:14px; font-weight:500; color:#fff;">Test model</span></div>
+            <div style="flex:1; display:flex; align-items:center; justify-content:center; gap:8px; height:44px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1); border-radius:12px;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#dadbdf" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18Z"/></svg><span style="font-size:14px; font-weight:500; color:#dadbdf;">Web search</span></div>
+          </div>
+          <div style="display:flex; gap:11px; padding:13px 14px; background:rgba(61,127,255,.09); border:1px solid rgba(61,127,255,.18); border-radius:12px; margin-bottom:24px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent,#3D7FFF)" stroke-width="2" style="flex:none; margin-top:1px;"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>
+            <div><div style="font-size:13px; color:#cfe0ff; font-weight:500;">Sift runtime model responded.</div><div class="gm" style="font-size:11px; color:#7f93b8; margin-top:3px;">deepseek · deepseek-v4-flash</div></div>
+          </div>
+
+          <div class="gm" style="font-size:11px; letter-spacing:.6px; color:#71757c; margin-bottom:9px; padding-left:2px;">PRIVACY</div>
+          <div style="display:flex; gap:11px; padding:14px; background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.06); border-radius:12px;">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#74787e" stroke-width="1.7" style="flex:none; margin-top:1px;"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+            <span style="font-size:13px; line-height:19px; color:#8b8f96;">Runtime API keys are stored by Sift Backend and returned to iOS only as a masked preview.</span>
+          </div>
+        </div>
+
+        <div style="position:absolute; bottom:18px; left:16px; right:16px; height:66px; background:rgba(20,22,26,.72); backdrop-filter:blur(20px) saturate(150%); -webkit-backdrop-filter:blur(20px) saturate(150%); border:1px solid rgba(255,255,255,.08); border-radius:26px; box-shadow:0 10px 34px -12px rgba(0,0,0,.7); display:flex; align-items:center; padding:6px; gap:4px;">
+          <div style="flex:1; height:54px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px;">
+            <div style="width:30px; height:30px; border-radius:10px; background:var(--accent,#3D7FFF); display:flex; align-items:center; justify-content:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6"><path d="M12 5v14M5 12h14"/></svg></div>
+            <span style="font-size:10px; color:#71757c;">Capture</span>
+          </div>
+          <div style="flex:1; height:54px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#71757c" stroke-width="1.7"><path d="M4 19V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14M4 19a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2M4 19h16M9 7h6"/></svg>
+            <span style="font-size:10px; color:#71757c;">Library</span>
+          </div>
+          <div style="flex:1; height:54px; border-radius:20px; background:rgba(255,255,255,.07); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#f3f4f5" stroke-width="1.8"><circle cx="12" cy="8" r="3.6"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg>
+            <span style="font-size:10px; font-weight:500; color:#f3f4f5;">Profile</span>
+          </div>
+        </div>
+        <div style="position:absolute; bottom:7px; left:50%; transform:translateX(-50%); width:128px; height:5px; border-radius:9999px; background:#fff; opacity:.5;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░░░ 6 · MODEL PROVIDER ░░░░ -->
+  <div style="position:absolute; left:2615px; top:0px; width:413px;">
+    <div data-drags-parent="1" style="display:flex; align-items:baseline; gap:10px; margin-bottom:14px;">
+      <span class="gm" style="font-size:12px; color:#5b5e63;">06 · MODEL PROVIDER</span>
+      <span style="font-size:12px; color:#74787e;">Settings detail</span>
+    </div>
+    <div style="width:413px; padding:9px; background:#040405; border-radius:54px; box-shadow:0 40px 80px -30px rgba(0,0,0,.7);">
+      <div style="position:relative; width:395px; height:852px; background:#0a0b0d; border-radius:46px; overflow:hidden;">
+        <div style="height:54px; display:flex; align-items:flex-end; justify-content:space-between; padding:0 30px 9px; color:#fff;">
+          <span style="font-size:15px; font-weight:600; letter-spacing:-.2px;">9:41</span>
+          <span style="display:flex; align-items:center; gap:7px;">
+            <svg width="18" height="12" viewBox="0 0 18 12" fill="#fff"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="4.5" width="3" height="7.5" rx="1"/><rect x="10" y="2" width="3" height="10" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1" opacity=".4"/></svg>
+            <svg width="17" height="12" viewBox="0 0 17 12"><path d="M8.5 11.5 0.6 3.3a11 11 0 0 1 15.8 0L8.5 11.5Z" fill="#fff"/></svg>
+            <svg width="26" height="13" viewBox="0 0 26 13" fill="none"><rect x="0.5" y="0.5" width="21" height="12" rx="3.2" stroke="#fff" opacity=".4"/><rect x="2" y="2" width="17" height="9" rx="1.8" fill="#fff"/><rect x="23" y="4.5" width="2" height="4" rx="1" fill="#fff" opacity=".5"/></svg>
+          </span>
+        </div>
+        <div style="position:absolute; top:13px; left:50%; transform:translateX(-50%); width:88px; height:27px; background:#000; border-radius:16px;"></div>
+
+        <div style="position:absolute; top:54px; left:0; right:0; height:50px; display:flex; align-items:center; justify-content:center; padding:0 16px; background:#0a0b0d; z-index:3;">
+          <div style="position:absolute; left:16px; width:36px; height:36px; border-radius:11px; background:rgba(255,255,255,.05); display:flex; align-items:center; justify-content:center;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#c7cace" stroke-width="1.8"><path d="m15 5-7 7 7 7"/></svg></div>
+          <span style="font-size:16px; font-weight:600; color:#f3f4f5;">Model Provider</span>
+        </div>
+
+        <div style="position:absolute; top:104px; left:0; right:0; bottom:84px; overflow:hidden; padding:6px 20px 0;">
+          <div class="gm" style="font-size:11px; letter-spacing:.6px; color:#71757c; margin-bottom:9px; padding-left:2px;">CONFIGURATION</div>
+          <div style="background:#16181c; border:1px solid rgba(255,255,255,.07); border-radius:16px; overflow:hidden; margin-bottom:24px; box-shadow:0 1px 2px -1px rgba(0,0,0,.5),0 6px 16px -10px rgba(0,0,0,.5);">
+            <div style="display:flex; align-items:center; justify-content:space-between; padding:15px 16px;">
+              <span style="font-size:15px; color:#f3f4f5;">Provider</span>
+              <span style="display:flex; align-items:center; gap:8px;"><span style="display:flex; align-items:center; gap:6px; font-size:13px; color:#dadbdf; background:rgba(255,255,255,.06); padding:3px 10px 3px 5px; border-radius:8px;"><span style="width:17px; height:17px; border-radius:5px; background:#fff; display:flex; align-items:center; justify-content:center;"><svg width="12" height="12" viewBox="0 0 24 24"><path d="M23.748 4.482c-.254-.124-.364.113-.512.234-.051.039-.094.09-.137.136-.372.397-.806.657-1.373.626-.829-.046-1.537.214-2.163.848-.133-.782-.575-1.248-1.247-1.548-.352-.156-.708-.311-.955-.65-.172-.241-.219-.51-.305-.774-.055-.16-.11-.323-.293-.35-.2-.031-.278.136-.356.276-.313.572-.434 1.202-.422 1.84.027 1.436.633 2.58 1.838 3.393.137.093.172.187.129.323-.082.28-.18.552-.266.833-.055.179-.137.217-.329.14a5.526 5.526 0 01-1.736-1.18c-.857-.828-1.631-1.742-2.597-2.458a11.365 11.365 0 00-.689-.471c-.985-.957.13-1.743.388-1.836.27-.098.093-.432-.779-.428-.872.004-1.67.295-2.687.684a3.055 3.055 0 01-.465.137 9.597 9.597 0 00-2.883-.102c-1.885.21-3.39 1.102-4.497 2.623C.082 8.606-.231 10.684.152 12.85c.403 2.284 1.569 4.175 3.36 5.653 1.858 1.533 3.997 2.284 6.438 2.14 1.482-.085 3.133-.284 4.994-1.86.47.234.962.327 1.78.397.63.059 1.236-.03 1.705-.128.735-.156.684-.837.419-.961-2.155-1.004-1.682-.595-2.113-.926 1.096-1.296 2.746-2.642 3.392-7.003.05-.347.007-.565 0-.845-.004-.17.035-.237.23-.256a4.173 4.173 0 001.545-.475c1.396-.763 1.96-2.015 2.093-3.517.02-.23-.004-.467-.247-.588zM11.581 18c-2.089-1.642-3.102-2.183-3.52-2.16-.392.024-.321.471-.235.763.09.288.207.486.371.739.114.167.192.416-.113.603-.673.416-1.842-.14-1.897-.167-1.361-.802-2.5-1.86-3.301-3.307-.774-1.393-1.224-2.887-1.298-4.482-.02-.386.093-.522.477-.592a4.696 4.696 0 011.529-.039c2.132.312 3.946 1.265 5.468 2.774.868.86 1.525 1.887 2.202 2.891.72 1.066 1.494 2.082 2.48 2.914.348.292.625.514.891.677-.802.09-2.14.11-3.054-.614zm1-6.44a.306.306 0 01.415-.287.302.302 0 01.2.288.306.306 0 01-.31.307.303.303 0 01-.304-.308zm3.11 1.596c-.2.081-.399.151-.59.16a1.245 1.245 0 01-.798-.254c-.274-.23-.47-.358-.552-.758a1.73 1.73 0 01.016-.588c.07-.327-.008-.537-.239-.727-.187-.156-.426-.199-.688-.199a.559.559 0 01-.254-.078c-.11-.054-.2-.19-.114-.358.028-.054.16-.186.192-.21.356-.202.767-.136 1.146.016.352.144.618.408 1.001.782.391.451.462.576.685.914.176.265.336.537.445.848.067.195-.019.354-.25.452z" fill="#4D6BFE"/></svg></span>DeepSeek</span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5b5e63" stroke-width="1.9"><path d="m6 9 6 6 6-6"/></svg></span>
+            </div>
+            <div style="height:1px; background:rgba(255,255,255,.06);"></div>
+            <div style="padding:14px 16px;"><div class="gm" style="font-size:10px; letter-spacing:.5px; color:#5b5e63; margin-bottom:5px;">BASE URL</div><span class="gm" style="font-size:13px; color:#dadbdf;">https://api.deepseek.com/v1</span></div>
+            <div style="height:1px; background:rgba(255,255,255,.06);"></div>
+            <div style="padding:14px 16px;"><div class="gm" style="font-size:10px; letter-spacing:.5px; color:#5b5e63; margin-bottom:5px;">API KEY</div><span class="gm" style="font-size:13px; color:#71757c;">•••••••••••• 76f7</span></div>
+            <div style="height:1px; background:rgba(255,255,255,.06);"></div>
+            <div style="padding:14px 16px;"><div class="gm" style="font-size:10px; letter-spacing:.5px; color:#5b5e63; margin-bottom:5px;">MODEL</div><div style="display:flex; align-items:center; justify-content:space-between;"><span class="gm" style="font-size:13px; color:#dadbdf;">deepseek-v4-flash</span><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#71757c" stroke-width="1.8"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg></div></div>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:11px;">
+            <div style="display:flex; align-items:center; justify-content:center; gap:9px; height:48px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1); border-radius:13px;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#dadbdf" stroke-width="1.8"><path d="M12 3v12M7 11l5 5 5-5M5 21h14"/></svg><span style="font-size:15px; font-weight:500; color:#dadbdf;">Load models</span></div>
+            <div style="display:flex; align-items:center; justify-content:center; gap:9px; height:48px; background:var(--accent,#3D7FFF); border-radius:13px; box-shadow:0 6px 18px -8px rgba(61,127,255,.7);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><path d="M20 6 9 17l-5-5"/></svg><span style="font-size:15px; font-weight:600; color:#fff;">Save changes</span></div>
+          </div>
+        </div>
+
+        <div style="position:absolute; bottom:18px; left:16px; right:16px; height:66px; background:rgba(20,22,26,.72); backdrop-filter:blur(20px) saturate(150%); -webkit-backdrop-filter:blur(20px) saturate(150%); border:1px solid rgba(255,255,255,.08); border-radius:26px; box-shadow:0 10px 34px -12px rgba(0,0,0,.7); display:flex; align-items:center; padding:6px; gap:4px;">
+          <div style="flex:1; height:54px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px;">
+            <div style="width:30px; height:30px; border-radius:10px; background:var(--accent,#3D7FFF); display:flex; align-items:center; justify-content:center;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6"><path d="M12 5v14M5 12h14"/></svg></div>
+            <span style="font-size:10px; color:#71757c;">Capture</span>
+          </div>
+          <div style="flex:1; height:54px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#71757c" stroke-width="1.7"><path d="M4 19V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14M4 19a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2M4 19h16M9 7h6"/></svg>
+            <span style="font-size:10px; color:#71757c;">Library</span>
+          </div>
+          <div style="flex:1; height:54px; border-radius:20px; background:rgba(255,255,255,.07); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#f3f4f5" stroke-width="1.8"><circle cx="12" cy="8" r="3.6"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg>
+            <span style="font-size:10px; font-weight:500; color:#f3f4f5;">Profile</span>
+          </div>
+        </div>
+        <div style="position:absolute; bottom:7px; left:50%; transform:translateX(-50%); width:128px; height:5px; border-radius:9999px; background:#fff; opacity:.5;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ░░░░ 7 · PROVIDER PICKER ░░░░ -->
+  <div style="position:absolute; left:3138px; top:0px; width:413px;">
+    <div data-drags-parent="1" style="display:flex; align-items:baseline; gap:10px; margin-bottom:14px;">
+      <span class="gm" style="font-size:12px; color:#5b5e63;">07 · PROVIDER PICKER</span>
+      <span style="font-size:12px; color:#74787e;">Sheet</span>
+    </div>
+    <div style="width:413px; padding:9px; background:#040405; border-radius:54px; box-shadow:0 40px 80px -30px rgba(0,0,0,.7);">
+      <div style="position:relative; width:395px; height:852px; background:#0a0b0d; border-radius:46px; overflow:hidden;">
+        <div style="position:absolute; inset:0; opacity:.32;">
+          <div style="height:104px;"></div>
+          <div style="padding:6px 20px 0;">
+            <div class="gm" style="font-size:11px; letter-spacing:.6px; color:#71757c; margin-bottom:9px;">CONFIGURATION</div>
+            <div style="height:210px; background:#16181c; border:1px solid rgba(255,255,255,.07); border-radius:16px;"></div>
+          </div>
+        </div>
+        <div style="position:absolute; inset:0; background:rgba(4,4,6,.58);"></div>
+        <div style="position:absolute; top:13px; left:50%; transform:translateX(-50%); width:88px; height:27px; background:#000; border-radius:16px; z-index:4;"></div>
+
+        <div style="position:absolute; left:0; right:0; bottom:0; top:296px; background:#131418; border:1px solid rgba(255,255,255,.09); border-bottom:none; border-radius:26px 26px 46px 46px; box-shadow:0 -26px 50px -16px rgba(0,0,0,.7); display:flex; flex-direction:column; overflow:hidden;">
+          <div style="width:38px; height:5px; border-radius:9999px; background:#3a3c41; margin:12px auto 6px;"></div>
+          <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 20px 16px;">
+            <span style="font-size:17px; font-weight:600; color:#f3f4f5;">Select Provider</span>
+            <div style="width:30px; height:30px; border-radius:9999px; background:rgba(255,255,255,.06); display:flex; align-items:center; justify-content:center;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9a9da2" stroke-width="2"><path d="m6 6 12 12M18 6 6 18"/></svg></div>
+          </div>
+
+          <div style="flex:1; overflow:hidden; padding:0 10px;">
+            <div style="display:flex; align-items:center; gap:13px; padding:12px;">
+              <div style="width:34px; height:34px; flex:none; border-radius:10px; background:#fff; display:flex; align-items:center; justify-content:center;"><svg width="21" height="21" viewBox="0 0 24 24"><path d="M14.752 4.64h5.274C22.242 4.64 24 6.475 24 8.691V15.8a3.947 3.947 0 01-3.974 3.975h-5.274l1.299-1.835 3.822-1.222c.688-.23 1.146-.918 1.146-1.605v-5.81c0-.687-.458-1.375-1.146-1.605L16.05 6.475l-1.3-1.835zM2.98 15.111c0 .688.46 1.376 1.147 1.606l3.822 1.146 1.3 1.835H3.974A3.947 3.947 0 010 15.723V8.69c0-2.216 1.758-4.05 3.975-4.05h5.273L7.95 6.474 4.127 7.697c-.688.23-1.146.918-1.146 1.606v5.808z" fill="#FF6A00"/><path d="M16.051 11.213H8.025v1.835h8.026v-1.835z" fill="#FF6A00"/></svg></div>
+              <div style="flex:1;"><div style="font-size:15px; font-weight:500; color:#f3f4f5;">Alibaba DashScope</div><div style="font-size:12px; color:#71757c; margin-top:1px;">OpenAI-compatible endpoint</div></div>
+            </div>
+            <div style="display:flex; align-items:center; gap:13px; padding:12px;">
+              <div style="width:34px; height:34px; flex:none; border-radius:10px; background:#fff; display:flex; align-items:center; justify-content:center;"><svg width="19" height="19" viewBox="0 0 24 24" fill="#181818" fill-rule="evenodd"><path d="M13.827 3.52h3.603L24 20h-3.603l-6.57-16.48zm-7.258 0h3.767L16.906 20h-3.674l-1.343-3.461H5.017l-1.344 3.46H0L6.57 3.522zm4.132 9.959L8.453 7.687 6.205 13.48H10.7z"/></svg></div>
+              <div style="flex:1;"><div style="font-size:15px; font-weight:500; color:#f3f4f5;">Anthropic</div><div style="font-size:12px; color:#71757c; margin-top:1px;">Claude native Messages API</div></div>
+            </div>
+            <div style="display:flex; align-items:center; gap:13px; padding:12px;">
+              <div style="width:34px; height:34px; flex:none; border-radius:10px; background:#fff; display:flex; align-items:center; justify-content:center;"><svg width="19" height="19" viewBox="0 0 24 24"><path d="M13.236 2.377L2.751 20.493H0L11.863 0l1.373 2.377zm3.554 6.156l-9.606 11.96H4.13L15.511 6.32l1.279 2.212zm6.908 11.96H14.05l8.406-2.151 1.242 2.15zm-3.42-5.922l-7.843 5.92H8.482l10.597-7.997 1.2 2.077z" fill="#008C8C"/></svg></div>
+              <div style="flex:1;"><div style="font-size:15px; font-weight:500; color:#f3f4f5;">Arcee AI</div><div style="font-size:12px; color:#71757c; margin-top:1px;">OpenAI-compatible endpoint</div></div>
+            </div>
+            <div style="display:flex; align-items:center; gap:13px; padding:12px; background:rgba(61,127,255,.12); border:1px solid rgba(61,127,255,.22); border-radius:12px;">
+              <div style="width:34px; height:34px; flex:none; border-radius:10px; background:#fff; display:flex; align-items:center; justify-content:center;"><svg width="21" height="21" viewBox="0 0 24 24"><path d="M23.748 4.482c-.254-.124-.364.113-.512.234-.051.039-.094.09-.137.136-.372.397-.806.657-1.373.626-.829-.046-1.537.214-2.163.848-.133-.782-.575-1.248-1.247-1.548-.352-.156-.708-.311-.955-.65-.172-.241-.219-.51-.305-.774-.055-.16-.11-.323-.293-.35-.2-.031-.278.136-.356.276-.313.572-.434 1.202-.422 1.84.027 1.436.633 2.58 1.838 3.393.137.093.172.187.129.323-.082.28-.18.552-.266.833-.055.179-.137.217-.329.14a5.526 5.526 0 01-1.736-1.18c-.857-.828-1.631-1.742-2.597-2.458a11.365 11.365 0 00-.689-.471c-.985-.957.13-1.743.388-1.836.27-.098.093-.432-.779-.428-.872.004-1.67.295-2.687.684a3.055 3.055 0 01-.465.137 9.597 9.597 0 00-2.883-.102c-1.885.21-3.39 1.102-4.497 2.623C.082 8.606-.231 10.684.152 12.85c.403 2.284 1.569 4.175 3.36 5.653 1.858 1.533 3.997 2.284 6.438 2.14 1.482-.085 3.133-.284 4.994-1.86.47.234.962.327 1.78.397.63.059 1.236-.03 1.705-.128.735-.156.684-.837.419-.961-2.155-1.004-1.682-.595-2.113-.926 1.096-1.296 2.746-2.642 3.392-7.003.05-.347.007-.565 0-.845-.004-.17.035-.237.23-.256a4.173 4.173 0 001.545-.475c1.396-.763 1.96-2.015 2.093-3.517.02-.23-.004-.467-.247-.588zM11.581 18c-2.089-1.642-3.102-2.183-3.52-2.16-.392.024-.321.471-.235.763.09.288.207.486.371.739.114.167.192.416-.113.603-.673.416-1.842-.14-1.897-.167-1.361-.802-2.5-1.86-3.301-3.307-.774-1.393-1.224-2.887-1.298-4.482-.02-.386.093-.522.477-.592a4.696 4.696 0 011.529-.039c2.132.312 3.946 1.265 5.468 2.774.868.86 1.525 1.887 2.202 2.891.72 1.066 1.494 2.082 2.48 2.914.348.292.625.514.891.677-.802.09-2.14.11-3.054-.614zm1-6.44a.306.306 0 01.415-.287.302.302 0 01.2.288.306.306 0 01-.31.307.303.303 0 01-.304-.308zm3.11 1.596c-.2.081-.399.151-.59.16a1.245 1.245 0 01-.798-.254c-.274-.23-.47-.358-.552-.758a1.73 1.73 0 01.016-.588c.07-.327-.008-.537-.239-.727-.187-.156-.426-.199-.688-.199a.559.559 0 01-.254-.078c-.11-.054-.2-.19-.114-.358.028-.054.16-.186.192-.21.356-.202.767-.136 1.146.016.352.144.618.408 1.001.782.391.451.462.576.685.914.176.265.336.537.445.848.067.195-.019.354-.25.452z" fill="#4D6BFE"/></svg></div>
+              <div style="flex:1;"><div style="font-size:15px; font-weight:600; color:#f3f4f5;">DeepSeek</div><div style="font-size:12px; color:#9cc0ff; margin-top:1px;">OpenAI-compatible chat completions</div></div>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent,#3D7FFF)" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg>
+            </div>
+            <div style="display:flex; align-items:center; gap:13px; padding:12px;">
+              <div style="width:34px; height:34px; flex:none; border-radius:10px; background:#fff; display:flex; align-items:center; justify-content:center;"><span style="font-family:'Geist',sans-serif; font-size:13px; font-weight:700; letter-spacing:-.5px; color:#1A1A1A;">GMI</span></div>
+              <div style="flex:1;"><div style="font-size:15px; font-weight:500; color:#f3f4f5;">GMI Cloud</div><div style="font-size:12px; color:#71757c; margin-top:1px;">OpenAI-compatible endpoint</div></div>
+            </div>
+            <div style="display:flex; align-items:center; gap:13px; padding:12px;">
+              <div style="width:34px; height:34px; flex:none; border-radius:10px; background:#fff; display:flex; align-items:center; justify-content:center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="#181818" fill-rule="evenodd"><path d="M16.804 1.957l7.22 4.105v.087L16.73 10.21l.017-2.117-.821-.03c-1.059-.028-1.611.002-2.268.11-1.064.175-2.038.577-3.147 1.352L8.345 11.03c-.284.195-.495.336-.68.455l-.515.322-.397.234.385.23.53.338c.476.314 1.17.796 2.701 1.866 1.11.775 2.083 1.177 3.147 1.352l.3.045c.694.091 1.375.094 2.825.033l.022-2.159 7.22 4.105v.087L16.589 22l.014-1.862-.635.022c-1.386.042-2.137.002-3.138-.162-1.694-.28-3.26-.926-4.881-2.059l-2.158-1.5a21.997 21.997 0 00-.755-.498l-.467-.28a55.927 55.927 0 00-.76-.43C2.908 14.73.563 14.116 0 14.116V9.888l.14.004c.564-.007 2.91-.622 3.809-1.124l1.016-.58.438-.274c.428-.28 1.072-.726 2.686-1.853 1.621-1.133 3.186-1.78 4.881-2.059 1.152-.19 1.974-.213 3.814-.138l.02-1.907z"/></svg></div>
+              <div style="flex:1;"><div style="font-size:15px; font-weight:500; color:#f3f4f5;">OpenRouter</div><div style="font-size:12px; color:#71757c; margin-top:1px;">Unified multi-provider gateway</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:3580,&quot;height&quot;:1060},&quot;accentColor&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#3D7FFF&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;#3D7FFF&quot;,&quot;#2F6BFF&quot;,&quot;#5B8DEF&quot;,&quot;#3DA5FF&quot;]}}">
+class Component extends DCLogic {
+  renderVals() {
+    return { accent: this.props.accentColor ?? '#3D7FFF' };
+  }
+}
+</script>
+</body>
+</html>

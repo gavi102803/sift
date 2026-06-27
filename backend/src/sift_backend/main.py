@@ -7,6 +7,7 @@ from sift_backend.api.concepts import build_concept_service
 from sift_backend.api.concepts import router as concepts_router
 from sift_backend.concepts.service import ConceptService
 from sift_backend.config import Settings, load_settings, write_provider_settings
+from sift_backend.runtime.capability_probe import probe_model_capabilities
 from sift_backend.runtime.providers import (
     build_model_provider_registry,
     build_runtime_model_provider,
@@ -15,7 +16,7 @@ from sift_backend.runtime.providers import (
     resolve_runtime_model,
 )
 from sift_backend.runtime.tools import build_web_provider_registry, web_provider_profiles
-from sift_backend.runtime.types import RuntimeMessage, RuntimeModelRequest, SiftRuntimeError
+from sift_backend.runtime.types import SiftRuntimeError
 from sift_backend.schemas.app_status import (
     AppStatusResponse,
     ModelDiagnosticResponse,
@@ -93,6 +94,10 @@ def create_app(
                     name=profile.display_name,
                     description=profile.description,
                     adapter=profile.adapter,
+                    apiMode=profile.api_mode,
+                    protocolDriver=profile.protocol_driver,
+                    hermesPluginPath=profile.hermes_plugin_path,
+                    exposureTier=profile.exposure_tier,
                     defaultBaseURL=profile.default_base_url,
                     defaultModel=profile.default_model,
                     requiresApiKey=profile.requires_api_key,
@@ -114,6 +119,7 @@ def create_app(
                     ),
                 )
                 for profile in build_model_provider_registry().profiles()
+                if profile.exposure_tier != "hidden"
             ]
         )
 
@@ -287,6 +293,14 @@ def create_app(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail={"code": error.code, "message": str(error)},
             ) from error
+        models = _filter_runtime_models(
+            models,
+            provider_name=settings.runtime_provider,
+            preferred_model=resolve_runtime_model(
+                settings.runtime_provider,
+                settings.runtime_model,
+            ),
+        )
         return ProviderModelListResponse(
             models=[
                 ProviderModelDTO(id=model, ownedBy=_runtime_provider(settings))
@@ -369,6 +383,105 @@ def _redacted_database_url(database_url: str) -> str:
     return f"{scheme}://***@{host}"
 
 
+def _filter_runtime_models(
+    models: list[str],
+    *,
+    provider_name: str,
+    preferred_model: str,
+) -> list[str]:
+    unique_models = _dedupe_models(models)
+    filtered = [
+        model
+        for model in unique_models
+        if _looks_like_chat_runtime_model(model, provider_name=provider_name)
+    ]
+    if not filtered:
+        filtered = unique_models
+    return sorted(
+        filtered,
+        key=lambda model: (
+            model != preferred_model,
+            _model_sort_rank(model),
+            model.casefold(),
+        ),
+    )
+
+
+def _dedupe_models(models: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for raw_model in models:
+        model = raw_model.strip()
+        if not model:
+            continue
+        key = model.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(model)
+    return deduped
+
+
+def _looks_like_chat_runtime_model(model: str, *, provider_name: str) -> bool:
+    lowered = model.casefold()
+    blocked_fragments = (
+        "embedding",
+        "embed",
+        "audio",
+        "transcribe",
+        "tts",
+        "whisper",
+        "image",
+        "vision-preview",
+        "moderation",
+        "omni-moderation",
+        "rerank",
+        "search-preview",
+        "search-api",
+        "dall-e",
+        "realtime",
+        "instruct",
+        "test",
+        "eval",
+        "codex",
+        "deep-research",
+    )
+    if any(fragment in lowered for fragment in blocked_fragments):
+        return False
+    if provider_name in {"openai", "custom"}:
+        if not lowered.startswith(("gpt-", "o")):
+            return False
+        if _has_dated_model_suffix(lowered):
+            return False
+    return True
+
+
+def _model_sort_rank(model: str) -> int:
+    lowered = model.casefold()
+    if lowered.startswith("gpt-5"):
+        return 0
+    if lowered.startswith("gpt-4.1") or lowered.startswith("gpt-4o"):
+        return 1
+    if lowered.startswith("o"):
+        return 2
+    return 10
+
+
+def _has_dated_model_suffix(model: str) -> bool:
+    parts = model.rsplit("-", maxsplit=3)
+    if len(parts) < 4:
+        return False
+    year, month, day = parts[-3:]
+    return (
+        len(year) == 4
+        and len(month) == 2
+        and len(day) == 2
+        and year.isdigit()
+        and month.isdigit()
+        and day.isdigit()
+    )
+
+
 async def _run_model_diagnostic(settings: Settings) -> ModelDiagnosticResponse:
     provider_name = _runtime_provider(settings)
     if provider_name == "mock":
@@ -387,17 +500,10 @@ async def _run_model_diagnostic(settings: Settings) -> ModelDiagnosticResponse:
     )
     model = resolve_runtime_model(settings.runtime_provider, settings.runtime_model)
     try:
-        response = await provider.complete(
-            RuntimeModelRequest(
-                model=model,
-                messages=(
-                    RuntimeMessage(
-                        role="user",
-                        content="Reply with exactly: ok",
-                    ),
-                ),
-                temperature=0,
-            )
+        probe = await probe_model_capabilities(
+            provider,
+            provider_name=provider_name,
+            model=model,
         )
     except SiftRuntimeError as error:
         return ModelDiagnosticResponse(
@@ -406,12 +512,30 @@ async def _run_model_diagnostic(settings: Settings) -> ModelDiagnosticResponse:
             model=model,
             message=str(error),
         )
+    except Exception as error:
+        return ModelDiagnosticResponse(
+            ok=False,
+            provider=provider_name,
+            model=model,
+            message=f"Capability probe failed: {error}",
+        )
+
+    if not probe.plain_completion.ok:
+        return ModelDiagnosticResponse(
+            ok=False,
+            provider=provider_name,
+            model=model,
+            message=probe.plain_completion.message,
+        )
 
     return ModelDiagnosticResponse(
         ok=True,
         provider=provider_name,
-        model=response.model,
-        message="Sift runtime model responded.",
+        model=model,
+        message=(
+            "Sift runtime model responded. "
+            f"Structured output: {probe.selected_structured_output or 'unavailable'}."
+        ),
     )
 
 
@@ -455,7 +579,7 @@ async def _run_web_search_diagnostic(settings: Settings) -> ModelDiagnosticRespo
             model=settings.runtime_model,
             message=(
                 f"Runtime web search provider {settings.web_search_provider} "
-                "requires SIFT_WEB_SEARCH_API_KEY."
+                "requires an API key configured from Profile."
             ),
         )
     if not web_provider.is_available():

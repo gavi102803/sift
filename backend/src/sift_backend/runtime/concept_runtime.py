@@ -12,6 +12,8 @@ from sift_backend.ai.context_pack import (
 )
 from sift_backend.runtime.tools import (
     RuntimeCitation,
+    RuntimeExtractedDocument,
+    RuntimeExtractProvider,
     RuntimeWebSearchTool,
     build_runtime_tool_registry,
 )
@@ -39,6 +41,18 @@ class ConceptRuntimeResult:
     result: ConceptTurnResult
 
 
+@dataclass(frozen=True)
+class RuntimeSourceEvidence:
+    citation: RuntimeCitation
+    extracted_document: RuntimeExtractedDocument | None = None
+
+    @property
+    def is_verified(self) -> bool:
+        if self.extracted_document is None:
+            return False
+        return bool(_document_text(self.extracted_document))
+
+
 ConceptRuntimeStreamEvent = ConceptRuntimeDelta | ConceptRuntimeResult
 
 
@@ -56,12 +70,17 @@ class LightweightHermesRuntime:
         model_provider: RuntimeModelProvider,
         model: str,
         web_search_tool: RuntimeWebSearchTool,
+        web_extract_tool: RuntimeExtractProvider | None = None,
         web_search_enabled: bool = True,
     ) -> None:
         self.model_provider = model_provider
         self.model = model
         self.web_search_tool = web_search_tool
-        self.tool_registry = build_runtime_tool_registry(web_search_tool)
+        self.web_extract_tool = web_extract_tool or web_search_tool
+        self.tool_registry = build_runtime_tool_registry(
+            web_search_tool,
+            extract_provider=self.web_extract_tool,
+        )
         self.web_search_enabled = web_search_enabled
 
     async def generate_initial_concept(
@@ -70,17 +89,17 @@ class LightweightHermesRuntime:
         locale: str,
     ) -> ConceptInitialResult:
         context_pack = build_initial_concept_context_pack(raw_capture=raw_capture, locale=locale)
-        citations = await self._retrieve(raw_capture)
+        evidence = await self._retrieve(raw_capture)
         request = RuntimeModelRequest(
             model=self.model,
-            messages=_messages_with_retrieval(context_pack.messages, citations),
+            messages=_messages_with_retrieval(context_pack.messages, evidence),
             response_format=context_pack.response_format,
         )
         started_at = time.perf_counter()
         completion = await self.model_provider.complete(request)
         latency_ms = round((time.perf_counter() - started_at) * 1000)
         result = _validate_initial(_parse_json(completion.content))
-        return _initial_with_runtime_metadata(result, completion, latency_ms, citations)
+        return _initial_with_runtime_metadata(result, completion, latency_ms, evidence)
 
     async def answer_concept_turn(
         self,
@@ -95,17 +114,17 @@ class LightweightHermesRuntime:
             recent_turns=recent_turns,
             user_query=user_query,
         )
-        citations = await self._retrieve(user_query)
+        evidence = await self._retrieve(user_query)
         request = RuntimeModelRequest(
             model=self.model,
-            messages=_messages_with_retrieval(context_pack.messages, citations),
+            messages=_messages_with_retrieval(context_pack.messages, evidence),
             response_format=context_pack.response_format,
         )
         started_at = time.perf_counter()
         completion = await self.model_provider.complete(request)
         latency_ms = round((time.perf_counter() - started_at) * 1000)
         result = _validate_turn(_parse_json(completion.content))
-        return _turn_with_runtime_metadata(result, completion, latency_ms, citations)
+        return _turn_with_runtime_metadata(result, completion, latency_ms, evidence)
 
     async def stream_concept_turn_answer(
         self,
@@ -120,10 +139,10 @@ class LightweightHermesRuntime:
             recent_turns=recent_turns,
             user_query=user_query,
         )
-        citations = await self._retrieve(user_query)
+        evidence = await self._retrieve(user_query)
         request = RuntimeModelRequest(
             model=self.model,
-            messages=_messages_with_retrieval(context_pack.messages, citations),
+            messages=_messages_with_retrieval(context_pack.messages, evidence),
             response_format=context_pack.response_format,
         )
         started_at = time.perf_counter()
@@ -147,10 +166,10 @@ class LightweightHermesRuntime:
         latency_ms = round((time.perf_counter() - started_at) * 1000)
         result = _validate_turn(_parse_json(completed.content))
         yield ConceptRuntimeResult(
-            _turn_with_runtime_metadata(result, completed, latency_ms, citations)
+            _turn_with_runtime_metadata(result, completed, latency_ms, evidence)
         )
 
-    async def _retrieve(self, query: str) -> list[RuntimeCitation]:
+    async def _retrieve(self, query: str) -> list[RuntimeSourceEvidence]:
         if not self.web_search_enabled:
             return []
         try:
@@ -163,30 +182,82 @@ class LightweightHermesRuntime:
             isinstance(citation, RuntimeCitation) for citation in citations
         ):
             raise SiftRuntimeError("tool_error", "Runtime web search returned invalid results.")
-        return citations
+        return await self._extract_evidence(citations)
+
+    async def _extract_evidence(
+        self,
+        citations: list[RuntimeCitation],
+    ) -> list[RuntimeSourceEvidence]:
+        if not citations:
+            return []
+        urls = [citation.url for citation in citations if citation.url]
+        try:
+            documents = await self.tool_registry.dispatch("web.extract", {"urls": urls})
+        except SiftRuntimeError:
+            documents = []
+        except Exception:
+            documents = []
+        if not isinstance(documents, list) or not all(
+            isinstance(document, RuntimeExtractedDocument) for document in documents
+        ):
+            documents = []
+        documents_by_url = {document.url: document for document in documents}
+        return [
+            RuntimeSourceEvidence(
+                citation=citation,
+                extracted_document=documents_by_url.get(citation.url),
+            )
+            for citation in citations
+        ]
 
 
 def _messages_with_retrieval(
     messages: tuple[RuntimeMessage, ...],
-    citations: list[RuntimeCitation],
+    evidence: list[RuntimeSourceEvidence],
 ) -> tuple[RuntimeMessage, ...]:
-    if not citations:
+    if not evidence:
         return messages
     retrieval_payload = [
-        {"title": citation.title, "url": citation.url, "snippet": citation.snippet}
-        for citation in citations
+        _retrieval_payload_item(source)
+        for source in evidence
     ]
     retrieval_message = RuntimeMessage(
         role="system",
         content=(
-            "Runtime retrieval results. Use only these sources for web-verified claims "
-            f"and cite them concisely:\n{json.dumps(retrieval_payload, ensure_ascii=False)}"
+            "Runtime retrieval results. Treat entries with status=sourceVerified as verified "
+            "source text. Treat entries with status=searchDiscovered as discovery context only; "
+            "do not present their snippets as verified facts. Cite sources concisely:\n"
+            f"{json.dumps(retrieval_payload, ensure_ascii=False)}"
         ),
     )
     return messages[:-1] + (retrieval_message, messages[-1])
 
 
+def _retrieval_payload_item(source: RuntimeSourceEvidence) -> dict:
+    document = source.extracted_document
+    item = {
+        "title": source.citation.title,
+        "url": source.citation.url,
+        "snippet": source.citation.snippet,
+        "status": (
+            AnswerSourceType.source_verified
+            if source.is_verified
+            else AnswerSourceType.search_discovered
+        ),
+    }
+    document_text = _document_text(document) if document is not None else ""
+    if document is not None and document_text:
+        item["extractedTitle"] = document.title
+        item["extractedContent"] = document_text[:4000]
+    return item
+
+
+def _document_text(document: RuntimeExtractedDocument) -> str:
+    return (document.content or document.raw_content).strip()
+
+
 def _parse_json(content: str) -> dict:
+    content = _strip_json_fence(content.strip())
     try:
         payload = json.loads(content)
     except json.JSONDecodeError as error:
@@ -194,6 +265,15 @@ def _parse_json(content: str) -> dict:
     if not isinstance(payload, dict):
         raise SiftRuntimeError("invalid_json", "Runtime response JSON must be an object.")
     return payload
+
+
+def _strip_json_fence(content: str) -> str:
+    if not content.startswith("```"):
+        return content
+    lines = content.splitlines()
+    if len(lines) < 3 or not lines[-1].strip().startswith("```"):
+        return content
+    return "\n".join(lines[1:-1]).strip()
 
 
 def _validate_turn(payload: dict) -> ConceptTurnResult:
@@ -220,13 +300,13 @@ def _initial_with_runtime_metadata(
     result: ConceptInitialResult,
     completion: RuntimeModelResponse,
     latency_ms: int,
-    citations: list[RuntimeCitation],
+    evidence: list[RuntimeSourceEvidence],
 ) -> ConceptInitialResult:
     return result.model_copy(
         update={
             "answer_source": _answer_source_with_citations(
                 result.answer_source,
-                citations,
+                evidence,
             ),
             "model_meta": result.model_meta.model_copy(
                 update={
@@ -245,13 +325,13 @@ def _turn_with_runtime_metadata(
     result: ConceptTurnResult,
     completion: RuntimeModelResponse,
     latency_ms: int,
-    citations: list[RuntimeCitation],
+    evidence: list[RuntimeSourceEvidence],
 ) -> ConceptTurnResult:
     return result.model_copy(
         update={
             "answer_source": _answer_source_with_citations(
                 result.answer_source,
-                citations,
+                evidence,
             ),
             "model_meta": result.model_meta.model_copy(
                 update={
@@ -266,19 +346,25 @@ def _turn_with_runtime_metadata(
     )
 
 
-def _answer_source_with_citations(answer_source, citations: list[RuntimeCitation]):
-    if not citations:
+def _answer_source_with_citations(answer_source, evidence: list[RuntimeSourceEvidence]):
+    if not evidence:
         return answer_source
     merged = list(answer_source.citations)
     seen = {citation.url for citation in merged}
-    for citation in citations:
+    for source in evidence:
+        citation = source.citation
         if citation.url in seen:
             continue
         merged.append(CitationDTO(title=citation.title, url=citation.url))
         seen.add(citation.url)
+    source_type = (
+        AnswerSourceType.source_verified
+        if any(source.is_verified for source in evidence)
+        else AnswerSourceType.search_discovered
+    )
     return answer_source.model_copy(
         update={
-            "source_type": AnswerSourceType.web_verified,
+            "source_type": source_type,
             "retrieval_used": True,
             "citations": merged,
         }

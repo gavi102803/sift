@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 
 from sift_backend.concepts.service import ConceptService
 from sift_backend.config import Settings
-from sift_backend.main import create_app
+from sift_backend.main import _filter_runtime_models, create_app
 
 
 def test_health_returns_ok() -> None:
@@ -160,11 +160,27 @@ def test_runtime_provider_catalog_lists_hermes_model_and_web_providers() -> None
     assert model_response.status_code == 200
     model_providers = {provider["id"]: provider for provider in model_response.json()["providers"]}
     assert model_providers["deepseek"]["status"] == "available"
+    assert model_providers["deepseek"]["apiMode"] == "chat_completions"
+    assert model_providers["deepseek"]["protocolDriver"] == "ChatCompletionsDriver"
+    assert (
+        model_providers["deepseek"]["hermesPluginPath"]
+        == "plugins/model-providers/deepseek/__init__.py"
+    )
+    assert model_providers["deepseek"]["exposureTier"] == "plannedStable"
     assert model_providers["anthropic"]["status"] == "available"
     assert model_providers["anthropic"]["adapter"] == "anthropic_messages"
+    assert model_providers["anthropic"]["protocolDriver"] == "AnthropicMessagesDriver"
     assert model_providers["gemini"]["status"] == "available"
+    assert model_providers["gemini"]["exposureTier"] == "plannedStable"
+    assert model_providers["gemini"]["adapter"] == "gemini"
+    assert model_providers["gemini"]["protocolDriver"] == "GeminiDriver"
     assert model_providers["custom"]["isAdvanced"] is True
-    assert model_providers["mock"]["status"] == "development"
+    assert model_providers["alibaba"]["exposureTier"] == "advanced"
+    assert model_providers["alibaba"]["isAdvanced"] is True
+    assert {provider["status"] for provider in model_response.json()["providers"]}.isdisjoint(
+        {"comingSoon"}
+    )
+    assert "mock" not in model_providers
     assert "bedrock" not in model_providers
     assert "qwen-oauth" not in model_providers
     assert "xai" not in model_providers
@@ -181,7 +197,31 @@ def test_runtime_provider_catalog_lists_hermes_model_and_web_providers() -> None
     assert "searxng" not in web_providers
 
 
-def test_web_provider_settings_update_masks_key_and_rebuilds_status() -> None:
+def test_runtime_model_filter_hides_non_chat_and_test_models() -> None:
+    models = _filter_runtime_models(
+        [
+            "text-embedding-3-large",
+            "gpt-5.5testmodel",
+            "gpt-4.1-mini",
+            "gpt-5.5",
+            "gpt-5.5-2026-04-23",
+            "gpt-5-codex",
+            "gpt-5-search-api",
+            "tts-1",
+            "omni-moderation-latest",
+        ],
+        provider_name="openai",
+        preferred_model="gpt-5.5",
+    )
+
+    assert models == ["gpt-5.5", "gpt-4.1-mini"]
+
+
+def test_web_provider_settings_update_masks_key_and_rebuilds_status(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SIFT_PROVIDER_SETTINGS_PATH", str(tmp_path / "model-provider.json"))
     client = TestClient(
         create_app(
             settings=Settings(runtime_api_key=""),
@@ -235,7 +275,8 @@ def test_model_provider_settings_rejects_discarded_upstream_provider() -> None:
     assert "not registered" in response.json()["detail"]
 
 
-def test_provider_settings_are_stored_per_provider() -> None:
+def test_provider_settings_are_stored_per_provider(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("SIFT_PROVIDER_SETTINGS_PATH", str(tmp_path / "model-provider.json"))
     client = TestClient(
         create_app(
             settings=Settings(runtime_api_key=""),

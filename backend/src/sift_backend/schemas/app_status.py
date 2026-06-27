@@ -68,6 +68,10 @@ class RuntimeProviderOptionDTO(SiftBaseModel):
     name: str
     description: str
     adapter: str
+    api_mode: str = Field(alias="apiMode")
+    protocol_driver: str = Field(alias="protocolDriver")
+    hermes_plugin_path: str | None = Field(default=None, alias="hermesPluginPath")
+    exposure_tier: str = Field(alias="exposureTier")
     default_base_url: str = Field(alias="defaultBaseURL")
     default_model: str = Field(alias="defaultModel")
     requires_api_key: bool = Field(alias="requiresApiKey")

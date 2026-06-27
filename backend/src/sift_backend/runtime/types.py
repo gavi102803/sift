@@ -20,7 +20,8 @@ class RuntimeModelRequest:
     model: str
     messages: tuple[RuntimeMessage, ...]
     response_format: dict[str, Any] | None = None
-    temperature: float = 0.2
+    temperature: float | None = None
+    structured_output_strategy: str | None = None
 
 
 @dataclass(frozen=True)
@@ -56,4 +57,3 @@ class RuntimeModelProvider(Protocol):
 
     async def list_models(self) -> list[str]:
         ...
-

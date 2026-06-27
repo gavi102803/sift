@@ -17,6 +17,88 @@ struct ConceptLocalStore {
         return concept
     }
 
+    func recordInitialCaptureQuestion(concept: Concept, question: String) {
+        let trimmedQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuestion.isEmpty else { return }
+        let conversation = ensureConversation(for: concept)
+        conversation.initialQuery = trimmedQuestion
+        conversation.updatedAt = .now
+        if conversation.messages.contains(where: { message in
+            message.role == ConversationRole.user.rawValue
+                && message.content == trimmedQuestion
+                && message.updateMode == initialCaptureUpdateMode
+        }) {
+            return
+        }
+        modelContext.insert(
+            ConversationMessage(
+                role: ConversationRole.user.rawValue,
+                content: trimmedQuestion,
+                createdAt: .now,
+                updateMode: initialCaptureUpdateMode,
+                conversation: conversation
+            )
+        )
+    }
+
+    func recordInitialGenerationAnswer(concept: Concept, question: String, answer: String) {
+        recordInitialCaptureQuestion(concept: concept, question: question)
+        let trimmedAnswer = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedAnswer.isEmpty else { return }
+        let conversation = ensureConversation(for: concept)
+        if conversation.messages.contains(where: { message in
+            message.role == ConversationRole.assistant.rawValue
+                && message.updateMode == initialCaptureUpdateMode
+        }) {
+            return
+        }
+        modelContext.insert(
+            ConversationMessage(
+                role: ConversationRole.assistant.rawValue,
+                content: trimmedAnswer,
+                createdAt: .now,
+                updateMode: initialCaptureUpdateMode,
+                conversation: conversation
+            )
+        )
+    }
+
+    func recordInitialGenerationFailure(concept: Concept, error: Error) {
+        let conversation = ensureConversation(for: concept)
+        conversation.updatedAt = .now
+        let message = "Generation failed: \(error.localizedDescription)"
+        if conversation.messages.contains(where: { existing in
+            existing.role == ConversationRole.assistant.rawValue
+                && existing.content == message
+                && existing.updateMode == failedFollowUpUpdateMode
+        }) {
+            return
+        }
+        modelContext.insert(
+            ConversationMessage(
+                role: ConversationRole.assistant.rawValue,
+                content: message,
+                createdAt: .now,
+                updateMode: failedFollowUpUpdateMode,
+                conversation: conversation
+            )
+        )
+    }
+
+    func localConversationTurns(for concept: Concept) -> [ConceptHistoryTurnDTO] {
+        guard let conversation = concept.conversation else { return [] }
+        return conversation.messages
+            .sorted { $0.createdAt < $1.createdAt }
+            .map { message in
+                ConceptHistoryTurnDTO(
+                    id: message.id,
+                    role: message.role,
+                    content: message.content,
+                    answerSource: nil
+                )
+            }
+    }
+
     func findCaptureMatch(rawCapture: String) throws -> CaptureMatchResult {
         let normalizedCapture = normalizedLookupKey(rawCapture)
         guard !normalizedCapture.isEmpty else { return .none }
@@ -461,6 +543,10 @@ struct ConceptLocalStore {
 
     private var failedFollowUpUpdateMode: String {
         "failed"
+    }
+
+    private var initialCaptureUpdateMode: String {
+        "initialCapture"
     }
 }
 

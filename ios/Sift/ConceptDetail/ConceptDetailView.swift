@@ -1379,8 +1379,11 @@ private struct ProposalPatchPreview: View {
 }
 
 private func sourceLabel(_ source: AnswerSourceDTO) -> String {
-    if source.retrievalUsed == true || source.sourceType == "webVerified" {
+    if source.sourceType == "sourceVerified" || source.sourceType == "webVerified" {
         return "Web"
+    }
+    if source.sourceType == "searchDiscovered" {
+        return "Search"
     }
     if source.sourceType == "userProvided" {
         return "Notes"
@@ -1389,8 +1392,11 @@ private func sourceLabel(_ source: AnswerSourceDTO) -> String {
 }
 
 private func sourceIcon(_ source: AnswerSourceDTO) -> String {
-    if source.retrievalUsed == true || source.sourceType == "webVerified" {
+    if source.sourceType == "sourceVerified" || source.sourceType == "webVerified" {
         return "network"
+    }
+    if source.sourceType == "searchDiscovered" {
+        return "magnifyingglass"
     }
     if source.sourceType == "userProvided" {
         return "doc.text"

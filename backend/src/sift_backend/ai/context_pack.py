@@ -46,9 +46,11 @@ def build_concept_turn_context_pack(
                 "do not persist the fact."
             ),
             (
-                "When web retrieval is used, set answerSource.sourceType to webVerified, "
-                "set retrievalUsed to true, include concise citations, and avoid claims "
-                "that are not supported by retrieved evidence."
+                "When web retrieval is used, set answerSource.sourceType to sourceVerified "
+                "only for claims supported by extracted source text. Use searchDiscovered "
+                "when only search snippets are available. Set retrievalUsed to true, include "
+                "concise citations, and avoid claims that are not supported by verified source "
+                "evidence."
             ),
         ]
     )
@@ -210,7 +212,13 @@ def initial_concept_response_format() -> dict[str, Any]:
                 "properties": {
                     "sourceType": {
                         "type": "string",
-                        "enum": ["modelKnowledge", "userProvided", "webVerified"],
+                            "enum": [
+                                "modelKnowledge",
+                                "userProvided",
+                                "searchDiscovered",
+                                "sourceVerified",
+                                "webVerified",
+                            ],
                     },
                     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                     "uncertaintyNote": {"type": ["string", "null"]},
@@ -294,7 +302,13 @@ def concept_turn_response_format() -> dict[str, Any]:
                 "properties": {
                     "sourceType": {
                         "type": "string",
-                        "enum": ["modelKnowledge", "userProvided", "webVerified"],
+                            "enum": [
+                                "modelKnowledge",
+                                "userProvided",
+                                "searchDiscovered",
+                                "sourceVerified",
+                                "webVerified",
+                            ],
                     },
                     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                     "uncertaintyNote": {"type": ["string", "null"]},

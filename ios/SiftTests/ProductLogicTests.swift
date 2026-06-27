@@ -176,6 +176,70 @@ final class ProductLogicTests: XCTestCase {
         XCTAssertEqual(ConversationTimeline.initialExchange(from: messages).map(\.content), ["What is a semantic cache?"])
     }
 
+    // MARK: - Local-first companion + failure-state UX
+
+    /// Failure categories are classified without leaking transport detail.
+    func testCompanionErrorKindClassifiesConnectionVsServer() {
+        XCTAssertEqual(CompanionErrorKind(URLError(.cannotConnectToHost)), .unreachable)
+        XCTAssertEqual(CompanionErrorKind(URLError(.timedOut)), .unreachable)
+        XCTAssertEqual(CompanionErrorKind(URLError(.notConnectedToInternet)), .unreachable)
+        XCTAssertEqual(CompanionErrorKind(SiftAPIError.httpStatus(502, detail: nil)), .companionError)
+        XCTAssertEqual(CompanionErrorKind(SiftAPIError.httpStatus(404, detail: nil)), .requestRejected)
+        XCTAssertEqual(CompanionErrorKind(SiftAPIError.invalidResponse), .unknown)
+        XCTAssertEqual(CompanionErrorKind(NSError(domain: "x", code: 1)), .unknown)
+    }
+
+    /// Copy distinguishes "couldn't reach" from "couldn't finish", and never
+    /// echoes raw error text.
+    func testCompanionCopyDistinguishesUnreachableFromGeneration() {
+        XCTAssertEqual(CompanionCopy.message(for: .unreachable).title, CompanionCopy.unreachableTitle)
+        XCTAssertEqual(CompanionCopy.message(for: .companionError).title, CompanionCopy.generationTitle)
+        XCTAssertNotEqual(CompanionCopy.hint(for: .unreachable), CompanionCopy.hint(for: .companionError))
+    }
+
+    /// Mock and unavailable are never the same surface.
+    func testMockAndUnavailableAreDistinguishable() {
+        XCTAssertNotEqual(CompanionStatus.mock.developerLabel, CompanionStatus.unavailable.developerLabel)
+        XCTAssertTrue(AppServices.preview.usesMockBackend)
+        let httpServices = AppServices(apiClient: HTTPSiftAPIClient(baseURL: URL(string: "http://127.0.0.1:8000")!))
+        XCTAssertFalse(httpServices.usesMockBackend)
+    }
+
+    /// Library distinguishes draft / generating / ready / failed without exposing
+    /// model or provider names.
+    func testCaptureStatusBadgeDistinguishesStates() {
+        XCTAssertNil(CaptureStatusBadge.label(for: CaptureStatus.ready.rawValue))
+        XCTAssertEqual(CaptureStatusBadge.label(for: CaptureStatus.generating.rawValue), "Generating")
+        XCTAssertEqual(CaptureStatusBadge.label(for: CaptureStatus.draft.rawValue), "Draft")
+        XCTAssertEqual(CaptureStatusBadge.label(for: CaptureStatus.generationFailed.rawValue), "Needs retry")
+        XCTAssertFalse(CaptureStatusBadge.subtitle(for: CaptureStatus.generationFailed.rawValue).isEmpty)
+    }
+
+    /// A terminal-only stream (completed result, no deltas) resolves to the final
+    /// answer — never an empty assistant bubble.
+    func testTerminalOnlyStreamResolvesToFinalAnswer() {
+        XCTAssertEqual(
+            ConversationTimeline.resolvedAssistantContent(streamed: "", finalAnswer: "The full answer."),
+            "The full answer."
+        )
+        // Streamed text is kept only if the final answer is somehow empty.
+        XCTAssertEqual(
+            ConversationTimeline.resolvedAssistantContent(streamed: "partial", finalAnswer: ""),
+            "partial"
+        )
+    }
+
+    /// A failed capture keeps the user's original question visible (as the
+    /// initial-capture user turn) and never renders the failure as an answer.
+    func testCaptureFailedKeepsOriginalQuestion() {
+        let messages = [
+            message(.user, "What is a semantic cache?", LocalConversationMarker.initialCapture, 0),
+            message(.assistant, "Generation failed: the provider is unavailable.", LocalConversationMarker.failed, 1)
+        ]
+        let exchange = ConversationTimeline.initialExchange(from: messages)
+        XCTAssertEqual(exchange.map(\.content), ["What is a semantic cache?"])
+    }
+
     private func turn(_ role: ConversationRole, _ content: String) -> ConceptHistoryTurnDTO {
         ConceptHistoryTurnDTO(role: role.rawValue, content: content)
     }

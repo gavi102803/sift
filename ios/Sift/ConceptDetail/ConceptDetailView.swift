@@ -356,7 +356,13 @@ struct ConceptDetailView: View {
             }
             store.clearFailedFollowUpDrafts(for: concept, matching: question)
             lastAnswerSource = response.answerSource
-            replaceAssistantAnswer(response.answer, turnId: assistantTurnId)
+            // Terminal-only streams (e.g. an idempotent retry) carry no deltas;
+            // fall back to the authoritative final answer so no blank bubble remains.
+            let streamed = turns.first(where: { $0.id == assistantTurnId })?.content ?? ""
+            replaceAssistantAnswer(
+                ConversationTimeline.resolvedAssistantContent(streamed: streamed, finalAnswer: response.answer),
+                turnId: assistantTurnId
+            )
             companion?.noteSuccess()
             isReadingOffline = false
             await refreshTurns(concept.id)

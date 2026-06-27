@@ -136,6 +136,15 @@ enum ConversationTimeline {
         return localInitial + remote
     }
 
+    /// The assistant content to show once a streamed turn completes. The final
+    /// answer is authoritative and covers terminal-only streams — a retry that
+    /// returns the completed result with no replayed deltas — so an empty
+    /// streamed bubble is never left behind. Streamed text is used only if the
+    /// final answer is empty.
+    static func resolvedAssistantContent(streamed: String, finalAnswer: String) -> String {
+        finalAnswer.isEmpty ? streamed : finalAnswer
+    }
+
     private static func remoteContainsQuestion(_ remote: [ConceptHistoryTurnDTO], question: String) -> Bool {
         let key = normalized(question)
         return remote.contains { turn in

@@ -409,11 +409,25 @@ private struct ConceptLibraryCard: View {
                             .foregroundStyle(SiftColor.textFaintest)
                     }
 
-                    Text(concept.oneLineExplanation.isEmpty ? statusText : concept.oneLineExplanation)
+                    Text(concept.oneLineExplanation.isEmpty
+                         ? CaptureStatusBadge.subtitle(for: concept.captureStatus)
+                         : concept.oneLineExplanation)
                         .font(SiftFont.cardDesc)
                         .foregroundStyle(SiftColor.textMuted)
                         .lineLimit(1)
                         .lineSpacing(2)
+
+                    if let badge = CaptureStatusBadge.label(for: concept.captureStatus) {
+                        HStack(spacing: 5) {
+                            Circle()
+                                .fill(CaptureStatusBadge.color(for: concept.captureStatus))
+                                .frame(width: 6, height: 6)
+                            Text(badge)
+                                .font(SiftFont.tag)
+                                .foregroundStyle(SiftColor.textFaint)
+                        }
+                        .padding(.top, 1)
+                    }
 
                     if !chips.isEmpty {
                         HStack(spacing: 6) {
@@ -436,10 +450,6 @@ private struct ConceptLibraryCard: View {
         .buttonStyle(.plain)
     }
 
-    private var statusText: String {
-        concept.captureStatus.replacingOccurrences(of: "Generation", with: "generation")
-    }
-
     private func relativeTime(for date: Date) -> String {
         let interval = -date.timeIntervalSinceNow
         if interval < 60 { return "NOW" }
@@ -449,6 +459,40 @@ private struct ConceptLibraryCard: View {
             .uppercased()
             .replacingOccurrences(of: " AGO", with: "")
             .replacingOccurrences(of: " ", with: "")
+    }
+}
+
+/// Quiet, user-facing capture-state labels for Library cards. Distinguishes
+/// draft / generating / ready / failed without exposing model or provider names.
+enum CaptureStatusBadge {
+    /// Short badge label, or nil for ready/archived (a finished card needs none).
+    static func label(for status: String) -> String? {
+        switch CaptureStatus(rawValue: status) {
+        case .generating, .pendingGeneration: "Generating"
+        case .draft: "Draft"
+        case .generationFailed: "Needs retry"
+        case .needsDisambiguation: "Review"
+        case .ready, .archived, .none: nil
+        }
+    }
+
+    /// Subtitle fallback when a card has no one-line explanation yet.
+    static func subtitle(for status: String) -> String {
+        switch CaptureStatus(rawValue: status) {
+        case .generating, .pendingGeneration: "Generating your card…"
+        case .draft: "Saved draft."
+        case .generationFailed: "Generation didn’t finish — open to retry."
+        case .needsDisambiguation: "Review possible matches."
+        default: ""
+        }
+    }
+
+    static func color(for status: String) -> Color {
+        switch CaptureStatus(rawValue: status) {
+        case .generationFailed: SiftColor.danger
+        case .generating, .pendingGeneration: SiftColor.accent
+        default: SiftColor.textFaint
+        }
     }
 }
 

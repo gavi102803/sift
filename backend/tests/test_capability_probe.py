@@ -33,10 +33,32 @@ async def test_capability_probe_caches_json_object_when_json_schema_fails(
     )
 
     assert result.plain_completion.ok is True
+    assert result.base_url_fingerprint != "none"
     assert result.structured_output["jsonSchema"].ok is False
     assert result.structured_output["jsonObject"].ok is True
+    assert result.structured_output["promptAndValidate"].ok is True
     assert result.selected_structured_output == "jsonObject"
-    assert get_cached_structured_output_strategy("deepseek", "deepseek-v4-flash") == "jsonObject"
+    assert provider.structured_request_formats == {
+        "jsonSchema": "json_schema",
+        "jsonObject": "json_object",
+        "promptAndValidate": None,
+    }
+    assert (
+        get_cached_structured_output_strategy(
+            "deepseek",
+            "deepseek-v4-flash",
+            base_url=provider.base_url,
+        )
+        == "jsonObject"
+    )
+    assert (
+        get_cached_structured_output_strategy(
+            "deepseek",
+            "deepseek-v4-flash",
+            base_url="https://other.example/v1",
+        )
+        is None
+    )
 
     policy = resolve_capability_policy(
         "deepseek",
@@ -53,7 +75,10 @@ async def test_capability_probe_caches_json_object_when_json_schema_fails(
 
 
 @pytest.mark.asyncio
-async def test_custom_policy_uses_cached_probe_strategy(tmp_path, monkeypatch) -> None:
+async def test_custom_policy_uses_cached_probe_strategy_for_same_endpoint(
+    tmp_path,
+    monkeypatch,
+) -> None:
     monkeypatch.setenv("SIFT_CAPABILITY_PROBE_CACHE_PATH", str(tmp_path / "probes.json"))
     provider = StructuredProbeProvider()
 
@@ -63,7 +88,7 @@ async def test_custom_policy_uses_cached_probe_strategy(tmp_path, monkeypatch) -
         model="local-model",
     )
 
-    policy = resolve_capability_policy(
+    policy_without_endpoint = resolve_capability_policy(
         "custom",
         "local-model",
         response_format={
@@ -71,22 +96,65 @@ async def test_custom_policy_uses_cached_probe_strategy(tmp_path, monkeypatch) -
             "json_schema": {"name": "answer", "schema": {"type": "object"}},
         },
     )
-
-    assert select_structured_output_strategy(policy, {"type": "json_schema"}) == (
-        StructuredOutputStrategy.JSON_OBJECT
+    policy_with_endpoint = resolve_capability_policy(
+        "custom",
+        "local-model",
+        response_format={
+            "type": "json_schema",
+            "json_schema": {"name": "answer", "schema": {"type": "object"}},
+        },
+        base_url=provider.base_url,
     )
+
+    assert select_structured_output_strategy(
+        policy_without_endpoint,
+        {"type": "json_schema"},
+    ) == (
+        StructuredOutputStrategy.PROMPT_AND_VALIDATE
+    )
+    assert select_structured_output_strategy(
+        policy_with_endpoint,
+        {"type": "json_schema"},
+    ) == StructuredOutputStrategy.JSON_OBJECT
+
+
+@pytest.mark.asyncio
+async def test_prompt_and_validate_probe_requires_schema_valid_json(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SIFT_CAPABILITY_PROBE_CACHE_PATH", str(tmp_path / "probes.json"))
+    provider = InvalidPromptValidationProvider()
+
+    result = await probe_model_capabilities(
+        provider,
+        provider_name="custom",
+        model="local-model",
+    )
+
+    assert result.structured_output["promptAndValidate"].ok is False
+    assert result.structured_output["promptAndValidate"].failure_kind == "malformed_response"
 
 
 class StructuredProbeProvider:
     provider_name = "deepseek"
+    base_url = "https://api.deepseek.com/v1"
+
+    def __init__(self) -> None:
+        self.structured_request_formats: dict[str, str | None] = {}
 
     async def complete(self, request: RuntimeModelRequest) -> RuntimeModelResponse:
-        if request.response_format is None:
+        if request.structured_output_strategy is None:
             return RuntimeModelResponse(
                 content="ok",
                 provider=self.provider_name,
                 model=request.model,
             )
+        self.structured_request_formats[request.structured_output_strategy] = (
+            request.response_format.get("type")
+            if isinstance(request.response_format, dict)
+            else None
+        )
         if request.structured_output_strategy == "jsonSchema":
             raise SiftRuntimeError(
                 "provider_error",
@@ -109,3 +177,14 @@ class StructuredProbeProvider:
 
     async def list_models(self) -> list[str]:
         return []
+
+
+class InvalidPromptValidationProvider(StructuredProbeProvider):
+    async def complete(self, request: RuntimeModelRequest) -> RuntimeModelResponse:
+        if request.structured_output_strategy == "promptAndValidate":
+            return RuntimeModelResponse(
+                content=json.dumps({"ok": "true"}),
+                provider=self.provider_name,
+                model=request.model,
+            )
+        return await super().complete(request)

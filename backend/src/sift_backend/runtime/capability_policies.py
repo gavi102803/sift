@@ -87,6 +87,7 @@ def resolve_capability_policy(
     *,
     response_format: dict[str, Any] | None = None,
     strategy_override: str | None = None,
+    base_url: str | None = None,
 ) -> ResolvedCapabilityPolicy:
     provider = provider_name.strip().lower()
     normalized_model = model.strip()
@@ -156,7 +157,7 @@ def resolve_capability_policy(
             structured_output=(_structured_strategy_from_value(strategy_override),),
         )
     elif response_format is not None:
-        cached_strategy = _cached_strategy(provider, normalized_model)
+        cached_strategy = _cached_strategy(provider, normalized_model, base_url=base_url)
         if cached_strategy is not None:
             policy = _replace(policy, structured_output=(cached_strategy,))
 
@@ -201,12 +202,21 @@ def _structured_strategy_from_value(value: str) -> StructuredOutputStrategy:
     return StructuredOutputStrategy.PROMPT_AND_VALIDATE
 
 
-def _cached_strategy(provider_name: str, model: str) -> StructuredOutputStrategy | None:
+def _cached_strategy(
+    provider_name: str,
+    model: str,
+    *,
+    base_url: str | None,
+) -> StructuredOutputStrategy | None:
     try:
         from sift_backend.runtime.capability_probe import get_cached_structured_output_strategy
     except ImportError:
         return None
-    cached = get_cached_structured_output_strategy(provider_name, model)
+    cached = get_cached_structured_output_strategy(
+        provider_name,
+        model,
+        base_url=base_url,
+    )
     return _structured_strategy_from_value(cached) if cached else None
 
 

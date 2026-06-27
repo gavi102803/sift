@@ -67,12 +67,20 @@ class ChatCompletionsDriver:
         data = await self._request(
             "POST",
             "/chat/completions",
-            json=_chat_payload(request, provider_name=self.provider_name),
+            json=_chat_payload(
+                request,
+                provider_name=self.provider_name,
+                base_url=self.base_url,
+            ),
         )
         return _parse_chat_completion(data, self.provider_name, request.model)
 
     async def stream(self, request: RuntimeModelRequest) -> AsyncIterator[RuntimeModelStreamEvent]:
-        payload = _chat_payload(request, provider_name=self.provider_name) | {"stream": True}
+        payload = _chat_payload(
+            request,
+            provider_name=self.provider_name,
+            base_url=self.base_url,
+        ) | {"stream": True}
         chunks: list[str] = []
         async for data in self._stream_request("/chat/completions", payload):
             delta = _stream_delta(data)
@@ -169,8 +177,17 @@ OpenAICompatibleRuntimeProvider = ChatCompletionsDriver
 AnthropicMessagesRuntimeProvider = AnthropicMessagesDriver
 
 
-def _chat_payload(request: RuntimeModelRequest, *, provider_name: str) -> dict[str, Any]:
-    return build_chat_completions_payload(request, provider_name=provider_name)
+def _chat_payload(
+    request: RuntimeModelRequest,
+    *,
+    provider_name: str,
+    base_url: str | None = None,
+) -> dict[str, Any]:
+    return build_chat_completions_payload(
+        request,
+        provider_name=provider_name,
+        base_url=base_url,
+    )
 
 
 def _parse_chat_completion(

@@ -15,12 +15,14 @@ def build_chat_completions_payload(
     request: RuntimeModelRequest,
     *,
     provider_name: str,
+    base_url: str | None = None,
 ) -> dict[str, Any]:
     policy = resolve_capability_policy(
         provider_name,
         request.model,
         response_format=request.response_format,
         strategy_override=request.structured_output_strategy,
+        base_url=base_url,
     )
     strategy = select_structured_output_strategy(policy, request.response_format)
     messages = [

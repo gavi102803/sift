@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from sift_backend.ai.context_pack import RecentTurn
 from sift_backend.api.concepts import build_concept_service
+from sift_backend.auth.principal import CurrentPrincipal
 from sift_backend.concepts.service import (
     ConceptService,
     InMemoryConceptStore,
@@ -37,6 +38,7 @@ from sift_backend.schemas.concepts import (
     ConceptTurnRequest,
     CreateConceptRequest,
     NoteBlockDTO,
+    UpdateConceptSummaryRequest,
 )
 from sift_backend.schemas.model_outputs import ConceptTurnResult, ModelMeta, ModelUpdateProposal
 from sift_backend.schemas.patches import AddRelationPatchOperation, AppendPatchOperation
@@ -292,6 +294,35 @@ async def test_create_concept_async_uses_model_generated_card() -> None:
     assert service.get_concept(concept.id).display_title == "RAG"
 
 
+def test_owner_boundary_hides_other_users_concepts() -> None:
+    store = InMemoryConceptStore()
+    owner_a = ConceptService(
+        store=store,
+        principal=CurrentPrincipal(user_id="owner-a", auth_method="test"),
+    )
+    owner_b = ConceptService(
+        store=store,
+        principal=CurrentPrincipal(user_id="owner-b", auth_method="test"),
+    )
+
+    concept = owner_a.create_concept(CreateConceptRequest(rawCapture="RAG"))
+
+    assert [item.id for item in owner_a.list_concepts()] == [concept.id]
+    assert owner_b.list_concepts() == []
+    with pytest.raises(HTTPException) as error:
+        owner_b.get_concept(concept.id)
+    assert error.value.status_code == 404
+    with pytest.raises(HTTPException) as update_error:
+        owner_b.update_concept_summary(
+            concept.id,
+            UpdateConceptSummaryRequest(
+                displayTitle="Stolen",
+                oneLineExplanation="Should not update.",
+            ),
+        )
+    assert update_error.value.status_code == 404
+
+
 @pytest.mark.asyncio
 async def test_submit_turn_maps_runtime_error_to_bad_gateway() -> None:
     service = ConceptService(model_service=FailingModelService())
@@ -305,6 +336,82 @@ async def test_submit_turn_maps_runtime_error_to_bad_gateway() -> None:
 
     assert error.value.status_code == 502
     assert error.value.detail["code"] == "invalid_schema"
+    assert service.get_concept(concept.id).note_revision == concept.note_revision
+    assert [turn.content for turn in service.store.list_turns(concept.id)] == [
+        "RAG",
+        "RAG captured as a draft concept.",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_initial_structured_output_failure_does_not_write_concept() -> None:
+    store = InMemoryConceptStore()
+    provider = RecordingRuntimeProvider(
+        responses=[
+            RuntimeModelResponse(
+                content="not json",
+                provider="test",
+                model="test-model",
+            )
+        ]
+    )
+    runtime = LightweightHermesRuntime(
+        model_provider=provider,
+        model="test-model",
+        web_search_tool=DisabledWebSearchTool(),
+        web_search_enabled=False,
+    )
+    service = ConceptService(
+        store=store,
+        model_service=SiftRuntimeConceptModelService(runtime),
+    )
+
+    with pytest.raises(HTTPException) as error:
+        await service.create_concept_async(CreateConceptRequest(rawCapture="RAG"))
+
+    assert error.value.status_code == 502
+    assert error.value.detail["code"] == "invalid_json"
+    assert store.list_concepts() == []
+
+
+@pytest.mark.asyncio
+async def test_turn_structured_output_failure_does_not_mutate_knowledge() -> None:
+    provider = RecordingRuntimeProvider(
+        responses=[
+            RuntimeModelResponse(
+                content="not json",
+                provider="test",
+                model="test-model",
+            )
+        ]
+    )
+    runtime = LightweightHermesRuntime(
+        model_provider=provider,
+        model="test-model",
+        web_search_tool=DisabledWebSearchTool(),
+        web_search_enabled=False,
+    )
+    service = ConceptService(model_service=SiftRuntimeConceptModelService(runtime))
+    concept = service.create_concept(CreateConceptRequest(rawCapture="RAG"))
+
+    with pytest.raises(HTTPException) as error:
+        await service.submit_turn(
+            concept.id,
+            ConceptTurnRequest(question="Explain the stable definition."),
+        )
+
+    assert error.value.status_code == 502
+    assert error.value.detail["code"] == "invalid_json"
+    persisted = service.get_concept(concept.id)
+    assert persisted.note_revision == concept.note_revision
+    assert persisted.blocks == concept.blocks
+    assert persisted.claims == []
+    assert persisted.sources == []
+    assert persisted.learning_state is None
+    assert [turn.content for turn in service.store.list_turns(concept.id)] == [
+        "RAG",
+        "RAG captured as a draft concept.",
+    ]
 
 
 @pytest.mark.asyncio

@@ -115,8 +115,11 @@ private enum ConceptPreview {
         )
     }
 
-    /// Remote follow-up turns (backend does not persist the initial capture).
-    static let followUpTurns: [ConceptHistoryTurnDTO] = [
+    /// Authoritative backend history: it now persists the initial exchange
+    /// (question + first answer) plus any follow-ups.
+    static let authoritativeTurns: [ConceptHistoryTurnDTO] = [
+        ConceptHistoryTurnDTO(role: ConversationRole.user.rawValue, content: "What is a semantic cache?"),
+        ConceptHistoryTurnDTO(role: ConversationRole.assistant.rawValue, content: "A cache keyed on the meaning of a request, so similar questions can reuse a stored answer."),
         ConceptHistoryTurnDTO(role: ConversationRole.user.rawValue, content: "How is it different from a normal cache?"),
         ConceptHistoryTurnDTO(role: ConversationRole.assistant.rawValue, content: "A normal cache needs an exact key match. A semantic cache matches on meaning, so paraphrases still hit.")
     ]
@@ -232,7 +235,7 @@ private enum ConceptPreview {
         ConceptDetailView(conceptId: ConceptPreview.conceptId, initialMode: .followUp)
     }
     .modelContainer(ConceptPreview.container(withInitialExchange: true))
-    .environment(\.appServices, ConceptPreview.services(turns: ConceptPreview.followUpTurns))
+    .environment(\.appServices, ConceptPreview.services(turns: ConceptPreview.authoritativeTurns))
     .preferredColorScheme(.dark)
 }
 

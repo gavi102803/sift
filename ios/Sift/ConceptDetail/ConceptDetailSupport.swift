@@ -69,6 +69,85 @@ enum ProposalCopy {
     }
 }
 
+// MARK: - Conversation timeline (authority + offline fallback)
+
+/// Decides what the follow-up timeline shows.
+///
+/// Authority model:
+/// - **Backend conversation history is the durable authority.** The backend now
+///   persists the initial user turn *and* the initial assistant turn.
+/// - **The local `initialCapture` exchange is an optimistic / offline fallback
+///   only** — shown immediately after capture and while the request is
+///   in-flight, failed, or offline. Once backend history is read it is
+///   superseded.
+///
+/// The initial exchange is treated as one logical pair: we never per-message
+/// text-merge local and remote (which would duplicate when the assistant
+/// wording differs slightly). When remote history is present it wins outright;
+/// the local pair is only prepended (as a whole) if the remote somehow lacks
+/// the original question.
+enum ConversationTimeline {
+    /// The optimistic initial exchange from locally stored messages: the capture
+    /// question and its first answer, tagged `initialCapture`. The `failed`
+    /// marker is excluded — a generation failure is surfaced as a retry card,
+    /// never as a conversation turn.
+    static func initialExchange(from messages: [ConversationMessage]) -> [ConceptHistoryTurnDTO] {
+        messages
+            .filter { message in
+                message.updateMode == LocalConversationMarker.initialCapture
+                    && ConversationRole(rawValue: message.role) != nil
+            }
+            .sorted { $0.createdAt < $1.createdAt }
+            .map { message in
+                ConceptHistoryTurnDTO(id: message.id, role: message.role, content: message.content)
+            }
+    }
+
+    /// The most recent failed follow-up *draft*: a user message tagged with the
+    /// exact `failed` marker. Identified precisely — never by "unknown update
+    /// mode" — so the initial question is never mistaken for a draft.
+    static func failedFollowUpDraft(from messages: [ConversationMessage]) -> String? {
+        messages
+            .filter { message in
+                message.role == ConversationRole.user.rawValue
+                    && message.updateMode == LocalConversationMarker.failed
+            }
+            .sorted { $0.createdAt > $1.createdAt }
+            .first?
+            .content
+    }
+
+    /// The display timeline. Remote (backend) history is authoritative; the local
+    /// initial exchange is only a fallback until it arrives.
+    static func displayTurns(
+        localInitial: [ConceptHistoryTurnDTO],
+        remote: [ConceptHistoryTurnDTO]
+    ) -> [ConceptHistoryTurnDTO] {
+        // Remote not arrived yet → show the optimistic local exchange.
+        guard !remote.isEmpty else { return localInitial }
+        // Remote present and already contains the initial exchange → it is
+        // authoritative and the local pair is superseded.
+        guard let question = localInitial.first(where: { $0.role == ConversationRole.user.rawValue })?.content,
+              !remoteContainsQuestion(remote, question: question) else {
+            return remote
+        }
+        // Defensive: remote lacks the original question → prepend the whole local
+        // pair (never split it, never per-message text-merge).
+        return localInitial + remote
+    }
+
+    private static func remoteContainsQuestion(_ remote: [ConceptHistoryTurnDTO], question: String) -> Bool {
+        let key = normalized(question)
+        return remote.contains { turn in
+            turn.role == ConversationRole.user.rawValue && normalized(turn.content) == key
+        }
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+}
+
 // MARK: - Markdown body
 
 struct MarkdownText: View {

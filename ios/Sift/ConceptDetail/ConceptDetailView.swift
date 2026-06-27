@@ -371,24 +371,15 @@ struct ConceptDetailView: View {
     }
 
     private func restoreFailedFollowUpDraft() {
+        // A failed follow-up draft only restores the composer text — it is never
+        // a conversation turn. Read it directly (no conversation is created).
         guard followUpText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let concept,
-              let messages = concept.conversation?.messages else {
+              let draft = ConversationTimeline.failedFollowUpDraft(
+                from: concept.conversation?.messages ?? []
+              ) else {
             return
         }
-        // A failed follow-up draft is a *user* message tagged with the exact
-        // `failed` marker. Identify it precisely — never by "unknown update
-        // mode" — so the initial-capture turn is not mistaken for a draft.
-        // Read it directly so opening a card never has to create a conversation.
-        let draft = messages
-            .filter { message in
-                message.role == ConversationRole.user.rawValue
-                    && message.updateMode == LocalConversationMarker.failed
-            }
-            .sorted { $0.createdAt > $1.createdAt }
-            .first?
-            .content
-        guard let draft else { return }
         followUpText = draft
         errorMessage = "Previous follow-up was not sent. You can edit and retry it."
     }
@@ -416,54 +407,28 @@ struct ConceptDetailView: View {
     }
 
     private func refreshTurns(_ conceptId: UUID) async {
-        let localInitial = initialExchangeTurns(for: concept)
+        let localInitial = ConversationTimeline.initialExchange(
+            from: concept?.conversation?.messages ?? []
+        )
+        // Local-only concepts have never synced — show the optimistic exchange.
         if let concept, ConceptStatusRules.isLocalOnly(concept.captureStatus) {
             turns = localInitial
             return
         }
         do {
             let remoteTurns = try await appServices.apiClient.listTurns(conceptId: conceptId)
-            turns = Self.reconciledTurns(localInitial: localInitial, remote: remoteTurns)
+            // Backend history is authoritative; the local exchange is superseded.
+            turns = ConversationTimeline.displayTurns(localInitial: localInitial, remote: remoteTurns)
         } catch is CancellationError {
             return
         } catch {
+            // Offline / failed: keep the optimistic exchange visible rather than
+            // blanking an unsynced timeline.
+            if turns.isEmpty {
+                turns = localInitial
+            }
             errorMessage = error.localizedDescription
         }
-    }
-
-    /// The persisted initial exchange (original capture question + its first
-    /// answer), tagged with the `initialCapture` marker. The `failed` marker is
-    /// excluded — generation failures surface as a retry card, never a turn.
-    private func initialExchangeTurns(for concept: Concept?) -> [ConceptHistoryTurnDTO] {
-        guard let messages = concept?.conversation?.messages else { return [] }
-        return messages
-            .filter { message in
-                message.updateMode == LocalConversationMarker.initialCapture
-                    && ConversationRole(rawValue: message.role) != nil
-            }
-            .sorted { $0.createdAt < $1.createdAt }
-            .map { message in
-                ConceptHistoryTurnDTO(id: message.id, role: message.role, content: message.content)
-            }
-    }
-
-    /// Reconcile the locally-persisted initial exchange with remote turns. The
-    /// backend does not persist the initial capture, so remote turns are
-    /// appended after the local initial exchange. Initial turns that the remote
-    /// already contains are dropped (remote wins) to avoid duplicates.
-    private static func reconciledTurns(
-        localInitial: [ConceptHistoryTurnDTO],
-        remote: [ConceptHistoryTurnDTO]
-    ) -> [ConceptHistoryTurnDTO] {
-        func key(_ turn: ConceptHistoryTurnDTO) -> String {
-            let content = turn.content
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased()
-            return "\(turn.role)|\(content)"
-        }
-        let remoteKeys = Set(remote.map(key))
-        let keptInitial = localInitial.filter { !remoteKeys.contains(key($0)) }
-        return keptInitial + remote
     }
 
     // MARK: - Proposals

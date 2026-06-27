@@ -407,6 +407,7 @@ class PersistentConceptStore:
         self,
         owner_id: str,
         idempotency_key: str,
+        payload_hash: str,
         raw_capture: str,
         locale: str,
     ) -> CaptureAttemptDTO:
@@ -423,6 +424,7 @@ class PersistentConceptStore:
                 id=str(uuid4()),
                 owner_id=owner_id,
                 idempotency_key=idempotency_key,
+                payload_hash=payload_hash,
                 raw_capture=raw_capture,
                 locale=locale,
                 status="generating",
@@ -472,6 +474,7 @@ class PersistentConceptStore:
         owner_id: str,
         endpoint: str,
         idempotency_key: str,
+        payload_hash: str,
         response_json: str,
     ) -> IdempotencyRecordDTO:
         with self.session_factory() as session:
@@ -488,10 +491,12 @@ class PersistentConceptStore:
                     owner_id=owner_id,
                     endpoint=endpoint,
                     idempotency_key=idempotency_key,
+                    payload_hash=payload_hash,
                     status="succeeded",
                 )
                 session.add(record)
             record.response_json = response_json
+            record.payload_hash = payload_hash
             record.status = "succeeded"
             session.commit()
             return _record_to_idempotency(record)
@@ -579,6 +584,7 @@ def _record_to_capture_attempt(record: CaptureAttemptRecord) -> CaptureAttemptDT
         id=UUID(record.id),
         owner_id=record.owner_id,
         idempotency_key=record.idempotency_key,
+        payload_hash=record.payload_hash,
         raw_capture=record.raw_capture,
         locale=record.locale,
         status=record.status,
@@ -594,6 +600,7 @@ def _record_to_idempotency(record: IdempotencyRecord) -> IdempotencyRecordDTO:
         owner_id=record.owner_id,
         endpoint=record.endpoint,
         idempotency_key=record.idempotency_key,
+        payload_hash=record.payload_hash,
         status=record.status,
         response_json=record.response_json,
     )

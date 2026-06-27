@@ -11,6 +11,8 @@ final class ConceptUpdateProposal {
     var rationale: String
     var confidence: Double
     var status: String
+    var mergeIdempotencyKey: String?
+    var mergeOperationStatus: String?
     var createdAt: Date
     var resolvedAt: Date?
 
@@ -23,6 +25,8 @@ final class ConceptUpdateProposal {
         rationale: String,
         confidence: Double,
         status: String = ProposalStatus.proposed.rawValue,
+        mergeIdempotencyKey: String? = nil,
+        mergeOperationStatus: String? = nil,
         createdAt: Date = .now,
         resolvedAt: Date? = nil
     ) {
@@ -34,6 +38,8 @@ final class ConceptUpdateProposal {
         self.rationale = rationale
         self.confidence = confidence
         self.status = status
+        self.mergeIdempotencyKey = mergeIdempotencyKey
+        self.mergeOperationStatus = mergeOperationStatus
         self.createdAt = createdAt
         self.resolvedAt = resolvedAt
     }

@@ -2,18 +2,35 @@ import json
 
 from fastapi.testclient import TestClient
 
-from sift_backend.concepts.service import ConceptService
+from sift_backend.concepts.service import ConceptService, MockConceptModelService
 from sift_backend.config import Settings
 from sift_backend.main import create_app
+from sift_backend.runtime.types import SiftRuntimeError
+from sift_backend.schemas.concepts import ConceptDTO
 
 
-def make_client() -> TestClient:
+def make_client(concept_service: ConceptService | None = None) -> TestClient:
     return TestClient(
         create_app(
             settings=Settings(runtime_api_key=""),
-            concept_service=ConceptService(),
+            concept_service=concept_service or ConceptService(),
         )
     )
+
+
+class FailsFirstInitialModelService(MockConceptModelService):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def create_initial_concept(
+        self,
+        title: str,
+        locale: str,
+    ) -> ConceptDTO:
+        self.calls += 1
+        if self.calls == 1:
+            raise SiftRuntimeError("generation_failed", "First attempt failed.")
+        return await super().create_initial_concept(title=title, locale=locale)
 
 
 def test_create_concept_returns_ready_card() -> None:
@@ -293,6 +310,55 @@ def test_create_concept_idempotency_key_does_not_create_duplicate_card() -> None
     assert [turn["role"] for turn in turns] == ["user", "assistant"]
 
 
+def test_create_concept_same_key_different_payload_returns_conflict() -> None:
+    client = make_client()
+    headers = {"Idempotency-Key": "capture-conflict-1"}
+
+    first = client.post(
+        "/v1/concepts",
+        json={"raw_capture": "RAG", "locale": "en"},
+        headers=headers,
+    )
+    second = client.post(
+        "/v1/concepts",
+        json={"raw_capture": "Agent runtime", "locale": "en"},
+        headers=headers,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.json()["detail"]["code"] == "idempotency_payload_conflict"
+    assert len(client.get("/v1/concepts").json()) == 1
+
+
+def test_create_concept_terminal_failure_new_retry_key_can_create_new_attempt() -> None:
+    service = ConceptService(model_service=FailsFirstInitialModelService())
+    client = make_client(service)
+    payload = {"raw_capture": "A2A protocol", "locale": "en"}
+
+    failed = client.post(
+        "/v1/concepts",
+        json=payload,
+        headers={"Idempotency-Key": "capture-failed-1"},
+    )
+    retried_same_key = client.post(
+        "/v1/concepts",
+        json=payload,
+        headers={"Idempotency-Key": "capture-failed-1"},
+    )
+    retried_new_key = client.post(
+        "/v1/concepts",
+        json=payload,
+        headers={"Idempotency-Key": "capture-failed-2"},
+    )
+
+    assert failed.status_code == 502
+    assert retried_same_key.status_code == 502
+    assert retried_new_key.status_code == 200
+    assert retried_new_key.json()["displayTitle"] == "A2A protocol"
+    assert len(client.get("/v1/concepts").json()) == 1
+
+
 def test_turn_idempotency_key_does_not_duplicate_turn_or_patch() -> None:
     client = make_client()
     concept = client.post("/v1/concepts", json={"raw_capture": "RAG", "locale": "en"}).json()
@@ -314,6 +380,29 @@ def test_turn_idempotency_key_does_not_duplicate_turn_or_patch() -> None:
     assert second.json()["concept"]["noteRevision"] == first.json()["concept"]["noteRevision"]
     persisted = client.get(f"/v1/concepts/{concept['id']}").json()
     assert persisted["noteRevision"] == 2
+    turns = client.get(f"/v1/concepts/{concept['id']}/turns").json()
+    assert [turn["role"] for turn in turns] == ["user", "assistant", "user", "assistant"]
+
+
+def test_turn_idempotency_key_conflicts_on_different_payload() -> None:
+    client = make_client()
+    concept = client.post("/v1/concepts", json={"raw_capture": "RAG", "locale": "en"}).json()
+    headers = {"Idempotency-Key": "turn-conflict-1"}
+
+    first = client.post(
+        f"/v1/concepts/{concept['id']}/turns",
+        json={"question": "How does it work?"},
+        headers=headers,
+    )
+    second = client.post(
+        f"/v1/concepts/{concept['id']}/turns",
+        json={"question": "When should I use it?"},
+        headers=headers,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.json()["detail"]["code"] == "idempotency_payload_conflict"
     turns = client.get(f"/v1/concepts/{concept['id']}/turns").json()
     assert [turn["role"] for turn in turns] == ["user", "assistant", "user", "assistant"]
 
@@ -340,6 +429,35 @@ def test_stream_turn_idempotency_key_returns_terminal_result_without_duplicate_t
     assert second == [
         {"type": "started"},
         {"type": "completed", "response": first[-1]["response"]},
+    ]
+    turns = client.get(f"/v1/concepts/{concept['id']}/turns").json()
+    assert [turn["role"] for turn in turns] == ["user", "assistant", "user", "assistant"]
+
+
+def test_turn_and_stream_share_logical_idempotency_scope() -> None:
+    client = make_client()
+    concept = client.post("/v1/concepts", json={"raw_capture": "RAG", "locale": "en"}).json()
+    headers = {"Idempotency-Key": "turn-shared-scope-1"}
+    payload = {"question": "How does it work?"}
+
+    first = client.post(
+        f"/v1/concepts/{concept['id']}/turns",
+        json=payload,
+        headers=headers,
+    )
+    with client.stream(
+        "POST",
+        f"/v1/concepts/{concept['id']}/turns/stream",
+        json=payload,
+        headers=headers,
+    ) as response:
+        second = [json.loads(line) for line in response.iter_lines() if line]
+
+    assert first.status_code == 200
+    assert response.status_code == 200
+    assert second == [
+        {"type": "started"},
+        {"type": "completed", "response": first.json()},
     ]
     turns = client.get(f"/v1/concepts/{concept['id']}/turns").json()
     assert [turn["role"] for turn in turns] == ["user", "assistant", "user", "assistant"]

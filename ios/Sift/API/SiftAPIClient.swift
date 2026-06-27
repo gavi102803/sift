@@ -33,13 +33,57 @@ protocol SiftAPIClient {
     func removeRelation(conceptId: UUID, relationId: UUID) async throws -> ConceptDTO
     func listTurns(conceptId: UUID) async throws -> [ConceptHistoryTurnDTO]
     func createConcept(_ request: CreateConceptRequest) async throws -> ConceptDTO
+    func createConcept(
+        _ request: CreateConceptRequest,
+        idempotencyKey: UUID?
+    ) async throws -> ConceptDTO
     func submitTurn(conceptId: UUID, request: ConceptTurnRequest) async throws -> ConceptTurnResponse
+    func submitTurn(
+        conceptId: UUID,
+        request: ConceptTurnRequest,
+        idempotencyKey: UUID?
+    ) async throws -> ConceptTurnResponse
     func streamTurn(
         conceptId: UUID,
         request: ConceptTurnRequest
     ) -> AsyncThrowingStream<ConceptTurnStreamEvent, Error>
+    func streamTurn(
+        conceptId: UUID,
+        request: ConceptTurnRequest,
+        idempotencyKey: UUID?
+    ) -> AsyncThrowingStream<ConceptTurnStreamEvent, Error>
     func mergeProposal(id: UUID) async throws -> ConceptDTO
+    func mergeProposal(id: UUID, idempotencyKey: UUID?) async throws -> ConceptDTO
     func dismissProposal(id: UUID) async throws
+}
+
+extension SiftAPIClient {
+    func createConcept(
+        _ request: CreateConceptRequest,
+        idempotencyKey: UUID?
+    ) async throws -> ConceptDTO {
+        try await createConcept(request)
+    }
+
+    func submitTurn(
+        conceptId: UUID,
+        request: ConceptTurnRequest,
+        idempotencyKey: UUID?
+    ) async throws -> ConceptTurnResponse {
+        try await submitTurn(conceptId: conceptId, request: request)
+    }
+
+    func streamTurn(
+        conceptId: UUID,
+        request: ConceptTurnRequest,
+        idempotencyKey: UUID?
+    ) -> AsyncThrowingStream<ConceptTurnStreamEvent, Error> {
+        streamTurn(conceptId: conceptId, request: request)
+    }
+
+    func mergeProposal(id: UUID, idempotencyKey: UUID?) async throws -> ConceptDTO {
+        try await mergeProposal(id: id)
+    }
 }
 
 enum SiftAPIClientFactory {
@@ -169,16 +213,43 @@ struct HTTPSiftAPIClient: SiftAPIClient {
     }
 
     func createConcept(_ request: CreateConceptRequest) async throws -> ConceptDTO {
-        try await post(path: "/v1/concepts", body: request)
+        try await createConcept(request, idempotencyKey: nil)
+    }
+
+    func createConcept(
+        _ request: CreateConceptRequest,
+        idempotencyKey: UUID?
+    ) async throws -> ConceptDTO {
+        try await post(path: "/v1/concepts", body: request, idempotencyKey: idempotencyKey)
     }
 
     func submitTurn(conceptId: UUID, request: ConceptTurnRequest) async throws -> ConceptTurnResponse {
-        try await post(path: "/v1/concepts/\(conceptId.uuidString)/turns", body: request)
+        try await submitTurn(conceptId: conceptId, request: request, idempotencyKey: nil)
+    }
+
+    func submitTurn(
+        conceptId: UUID,
+        request: ConceptTurnRequest,
+        idempotencyKey: UUID?
+    ) async throws -> ConceptTurnResponse {
+        try await post(
+            path: "/v1/concepts/\(conceptId.uuidString)/turns",
+            body: request,
+            idempotencyKey: idempotencyKey
+        )
     }
 
     func streamTurn(
         conceptId: UUID,
         request: ConceptTurnRequest
+    ) -> AsyncThrowingStream<ConceptTurnStreamEvent, Error> {
+        streamTurn(conceptId: conceptId, request: request, idempotencyKey: nil)
+    }
+
+    func streamTurn(
+        conceptId: UUID,
+        request: ConceptTurnRequest,
+        idempotencyKey: UUID?
     ) -> AsyncThrowingStream<ConceptTurnStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             Task {
@@ -186,6 +257,7 @@ struct HTTPSiftAPIClient: SiftAPIClient {
                     try await streamPost(
                         path: "/v1/concepts/\(conceptId.uuidString)/turns/stream",
                         body: request,
+                        idempotencyKey: idempotencyKey,
                         continuation: continuation
                     )
                     continuation.finish()
@@ -197,7 +269,15 @@ struct HTTPSiftAPIClient: SiftAPIClient {
     }
 
     func mergeProposal(id: UUID) async throws -> ConceptDTO {
-        try await post(path: "/v1/update-proposals/\(id.uuidString)/merge", body: EmptyRequest())
+        try await mergeProposal(id: id, idempotencyKey: nil)
+    }
+
+    func mergeProposal(id: UUID, idempotencyKey: UUID?) async throws -> ConceptDTO {
+        try await post(
+            path: "/v1/update-proposals/\(id.uuidString)/merge",
+            body: EmptyRequest(),
+            idempotencyKey: idempotencyKey
+        )
     }
 
     func dismissProposal(id: UUID) async throws {
@@ -224,11 +304,15 @@ struct HTTPSiftAPIClient: SiftAPIClient {
 
     private func post<Request: Encodable, Response: Decodable>(
         path: String,
-        body: Request
+        body: Request,
+        idempotencyKey: UUID? = nil
     ) async throws -> Response {
         var urlRequest = URLRequest(url: baseURL.appending(path: path))
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let idempotencyKey {
+            urlRequest.setValue(idempotencyKey.uuidString, forHTTPHeaderField: "Idempotency-Key")
+        }
         urlRequest.httpBody = try jsonEncoder.encode(body)
 
         let (data, response) = try await urlSession.data(for: urlRequest)
@@ -250,12 +334,16 @@ struct HTTPSiftAPIClient: SiftAPIClient {
     private func streamPost<Request: Encodable, Event: Decodable>(
         path: String,
         body: Request,
+        idempotencyKey: UUID? = nil,
         continuation: AsyncThrowingStream<Event, Error>.Continuation
     ) async throws {
         var urlRequest = URLRequest(url: baseURL.appending(path: path))
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.setValue("application/x-ndjson", forHTTPHeaderField: "Accept")
+        if let idempotencyKey {
+            urlRequest.setValue(idempotencyKey.uuidString, forHTTPHeaderField: "Idempotency-Key")
+        }
         urlRequest.httpBody = try jsonEncoder.encode(body)
 
         let (bytes, response) = try await urlSession.bytes(for: urlRequest)

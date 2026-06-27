@@ -1,6 +1,7 @@
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from hashlib import sha256
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -87,6 +88,7 @@ class CaptureAttemptDTO:
     id: UUID
     owner_id: str
     idempotency_key: str
+    payload_hash: str | None
     raw_capture: str
     locale: str
     status: str
@@ -101,6 +103,7 @@ class IdempotencyRecordDTO:
     owner_id: str
     endpoint: str
     idempotency_key: str
+    payload_hash: str | None
     status: str
     response_json: str | None = None
 
@@ -332,6 +335,7 @@ class InMemoryConceptStore:
         self,
         owner_id: str,
         idempotency_key: str,
+        payload_hash: str,
         raw_capture: str,
         locale: str,
     ) -> CaptureAttemptDTO:
@@ -339,6 +343,7 @@ class InMemoryConceptStore:
             id=uuid4(),
             owner_id=owner_id,
             idempotency_key=idempotency_key,
+            payload_hash=payload_hash,
             raw_capture=raw_capture,
             locale=locale,
             status="generating",
@@ -361,6 +366,7 @@ class InMemoryConceptStore:
                     id=attempt.id,
                     owner_id=attempt.owner_id,
                     idempotency_key=attempt.idempotency_key,
+                    payload_hash=attempt.payload_hash,
                     raw_capture=attempt.raw_capture,
                     locale=attempt.locale,
                     status=status,
@@ -388,6 +394,7 @@ class InMemoryConceptStore:
         owner_id: str,
         endpoint: str,
         idempotency_key: str,
+        payload_hash: str,
         response_json: str,
     ) -> IdempotencyRecordDTO:
         record = IdempotencyRecordDTO(
@@ -395,6 +402,7 @@ class InMemoryConceptStore:
             owner_id=owner_id,
             endpoint=endpoint,
             idempotency_key=idempotency_key,
+            payload_hash=payload_hash,
             status="succeeded",
             response_json=response_json,
         )
@@ -603,12 +611,14 @@ class ConceptService:
     ) -> ConceptDTO:
         title = request.raw_capture.strip()
         if idempotency_key:
-            existing = self._existing_capture_result(idempotency_key)
+            payload_hash = _idempotency_payload_hash(request)
+            existing = self._existing_capture_result(idempotency_key, payload_hash)
             if existing is not None:
                 return existing
             attempt = self.store.create_capture_attempt(
                 self.owner_id,
                 idempotency_key,
+                payload_hash,
                 title,
                 request.locale,
             )
@@ -635,12 +645,14 @@ class ConceptService:
     ) -> ConceptDTO:
         title = request.raw_capture.strip()
         if idempotency_key:
-            existing = self._existing_capture_result(idempotency_key)
+            payload_hash = _idempotency_payload_hash(request)
+            existing = self._existing_capture_result(idempotency_key, payload_hash)
             if existing is not None:
                 return existing
             attempt = self.store.create_capture_attempt(
                 self.owner_id,
                 idempotency_key,
+                payload_hash,
                 title,
                 request.locale,
             )
@@ -817,9 +829,10 @@ class ConceptService:
         request: ConceptTurnRequest,
         idempotency_key: str | None = None,
     ) -> ConceptTurnResponse:
-        endpoint = f"POST /v1/concepts/{concept_id}/turns"
+        endpoint = _turn_idempotency_scope(concept_id)
         if idempotency_key:
-            existing = self._existing_turn_result(endpoint, idempotency_key)
+            payload_hash = _idempotency_payload_hash(request)
+            existing = self._existing_turn_result(endpoint, idempotency_key, payload_hash)
             if existing is not None:
                 return existing
         concept = self.store.get_concept(concept_id, owner_id=self.owner_id)
@@ -842,6 +855,7 @@ class ConceptService:
                 self.owner_id,
                 endpoint,
                 idempotency_key,
+                payload_hash,
                 response.model_dump_json(by_alias=True),
             )
         return response
@@ -852,9 +866,10 @@ class ConceptService:
         request: ConceptTurnRequest,
         idempotency_key: str | None = None,
     ) -> AsyncIterator[ConceptTurnStreamEvent]:
-        endpoint = f"POST /v1/concepts/{concept_id}/turns/stream"
+        endpoint = _turn_idempotency_scope(concept_id)
         if idempotency_key:
-            existing = self._existing_turn_result(endpoint, idempotency_key)
+            payload_hash = _idempotency_payload_hash(request)
+            existing = self._existing_turn_result(endpoint, idempotency_key, payload_hash)
             if existing is not None:
                 yield ConceptTurnStreamResult(existing)
                 return
@@ -889,6 +904,7 @@ class ConceptService:
                 self.owner_id,
                 endpoint,
                 idempotency_key,
+                payload_hash,
                 response.model_dump_json(by_alias=True),
             )
         yield ConceptTurnStreamResult(response)
@@ -898,9 +914,10 @@ class ConceptService:
         proposal_id: UUID,
         idempotency_key: str | None = None,
     ) -> ConceptDTO:
-        endpoint = f"POST /v1/update-proposals/{proposal_id}/merge"
+        endpoint = _proposal_merge_idempotency_scope(proposal_id)
         if idempotency_key:
-            existing = self._existing_concept_result(endpoint, idempotency_key)
+            payload_hash = _idempotency_payload_hash({"proposalId": str(proposal_id)})
+            existing = self._existing_concept_result(endpoint, idempotency_key, payload_hash)
             if existing is not None:
                 return existing
         proposal = self.store.get_proposal(proposal_id)
@@ -936,6 +953,7 @@ class ConceptService:
                 self.owner_id,
                 endpoint,
                 idempotency_key,
+                payload_hash,
                 updated.model_dump_json(by_alias=True),
             )
         return updated
@@ -1138,10 +1156,15 @@ class ConceptService:
             answer_source=concept.answer_source,
         )
 
-    def _existing_capture_result(self, idempotency_key: str) -> ConceptDTO | None:
+    def _existing_capture_result(
+        self,
+        idempotency_key: str,
+        payload_hash: str,
+    ) -> ConceptDTO | None:
         attempt = self.store.get_capture_attempt(self.owner_id, idempotency_key)
         if attempt is None:
             return None
+        _raise_if_idempotency_payload_conflict(attempt.payload_hash, payload_hash)
         if attempt.status == "succeeded" and attempt.concept_id is not None:
             return self.store.get_concept(attempt.concept_id, owner_id=self.owner_id)
         if attempt.status == "failed":
@@ -1161,6 +1184,7 @@ class ConceptService:
         self,
         endpoint: str,
         idempotency_key: str,
+        payload_hash: str,
     ) -> ConceptTurnResponse | None:
         record = self.store.get_idempotency_record(
             self.owner_id,
@@ -1169,12 +1193,14 @@ class ConceptService:
         )
         if record is None or record.response_json is None:
             return None
+        _raise_if_idempotency_payload_conflict(record.payload_hash, payload_hash)
         return ConceptTurnResponse.model_validate_json(record.response_json)
 
     def _existing_concept_result(
         self,
         endpoint: str,
         idempotency_key: str,
+        payload_hash: str,
     ) -> ConceptDTO | None:
         record = self.store.get_idempotency_record(
             self.owner_id,
@@ -1183,6 +1209,7 @@ class ConceptService:
         )
         if record is None or record.response_json is None:
             return None
+        _raise_if_idempotency_payload_conflict(record.payload_hash, payload_hash)
         return ConceptDTO.model_validate_json(record.response_json)
 
     def _validate_relation_operations(
@@ -1472,6 +1499,36 @@ def _answer_source_from_recent_turn(turn: RecentTurn) -> AnswerSourceDTO | None:
     except json.JSONDecodeError:
         return None
     return AnswerSourceDTO.model_validate(payload)
+
+
+def _idempotency_payload_hash(payload: Any) -> str:
+    if hasattr(payload, "model_dump"):
+        payload = payload.model_dump(mode="json", by_alias=True)
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _turn_idempotency_scope(concept_id: UUID) -> str:
+    return f"turn:{concept_id}"
+
+
+def _proposal_merge_idempotency_scope(proposal_id: UUID) -> str:
+    return f"proposal-merge:{proposal_id}"
+
+
+def _raise_if_idempotency_payload_conflict(
+    existing_hash: str | None,
+    requested_hash: str,
+) -> None:
+    if existing_hash is None or existing_hash == requested_hash:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "idempotency_payload_conflict",
+            "message": "Idempotency key already belongs to a different operation payload.",
+        },
+    )
 
 
 def _names_from_suggestions(suggestions: list) -> list[str]:

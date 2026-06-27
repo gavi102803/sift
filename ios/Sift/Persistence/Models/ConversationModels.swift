@@ -9,6 +9,9 @@ final class Conversation {
     var memoryRevision: Int
     var memoryUpdatedAt: Date
     var defaultModelId: String
+    var pendingFollowUpIdempotencyKey: String?
+    var pendingFollowUpQuestion: String?
+    var pendingFollowUpOperationStatus: String?
     var createdAt: Date
     var updatedAt: Date
 
@@ -24,6 +27,9 @@ final class Conversation {
         memoryRevision: Int = 0,
         memoryUpdatedAt: Date = .now,
         defaultModelId: String = "sift-explain",
+        pendingFollowUpIdempotencyKey: String? = nil,
+        pendingFollowUpQuestion: String? = nil,
+        pendingFollowUpOperationStatus: String? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now,
         concept: Concept? = nil,
@@ -35,6 +41,9 @@ final class Conversation {
         self.memoryRevision = memoryRevision
         self.memoryUpdatedAt = memoryUpdatedAt
         self.defaultModelId = defaultModelId
+        self.pendingFollowUpIdempotencyKey = pendingFollowUpIdempotencyKey
+        self.pendingFollowUpQuestion = pendingFollowUpQuestion
+        self.pendingFollowUpOperationStatus = pendingFollowUpOperationStatus
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.concept = concept
@@ -79,6 +88,8 @@ final class ConversationMessage {
     var mergedIntoNote: Bool
     var updateMode: String
     var answerSourceId: UUID?
+    var operationIdempotencyKey: String?
+    var operationStatus: String?
 
     var conversation: Conversation?
 
@@ -92,6 +103,8 @@ final class ConversationMessage {
         mergedIntoNote: Bool = false,
         updateMode: String = UpdateMode.none.rawValue,
         answerSourceId: UUID? = nil,
+        operationIdempotencyKey: String? = nil,
+        operationStatus: String? = nil,
         conversation: Conversation? = nil
     ) {
         self.id = id
@@ -103,6 +116,8 @@ final class ConversationMessage {
         self.mergedIntoNote = mergedIntoNote
         self.updateMode = updateMode
         self.answerSourceId = answerSourceId
+        self.operationIdempotencyKey = operationIdempotencyKey
+        self.operationStatus = operationStatus
         self.conversation = conversation
     }
 }
@@ -130,4 +145,3 @@ enum LocalConversationMarker {
     /// notice. Never rendered as a real conversation turn.
     static let failed = "failed"
 }
-

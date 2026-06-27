@@ -297,6 +297,13 @@ struct MockSiftAPIClient: SiftAPIClient {
     }
 
     func createConcept(_ request: CreateConceptRequest) async throws -> ConceptDTO {
+        try await createConcept(request, idempotencyKey: nil)
+    }
+
+    func createConcept(
+        _ request: CreateConceptRequest,
+        idempotencyKey: UUID?
+    ) async throws -> ConceptDTO {
         try await Task.sleep(nanoseconds: delayNanoseconds)
 
         return ConceptDTO(
@@ -327,6 +334,14 @@ struct MockSiftAPIClient: SiftAPIClient {
     }
 
     func submitTurn(conceptId: UUID, request: ConceptTurnRequest) async throws -> ConceptTurnResponse {
+        try await submitTurn(conceptId: conceptId, request: request, idempotencyKey: nil)
+    }
+
+    func submitTurn(
+        conceptId: UUID,
+        request: ConceptTurnRequest,
+        idempotencyKey: UUID?
+    ) async throws -> ConceptTurnResponse {
         try await Task.sleep(nanoseconds: delayNanoseconds)
 
         let concept = ConceptDTO(
@@ -357,9 +372,21 @@ struct MockSiftAPIClient: SiftAPIClient {
         conceptId: UUID,
         request: ConceptTurnRequest
     ) -> AsyncThrowingStream<ConceptTurnStreamEvent, Error> {
+        streamTurn(conceptId: conceptId, request: request, idempotencyKey: nil)
+    }
+
+    func streamTurn(
+        conceptId: UUID,
+        request: ConceptTurnRequest,
+        idempotencyKey: UUID?
+    ) -> AsyncThrowingStream<ConceptTurnStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             Task {
-                let response = try await submitTurn(conceptId: conceptId, request: request)
+                let response = try await submitTurn(
+                    conceptId: conceptId,
+                    request: request,
+                    idempotencyKey: idempotencyKey
+                )
                 continuation.yield(ConceptTurnStreamEvent(type: "started", delta: nil, response: nil))
                 for chunk in response.answer.chunked(maxLength: 12) {
                     try await Task.sleep(nanoseconds: 60_000_000)
@@ -372,6 +399,10 @@ struct MockSiftAPIClient: SiftAPIClient {
     }
 
     func mergeProposal(id: UUID) async throws -> ConceptDTO {
+        try await mergeProposal(id: id, idempotencyKey: nil)
+    }
+
+    func mergeProposal(id: UUID, idempotencyKey: UUID?) async throws -> ConceptDTO {
         try await Task.sleep(nanoseconds: delayNanoseconds)
 
         return ConceptDTO(

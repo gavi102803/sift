@@ -8,12 +8,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from sift_backend.ai.context_pack import RecentTurn
+from sift_backend.concepts.service import CaptureAttemptDTO, IdempotencyRecordDTO
 from sift_backend.persistence.models import (
+    CaptureAttemptRecord,
     ClaimRecord,
     ConceptRecord,
     ConceptRelationRecord,
     ConceptTagRecord,
     ConceptTopicRecord,
+    IdempotencyRecord,
     LearningStateEntryRecord,
     NoteBlockRecord,
     NoteRevisionRecord,
@@ -60,13 +63,17 @@ class PersistentConceptStore:
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
         self.session_factory = session_factory
 
-    def save_concept(self, concept: ConceptDTO) -> ConceptDTO:
+    def save_concept(self, concept: ConceptDTO, owner_id: str | None = None) -> ConceptDTO:
         with self.session_factory() as session:
             record = session.get(ConceptRecord, str(concept.id))
             if record is None:
                 record = ConceptRecord(id=str(concept.id))
                 session.add(record)
 
+            if owner_id is not None:
+                record.owner_id = owner_id
+            elif not record.owner_id:
+                record.owner_id = "local-dev"
             record.canonical_title = concept.canonical_title
             record.display_title = concept.display_title
             record.one_line_explanation = concept.one_line_explanation
@@ -89,7 +96,7 @@ class PersistentConceptStore:
             _replace_tag_assignments(session, record, concept.tags)
             _replace_topic_assignments(session, record, concept.topics)
             session.commit()
-            return self.get_concept(concept.id)
+            return self.get_concept(concept.id, owner_id=owner_id)
 
     def add_sources(self, concept_id: UUID, sources: list[SourceDTO]) -> list[SourceDTO]:
         if not sources:
@@ -159,19 +166,20 @@ class PersistentConceptStore:
             ).all()
             return _learning_state_from_records(concept_id, records)
 
-    def list_concepts(self) -> list[ConceptDTO]:
+    def list_concepts(self, owner_id: str | None = None) -> list[ConceptDTO]:
         with self.session_factory() as session:
-            records = session.scalars(
-                select(ConceptRecord).order_by(ConceptRecord.created_at)
-            ).all()
+            statement = select(ConceptRecord).order_by(ConceptRecord.created_at)
+            if owner_id is not None:
+                statement = statement.where(ConceptRecord.owner_id == owner_id)
+            records = session.scalars(statement).all()
             for record in records:
                 _attach_knowledge_records(session, record)
             return [_record_to_concept(record) for record in records]
 
-    def get_concept(self, concept_id: UUID) -> ConceptDTO:
+    def get_concept(self, concept_id: UUID, owner_id: str | None = None) -> ConceptDTO:
         with self.session_factory() as session:
             record = session.get(ConceptRecord, str(concept_id))
-            if record is None:
+            if record is None or (owner_id is not None and record.owner_id != owner_id):
                 raise _not_found("Concept not found.")
             _attach_knowledge_records(session, record)
             return _record_to_concept(record)
@@ -381,6 +389,113 @@ class PersistentConceptStore:
                 for record in records
             ]
 
+    def get_capture_attempt(
+        self,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> CaptureAttemptDTO | None:
+        with self.session_factory() as session:
+            record = session.scalar(
+                select(CaptureAttemptRecord).where(
+                    CaptureAttemptRecord.owner_id == owner_id,
+                    CaptureAttemptRecord.idempotency_key == idempotency_key,
+                )
+            )
+            return _record_to_capture_attempt(record) if record is not None else None
+
+    def create_capture_attempt(
+        self,
+        owner_id: str,
+        idempotency_key: str,
+        raw_capture: str,
+        locale: str,
+    ) -> CaptureAttemptDTO:
+        with self.session_factory() as session:
+            existing = session.scalar(
+                select(CaptureAttemptRecord).where(
+                    CaptureAttemptRecord.owner_id == owner_id,
+                    CaptureAttemptRecord.idempotency_key == idempotency_key,
+                )
+            )
+            if existing is not None:
+                return _record_to_capture_attempt(existing)
+            record = CaptureAttemptRecord(
+                id=str(uuid4()),
+                owner_id=owner_id,
+                idempotency_key=idempotency_key,
+                raw_capture=raw_capture,
+                locale=locale,
+                status="generating",
+            )
+            session.add(record)
+            session.commit()
+            return _record_to_capture_attempt(record)
+
+    def update_capture_attempt(
+        self,
+        attempt_id: UUID,
+        *,
+        status: str,
+        concept_id: UUID | None = None,
+        failure_code: str | None = None,
+        failure_message: str | None = None,
+    ) -> CaptureAttemptDTO:
+        with self.session_factory() as session:
+            record = session.get(CaptureAttemptRecord, str(attempt_id))
+            if record is None:
+                raise _not_found("Capture attempt not found.")
+            record.status = status
+            record.concept_id = str(concept_id) if concept_id is not None else None
+            record.failure_code = failure_code
+            record.failure_message = failure_message
+            session.commit()
+            return _record_to_capture_attempt(record)
+
+    def get_idempotency_record(
+        self,
+        owner_id: str,
+        endpoint: str,
+        idempotency_key: str,
+    ) -> IdempotencyRecordDTO | None:
+        with self.session_factory() as session:
+            record = session.scalar(
+                select(IdempotencyRecord).where(
+                    IdempotencyRecord.owner_id == owner_id,
+                    IdempotencyRecord.endpoint == endpoint,
+                    IdempotencyRecord.idempotency_key == idempotency_key,
+                )
+            )
+            return _record_to_idempotency(record) if record is not None else None
+
+    def save_idempotency_record(
+        self,
+        owner_id: str,
+        endpoint: str,
+        idempotency_key: str,
+        response_json: str,
+    ) -> IdempotencyRecordDTO:
+        with self.session_factory() as session:
+            record = session.scalar(
+                select(IdempotencyRecord).where(
+                    IdempotencyRecord.owner_id == owner_id,
+                    IdempotencyRecord.endpoint == endpoint,
+                    IdempotencyRecord.idempotency_key == idempotency_key,
+                )
+            )
+            if record is None:
+                record = IdempotencyRecord(
+                    id=str(uuid4()),
+                    owner_id=owner_id,
+                    endpoint=endpoint,
+                    idempotency_key=idempotency_key,
+                    status="succeeded",
+                )
+                session.add(record)
+            record.response_json = response_json
+            record.status = "succeeded"
+            session.commit()
+            return _record_to_idempotency(record)
+
 
 def _note_block_to_record(
     block: NoteBlockDTO,
@@ -456,6 +571,31 @@ def _record_to_concept(record: ConceptRecord) -> ConceptDTO:
                 key=lambda entry: entry.created_at,
             ),
         ),
+    )
+
+
+def _record_to_capture_attempt(record: CaptureAttemptRecord) -> CaptureAttemptDTO:
+    return CaptureAttemptDTO(
+        id=UUID(record.id),
+        owner_id=record.owner_id,
+        idempotency_key=record.idempotency_key,
+        raw_capture=record.raw_capture,
+        locale=record.locale,
+        status=record.status,
+        concept_id=UUID(record.concept_id) if record.concept_id is not None else None,
+        failure_code=record.failure_code,
+        failure_message=record.failure_message,
+    )
+
+
+def _record_to_idempotency(record: IdempotencyRecord) -> IdempotencyRecordDTO:
+    return IdempotencyRecordDTO(
+        id=UUID(record.id),
+        owner_id=record.owner_id,
+        endpoint=record.endpoint,
+        idempotency_key=record.idempotency_key,
+        status=record.status,
+        response_json=record.response_json,
     )
 
 

@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 from fastapi import HTTPException, status
 
 from sift_backend.ai.context_pack import RecentTurn
+from sift_backend.auth.principal import CurrentPrincipal, DevelopmentPrincipalProvider
 from sift_backend.notes.patch_engine import (
     NoteSnapshot,
     PatchApplicationError,
@@ -81,7 +82,32 @@ class ConceptTurnStreamResult:
     response: ConceptTurnResponse
 
 
+@dataclass(frozen=True)
+class CaptureAttemptDTO:
+    id: UUID
+    owner_id: str
+    idempotency_key: str
+    raw_capture: str
+    locale: str
+    status: str
+    concept_id: UUID | None = None
+    failure_code: str | None = None
+    failure_message: str | None = None
+
+
+@dataclass(frozen=True)
+class IdempotencyRecordDTO:
+    id: UUID
+    owner_id: str
+    endpoint: str
+    idempotency_key: str
+    status: str
+    response_json: str | None = None
+
+
 ConceptTurnStreamEvent = ConceptTurnStreamDelta | ConceptTurnStreamResult
+
+LOCAL_DEV_OWNER_ID = "local-dev"
 
 
 class InMemoryConceptStore:
@@ -93,9 +119,16 @@ class InMemoryConceptStore:
         self.proposals: dict[UUID, UpdateProposalDTO] = {}
         self.proposal_concept_ids: dict[UUID, UUID] = {}
         self.turns: dict[UUID, list[RecentTurn]] = {}
+        self.concept_owner_ids: dict[UUID, str] = {}
+        self.capture_attempts: dict[tuple[str, str], CaptureAttemptDTO] = {}
+        self.idempotency_records: dict[tuple[str, str, str], IdempotencyRecordDTO] = {}
 
-    def save_concept(self, concept: ConceptDTO) -> ConceptDTO:
+    def save_concept(self, concept: ConceptDTO, owner_id: str | None = None) -> ConceptDTO:
         self.concepts[concept.id] = concept.model_copy(update={"relations": []})
+        if owner_id is not None:
+            self.concept_owner_ids[concept.id] = owner_id
+        else:
+            self.concept_owner_ids.setdefault(concept.id, LOCAL_DEV_OWNER_ID)
         return self.get_concept(concept.id)
 
     def add_sources(self, concept_id: UUID, sources: list[SourceDTO]) -> list[SourceDTO]:
@@ -145,17 +178,27 @@ class InMemoryConceptStore:
         )
         return data
 
-    def list_concepts(self) -> list[ConceptDTO]:
-        return [self._concept_with_relations(concept) for concept in self.concepts.values()]
+    def list_concepts(self, owner_id: str | None = None) -> list[ConceptDTO]:
+        return [
+            self._concept_with_relations(concept)
+            for concept in self.concepts.values()
+            if owner_id is None or self.concept_owner_ids.get(concept.id) == owner_id
+        ]
 
-    def get_concept(self, concept_id: UUID) -> ConceptDTO:
+    def get_concept(self, concept_id: UUID, owner_id: str | None = None) -> ConceptDTO:
         try:
-            return self._concept_with_relations(self.concepts[concept_id])
+            concept = self.concepts[concept_id]
         except KeyError as error:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Concept not found.",
             ) from error
+        if owner_id is not None and self.concept_owner_ids.get(concept_id) != owner_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Concept not found.",
+            )
+        return self._concept_with_relations(concept)
 
     def add_relation(
         self,
@@ -277,6 +320,86 @@ class InMemoryConceptStore:
     def list_turns(self, concept_id: UUID) -> list[RecentTurn]:
         self.get_concept(concept_id)
         return self.turns.get(concept_id, [])
+
+    def get_capture_attempt(
+        self,
+        owner_id: str,
+        idempotency_key: str,
+    ) -> CaptureAttemptDTO | None:
+        return self.capture_attempts.get((owner_id, idempotency_key))
+
+    def create_capture_attempt(
+        self,
+        owner_id: str,
+        idempotency_key: str,
+        raw_capture: str,
+        locale: str,
+    ) -> CaptureAttemptDTO:
+        attempt = CaptureAttemptDTO(
+            id=uuid4(),
+            owner_id=owner_id,
+            idempotency_key=idempotency_key,
+            raw_capture=raw_capture,
+            locale=locale,
+            status="generating",
+        )
+        self.capture_attempts[(owner_id, idempotency_key)] = attempt
+        return attempt
+
+    def update_capture_attempt(
+        self,
+        attempt_id: UUID,
+        *,
+        status: str,
+        concept_id: UUID | None = None,
+        failure_code: str | None = None,
+        failure_message: str | None = None,
+    ) -> CaptureAttemptDTO:
+        for key, attempt in self.capture_attempts.items():
+            if attempt.id == attempt_id:
+                updated = CaptureAttemptDTO(
+                    id=attempt.id,
+                    owner_id=attempt.owner_id,
+                    idempotency_key=attempt.idempotency_key,
+                    raw_capture=attempt.raw_capture,
+                    locale=attempt.locale,
+                    status=status,
+                    concept_id=concept_id,
+                    failure_code=failure_code,
+                    failure_message=failure_message,
+                )
+                self.capture_attempts[key] = updated
+                return updated
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Capture attempt not found.",
+        )
+
+    def get_idempotency_record(
+        self,
+        owner_id: str,
+        endpoint: str,
+        idempotency_key: str,
+    ) -> IdempotencyRecordDTO | None:
+        return self.idempotency_records.get((owner_id, endpoint, idempotency_key))
+
+    def save_idempotency_record(
+        self,
+        owner_id: str,
+        endpoint: str,
+        idempotency_key: str,
+        response_json: str,
+    ) -> IdempotencyRecordDTO:
+        record = IdempotencyRecordDTO(
+            id=uuid4(),
+            owner_id=owner_id,
+            endpoint=endpoint,
+            idempotency_key=idempotency_key,
+            status="succeeded",
+            response_json=response_json,
+        )
+        self.idempotency_records[(owner_id, endpoint, idempotency_key)] = record
+        return record
 
     def _concept_with_relations(self, concept: ConceptDTO) -> ConceptDTO:
         relations = [
@@ -467,48 +590,105 @@ class ConceptService:
             | SiftRuntimeConceptModelService
             | None
         ) = None,
+        principal: CurrentPrincipal | None = None,
     ) -> None:
         self.store = store or InMemoryConceptStore()
         self.model_service = model_service or MockConceptModelService()
+        self.principal = principal or DevelopmentPrincipalProvider().current_principal()
 
-    def create_concept(self, request: CreateConceptRequest) -> ConceptDTO:
+    def create_concept(
+        self,
+        request: CreateConceptRequest,
+        idempotency_key: str | None = None,
+    ) -> ConceptDTO:
         title = request.raw_capture.strip()
-        return self._save_concept_with_audit(
+        if idempotency_key:
+            existing = self._existing_capture_result(idempotency_key)
+            if existing is not None:
+                return existing
+            attempt = self.store.create_capture_attempt(
+                self.owner_id,
+                idempotency_key,
+                title,
+                request.locale,
+            )
+        else:
+            attempt = None
+        concept = self._save_concept_with_audit(
             _fallback_initial_concept(title),
             event_type="initialGeneration",
             actor="ai",
         )
+        self._append_initial_turn(concept, title)
+        if attempt is not None:
+            self.store.update_capture_attempt(
+                attempt.id,
+                status="succeeded",
+                concept_id=concept.id,
+            )
+        return concept
 
-    async def create_concept_async(self, request: CreateConceptRequest) -> ConceptDTO:
+    async def create_concept_async(
+        self,
+        request: CreateConceptRequest,
+        idempotency_key: str | None = None,
+    ) -> ConceptDTO:
         title = request.raw_capture.strip()
+        if idempotency_key:
+            existing = self._existing_capture_result(idempotency_key)
+            if existing is not None:
+                return existing
+            attempt = self.store.create_capture_attempt(
+                self.owner_id,
+                idempotency_key,
+                title,
+                request.locale,
+            )
+        else:
+            attempt = None
         try:
             concept = await self.model_service.create_initial_concept(
                 title=title,
                 locale=request.locale,
             )
         except SiftRuntimeError as error:
+            if attempt is not None:
+                self.store.update_capture_attempt(
+                    attempt.id,
+                    status="failed",
+                    failure_code=error.code,
+                    failure_message=str(error),
+                )
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail={"code": error.code, "message": str(error)},
             ) from error
-        return self._save_concept_with_audit(
+        saved = self._save_concept_with_audit(
             concept,
             event_type="initialGeneration",
             actor="ai",
         )
+        self._append_initial_turn(saved, title)
+        if attempt is not None:
+            self.store.update_capture_attempt(
+                attempt.id,
+                status="succeeded",
+                concept_id=saved.id,
+            )
+        return saved
 
     def list_concepts(self) -> list[ConceptDTO]:
-        return self.store.list_concepts()
+        return self.store.list_concepts(owner_id=self.owner_id)
 
     def get_concept(self, concept_id: UUID) -> ConceptDTO:
-        return self.store.get_concept(concept_id)
+        return self.store.get_concept(concept_id, owner_id=self.owner_id)
 
     def update_concept_summary(
         self,
         concept_id: UUID,
         request: UpdateConceptSummaryRequest,
     ) -> ConceptDTO:
-        concept = self.store.get_concept(concept_id)
+        concept = self.store.get_concept(concept_id, owner_id=self.owner_id)
         display_title = request.display_title.strip()
         if not display_title:
             raise HTTPException(
@@ -536,7 +716,7 @@ class ConceptService:
         block_id: UUID,
         request: UpdateNoteBlockRequest,
     ) -> ConceptDTO:
-        concept = self.store.get_concept(concept_id)
+        concept = self.store.get_concept(concept_id, owner_id=self.owner_id)
         content = request.content.strip()
         if not content:
             raise HTTPException(
@@ -585,7 +765,7 @@ class ConceptService:
         concept_id: UUID,
         request: UpdateConceptOrganizationRequest,
     ) -> ConceptDTO:
-        concept = self.store.get_concept(concept_id)
+        concept = self.store.get_concept(concept_id, owner_id=self.owner_id)
         updated = concept.model_copy(
             update={
                 "tags": _normalized_names(request.tags),
@@ -604,6 +784,8 @@ class ConceptService:
         concept_id: UUID,
         request: CreateConceptRelationRequest,
     ) -> ConceptDTO:
+        self.store.get_concept(concept_id, owner_id=self.owner_id)
+        self.store.get_concept(request.target_concept_id, owner_id=self.owner_id)
         return self.store.add_relation(
             source_concept_id=concept_id,
             target_concept_id=request.target_concept_id,
@@ -611,9 +793,11 @@ class ConceptService:
         )
 
     def remove_relation(self, concept_id: UUID, relation_id: UUID) -> ConceptDTO:
+        self.store.get_concept(concept_id, owner_id=self.owner_id)
         return self.store.remove_relation(concept_id, relation_id)
 
     def list_turns(self, concept_id: UUID) -> list[ConceptHistoryTurnDTO]:
+        self.store.get_concept(concept_id, owner_id=self.owner_id)
         return [
             ConceptHistoryTurnDTO(
                 role=turn.role,
@@ -623,12 +807,22 @@ class ConceptService:
             for turn in self.store.list_turns(concept_id)
         ]
 
+    @property
+    def owner_id(self) -> str:
+        return self.principal.user_id
+
     async def submit_turn(
         self,
         concept_id: UUID,
         request: ConceptTurnRequest,
+        idempotency_key: str | None = None,
     ) -> ConceptTurnResponse:
-        concept = self.store.get_concept(concept_id)
+        endpoint = f"POST /v1/concepts/{concept_id}/turns"
+        if idempotency_key:
+            existing = self._existing_turn_result(endpoint, idempotency_key)
+            if existing is not None:
+                return existing
+        concept = self.store.get_concept(concept_id, owner_id=self.owner_id)
         recent_turns = self.store.get_recent_turns(concept.id)
         try:
             result = await self.model_service.answer_turn(
@@ -642,14 +836,29 @@ class ConceptService:
                 detail={"code": error.code, "message": str(error)},
             ) from error
 
-        return self._finalize_turn_response(concept, request, result)
+        response = self._finalize_turn_response(concept, request, result)
+        if idempotency_key:
+            self.store.save_idempotency_record(
+                self.owner_id,
+                endpoint,
+                idempotency_key,
+                response.model_dump_json(by_alias=True),
+            )
+        return response
 
     async def submit_turn_stream(
         self,
         concept_id: UUID,
         request: ConceptTurnRequest,
+        idempotency_key: str | None = None,
     ) -> AsyncIterator[ConceptTurnStreamEvent]:
-        concept = self.store.get_concept(concept_id)
+        endpoint = f"POST /v1/concepts/{concept_id}/turns/stream"
+        if idempotency_key:
+            existing = self._existing_turn_result(endpoint, idempotency_key)
+            if existing is not None:
+                yield ConceptTurnStreamResult(existing)
+                return
+        concept = self.store.get_concept(concept_id, owner_id=self.owner_id)
         recent_turns = self.store.get_recent_turns(concept.id)
         final_result: ConceptTurnResult | None = None
         try:
@@ -675,9 +884,25 @@ class ConceptService:
             )
 
         response = self._finalize_turn_response(concept, request, final_result)
+        if idempotency_key:
+            self.store.save_idempotency_record(
+                self.owner_id,
+                endpoint,
+                idempotency_key,
+                response.model_dump_json(by_alias=True),
+            )
         yield ConceptTurnStreamResult(response)
 
-    def merge_proposal(self, proposal_id: UUID) -> ConceptDTO:
+    def merge_proposal(
+        self,
+        proposal_id: UUID,
+        idempotency_key: str | None = None,
+    ) -> ConceptDTO:
+        endpoint = f"POST /v1/update-proposals/{proposal_id}/merge"
+        if idempotency_key:
+            existing = self._existing_concept_result(endpoint, idempotency_key)
+            if existing is not None:
+                return existing
         proposal = self.store.get_proposal(proposal_id)
         if proposal.status != ProposalStatus.proposed:
             raise HTTPException(
@@ -685,7 +910,10 @@ class ConceptService:
                 detail="Update proposal is not mergeable.",
             )
 
-        concept = self.store.get_concept(self.store.get_proposal_concept_id(proposal_id))
+        concept = self.store.get_concept(
+            self.store.get_proposal_concept_id(proposal_id),
+            owner_id=self.owner_id,
+        )
         try:
             updated = self._apply_patch_operations(
                 concept,
@@ -703,6 +931,13 @@ class ConceptService:
             ) from error
 
         self.store.save_proposal(proposal.model_copy(update={"status": ProposalStatus.accepted}))
+        if idempotency_key:
+            self.store.save_idempotency_record(
+                self.owner_id,
+                endpoint,
+                idempotency_key,
+                updated.model_dump_json(by_alias=True),
+            )
         return updated
 
     def dismiss_proposal(self, proposal_id: UUID) -> None:
@@ -864,7 +1099,7 @@ class ConceptService:
         actor: str,
         proposal_id: UUID | None = None,
     ) -> ConceptDTO:
-        saved = self.store.save_concept(concept)
+        saved = self.store.save_concept(concept, owner_id=self.owner_id)
         self.store.record_note_audit(
             saved.id,
             event_type=event_type,
@@ -872,6 +1107,61 @@ class ConceptService:
             proposal_id=proposal_id,
         )
         return saved
+
+    def _append_initial_turn(self, concept: ConceptDTO, raw_capture: str) -> None:
+        self.store.append_turn_pair(
+            concept.id,
+            raw_capture,
+            concept.one_line_explanation,
+            answer_source=concept.answer_source,
+        )
+
+    def _existing_capture_result(self, idempotency_key: str) -> ConceptDTO | None:
+        attempt = self.store.get_capture_attempt(self.owner_id, idempotency_key)
+        if attempt is None:
+            return None
+        if attempt.status == "succeeded" and attempt.concept_id is not None:
+            return self.store.get_concept(attempt.concept_id, owner_id=self.owner_id)
+        if attempt.status == "failed":
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={
+                    "code": attempt.failure_code or "generation_failed",
+                    "message": attempt.failure_message or "Capture generation failed.",
+                },
+            )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "generation_in_progress", "message": "Capture is still generating."},
+        )
+
+    def _existing_turn_result(
+        self,
+        endpoint: str,
+        idempotency_key: str,
+    ) -> ConceptTurnResponse | None:
+        record = self.store.get_idempotency_record(
+            self.owner_id,
+            endpoint,
+            idempotency_key,
+        )
+        if record is None or record.response_json is None:
+            return None
+        return ConceptTurnResponse.model_validate_json(record.response_json)
+
+    def _existing_concept_result(
+        self,
+        endpoint: str,
+        idempotency_key: str,
+    ) -> ConceptDTO | None:
+        record = self.store.get_idempotency_record(
+            self.owner_id,
+            endpoint,
+            idempotency_key,
+        )
+        if record is None or record.response_json is None:
+            return None
+        return ConceptDTO.model_validate_json(record.response_json)
 
     def _validate_relation_operations(
         self,
@@ -885,7 +1175,7 @@ class ConceptService:
                     "Patch cannot relate a concept to itself.",
                 )
             try:
-                self.store.get_concept(operation.target_concept_id)
+                self.store.get_concept(operation.target_concept_id, owner_id=self.owner_id)
             except HTTPException as error:
                 if error.status_code == status.HTTP_404_NOT_FOUND:
                     raise PatchApplicationError(

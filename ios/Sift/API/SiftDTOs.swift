@@ -275,6 +275,7 @@ struct AnswerSourceDTO: Codable {
 
 struct CitationDTO: Codable, Identifiable {
     var id: String { url }
+    var sourceId: String?
     var title: String
     var url: String
 }

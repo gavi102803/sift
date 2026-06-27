@@ -193,10 +193,13 @@ async def test_persistent_store_round_trips_turns_and_proposals(tmp_path) -> Non
     concept_id = second_service.store.get_proposal_concept_id(response.proposal.id)
 
     assert [turn.content for turn in turns] == [
+        "RAG",
+        "RAG captured as a draft concept.",
         "Define this more precisely",
         "Draft answer for: Define this more precisely",
     ]
     assert turns[1].answer_source.source_type == "modelKnowledge"
+    assert turns[3].answer_source.source_type == "modelKnowledge"
     assert proposal.status == ProposalStatus.proposed
     assert concept_id == concept.id
     assert proposal.patch_operations[0].target_block_id == concept.blocks[0].id

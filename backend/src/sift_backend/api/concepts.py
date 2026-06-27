@@ -91,7 +91,10 @@ async def list_concepts(request: Request) -> list[ConceptDTO]:
 
 @router.post("/concepts", response_model=ConceptDTO, response_model_by_alias=True)
 async def create_concept(request: Request, payload: CreateConceptRequest) -> ConceptDTO:
-    return await get_concept_service(request).create_concept_async(payload)
+    return await get_concept_service(request).create_concept_async(
+        payload,
+        idempotency_key=_idempotency_key(request),
+    )
 
 
 @router.get("/concepts/{concept_id}", response_model=ConceptDTO, response_model_by_alias=True)
@@ -181,7 +184,11 @@ async def submit_concept_turn(
     concept_id: UUID,
     payload: ConceptTurnRequest,
 ) -> ConceptTurnResponse:
-    return await get_concept_service(request).submit_turn(concept_id, payload)
+    return await get_concept_service(request).submit_turn(
+        concept_id,
+        payload,
+        idempotency_key=_idempotency_key(request),
+    )
 
 
 @router.post("/concepts/{concept_id}/turns/stream")
@@ -192,8 +199,13 @@ async def stream_concept_turn(
 ) -> StreamingResponse:
     async def events():
         service = get_concept_service(request)
+        idempotency_key = _idempotency_key(request)
         yield _stream_line(ConceptTurnStreamEvent(type="started"))
-        async for event in service.submit_turn_stream(concept_id, payload):
+        async for event in service.submit_turn_stream(
+            concept_id,
+            payload,
+            idempotency_key=idempotency_key,
+        ):
             if isinstance(event, ConceptTurnStreamDelta):
                 yield _stream_line(ConceptTurnStreamEvent(type="delta", delta=event.content))
             if isinstance(event, ConceptTurnStreamResult):
@@ -210,7 +222,10 @@ async def stream_concept_turn(
     response_model_by_alias=True,
 )
 async def merge_update_proposal(request: Request, proposal_id: UUID) -> ConceptDTO:
-    return get_concept_service(request).merge_proposal(proposal_id)
+    return get_concept_service(request).merge_proposal(
+        proposal_id,
+        idempotency_key=_idempotency_key(request),
+    )
 
 
 @router.post("/update-proposals/{proposal_id}/dismiss", status_code=status.HTTP_204_NO_CONTENT)
@@ -220,3 +235,11 @@ async def dismiss_update_proposal(request: Request, proposal_id: UUID) -> None:
 
 def _stream_line(event: ConceptTurnStreamEvent) -> str:
     return event.model_dump_json(by_alias=True, exclude_none=True) + "\n"
+
+
+def _idempotency_key(request: Request) -> str | None:
+    value = request.headers.get("idempotency-key")
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None

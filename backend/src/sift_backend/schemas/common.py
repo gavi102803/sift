@@ -58,6 +58,7 @@ class AnswerSourceType(StrEnum):
     model_knowledge = "modelKnowledge"
     user_provided = "userProvided"
     search_discovered = "searchDiscovered"
+    source_read = "sourceRead"
     source_verified = "sourceVerified"
     web_verified = "webVerified"
 

@@ -235,6 +235,18 @@ def test_list_concept_turns_returns_persisted_question_and_answer() -> None:
 
     assert response.status_code == 200
     assert response.json() == [
+        {"role": "user", "content": "RAG"},
+        {
+            "role": "assistant",
+            "content": "RAG captured as a draft concept.",
+            "answerSource": {
+                "sourceType": "modelKnowledge",
+                "confidence": 0.5,
+                "uncertaintyNote": "Mock backend response; no external sources cited.",
+                "retrievalUsed": False,
+                "citations": [],
+            },
+        },
         {"role": "user", "content": "How is it different from fine-tuning?"},
         {
             "role": "assistant",
@@ -256,6 +268,100 @@ def test_list_concept_turns_returns_404_for_missing_concept() -> None:
     response = client.get("/v1/concepts/00000000-0000-0000-0000-000000000001/turns")
 
     assert response.status_code == 404
+
+
+def test_create_concept_idempotency_key_does_not_create_duplicate_card() -> None:
+    client = make_client()
+    headers = {"Idempotency-Key": "capture-rag-1"}
+
+    first = client.post(
+        "/v1/concepts",
+        json={"raw_capture": "RAG", "locale": "en"},
+        headers=headers,
+    )
+    second = client.post(
+        "/v1/concepts",
+        json={"raw_capture": "RAG", "locale": "en"},
+        headers=headers,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["id"] == first.json()["id"]
+    assert len(client.get("/v1/concepts").json()) == 1
+    turns = client.get(f"/v1/concepts/{first.json()['id']}/turns").json()
+    assert [turn["role"] for turn in turns] == ["user", "assistant"]
+
+
+def test_turn_idempotency_key_does_not_duplicate_turn_or_patch() -> None:
+    client = make_client()
+    concept = client.post("/v1/concepts", json={"raw_capture": "RAG", "locale": "en"}).json()
+    headers = {"Idempotency-Key": "turn-1"}
+
+    first = client.post(
+        f"/v1/concepts/{concept['id']}/turns",
+        json={"question": "How does it work?"},
+        headers=headers,
+    )
+    second = client.post(
+        f"/v1/concepts/{concept['id']}/turns",
+        json={"question": "How does it work?"},
+        headers=headers,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["concept"]["noteRevision"] == first.json()["concept"]["noteRevision"]
+    persisted = client.get(f"/v1/concepts/{concept['id']}").json()
+    assert persisted["noteRevision"] == 2
+    turns = client.get(f"/v1/concepts/{concept['id']}/turns").json()
+    assert [turn["role"] for turn in turns] == ["user", "assistant", "user", "assistant"]
+
+
+def test_stream_turn_idempotency_key_returns_terminal_result_without_duplicate_turn() -> None:
+    client = make_client()
+    concept = client.post("/v1/concepts", json={"raw_capture": "RAG", "locale": "en"}).json()
+    headers = {"Idempotency-Key": "stream-turn-1"}
+
+    def run_stream() -> list[dict]:
+        with client.stream(
+            "POST",
+            f"/v1/concepts/{concept['id']}/turns/stream",
+            json={"question": "How does it work?"},
+            headers=headers,
+        ) as response:
+            assert response.status_code == 200
+            return [json.loads(line) for line in response.iter_lines() if line]
+
+    first = run_stream()
+    second = run_stream()
+
+    assert first[-1]["type"] == "completed"
+    assert second == [
+        {"type": "started"},
+        {"type": "completed", "response": first[-1]["response"]},
+    ]
+    turns = client.get(f"/v1/concepts/{concept['id']}/turns").json()
+    assert [turn["role"] for turn in turns] == ["user", "assistant", "user", "assistant"]
+
+
+def test_merge_proposal_idempotency_key_does_not_apply_patch_twice() -> None:
+    client = make_client()
+    concept = client.post("/v1/concepts", json={"raw_capture": "RAG", "locale": "en"}).json()
+    turn = client.post(
+        f"/v1/concepts/{concept['id']}/turns",
+        json={"question": "define it more precisely"},
+    ).json()
+    proposal_id = turn["proposal"]["id"]
+    headers = {"Idempotency-Key": "merge-1"}
+
+    first = client.post(f"/v1/update-proposals/{proposal_id}/merge", headers=headers)
+    second = client.post(f"/v1/update-proposals/{proposal_id}/merge", headers=headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["noteRevision"] == first.json()["noteRevision"]
+    assert client.get(f"/v1/concepts/{concept['id']}").json()["noteRevision"] == 2
 
 
 def test_submit_turn_returns_404_for_missing_concept() -> None:

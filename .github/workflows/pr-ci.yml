@@ -1,0 +1,43 @@
+name: PR CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - codex/**
+
+jobs:
+  backend:
+    name: Backend lint, tests, migrations
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend
+        run: python -m pip install -e ".[dev]"
+      - name: Ruff
+        run: python -m ruff check src tests
+      - name: Pytest
+        env:
+          SIFT_ENV: test
+          SIFT_PROVIDER_SETTINGS_PATH: ${{ runner.temp }}/provider-settings.json
+          SIFT_CAPABILITY_PROBE_CACHE_PATH: ${{ runner.temp }}/capability-probes.json
+        run: python -m pytest tests
+
+  ios:
+    name: iOS build and tests
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test Sift
+        run: |
+          xcodebuild test \
+            -project ios/Sift.xcodeproj \
+            -scheme Sift \
+            -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+            CODE_SIGNING_ALLOWED=NO

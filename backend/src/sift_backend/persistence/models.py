@@ -16,6 +16,7 @@ class ConceptRecord(Base):
     __tablename__ = "concepts"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(128), nullable=False, default="local-dev")
     canonical_title: Mapped[str] = mapped_column(String(255), nullable=False)
     display_title: Mapped[str] = mapped_column(String(255), nullable=False)
     one_line_explanation: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -56,6 +57,54 @@ class ConceptRecord(Base):
         back_populates="target_concept",
         cascade="all, delete-orphan",
         order_by="ConceptRelationRecord.created_at",
+    )
+
+
+class CaptureAttemptRecord(Base):
+    __tablename__ = "capture_attempts"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "idempotency_key", name="uq_capture_attempt_owner_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    raw_capture: Mapped[str] = mapped_column(Text, nullable=False)
+    locale: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    concept_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    failure_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    failure_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+
+class IdempotencyRecord(Base):
+    __tablename__ = "idempotency_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "owner_id",
+            "endpoint",
+            "idempotency_key",
+            name="uq_idempotency_owner_endpoint_key",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    endpoint: Mapped[str] = mapped_column(String(255), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    response_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        onupdate=utc_now,
     )
 
 

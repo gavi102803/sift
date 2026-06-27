@@ -32,13 +32,15 @@ struct CaptureFlowService {
     func generateConcept(from draft: Concept) async throws -> Concept {
         draft.captureStatus = CaptureStatus.pendingGeneration.rawValue
         draft.updatedAt = .now
+        let idempotencyKey = localStore.beginCaptureGeneration(for: draft)
 
         do {
-            draft.captureStatus = CaptureStatus.generating.rawValue
             let dto = try await apiClient.createConcept(
-                CreateConceptRequest(rawCapture: draft.displayTitle, locale: draft.language)
+                CreateConceptRequest(rawCapture: draft.displayTitle, locale: draft.language),
+                idempotencyKey: idempotencyKey
             )
             let concept = try localStore.upsertConcept(from: dto)
+            localStore.markCaptureGenerationCompleted(draft)
             localStore.recordInitialGenerationAnswer(
                 concept: concept,
                 question: draft.displayTitle,
@@ -49,15 +51,27 @@ struct CaptureFlowService {
             }
             return concept
         } catch {
-            draft.captureStatus = CaptureStatus.generationFailed.rawValue
-            draft.updatedAt = .now
-            localStore.recordInitialGenerationFailure(concept: draft, error: error)
+            if isTerminalGenerationFailure(error) {
+                localStore.markCaptureGenerationTerminalFailure(draft, error: error)
+            } else {
+                localStore.markCaptureGenerationUnknown(draft)
+            }
             throw error
         }
     }
 
     func retryGeneration(for concept: Concept) async throws -> Concept {
         try await generateConcept(from: concept)
+    }
+
+    private func isTerminalGenerationFailure(_ error: Error) -> Bool {
+        if case SiftAPIError.httpStatus = error {
+            return true
+        }
+        if error is URLError {
+            return false
+        }
+        return false
     }
 }
 

@@ -13,6 +13,8 @@ final class Concept {
     var captureStatus: String
     var noteRevision: Int
     var answerSourceJSON: String?
+    var captureGenerationIdempotencyKey: String?
+    var captureGenerationOperationStatus: String?
     var createdAt: Date
     var updatedAt: Date
 
@@ -33,6 +35,8 @@ final class Concept {
         captureStatus: String = CaptureStatus.draft.rawValue,
         noteRevision: Int = 0,
         answerSourceJSON: String? = nil,
+        captureGenerationIdempotencyKey: String? = nil,
+        captureGenerationOperationStatus: String? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now
     ) {
@@ -46,9 +50,18 @@ final class Concept {
         self.captureStatus = captureStatus
         self.noteRevision = noteRevision
         self.answerSourceJSON = answerSourceJSON
+        self.captureGenerationIdempotencyKey = captureGenerationIdempotencyKey
+        self.captureGenerationOperationStatus = captureGenerationOperationStatus
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
+}
+
+enum LocalOperationStatus: String, Codable, CaseIterable {
+    case pending
+    case inFlight
+    case failed
+    case completed
 }
 
 enum CaptureStatus: String, Codable, CaseIterable {

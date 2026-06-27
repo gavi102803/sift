@@ -9,7 +9,9 @@ final class ConceptLocalStoreTests: XCTestCase {
         let store = ConceptLocalStore(modelContext: context)
         let service = CaptureFlowService(
             localStore: store,
-            apiClient: TestAPIClient(createConceptResult: .failure(TestError.expectedFailure))
+            apiClient: TestAPIClient(
+                createConceptResult: .failure(SiftAPIError.httpStatus(502, detail: nil))
+            )
         )
 
         guard case .newDraft(let draft) = try service.resolveCapture(rawCapture: " Offline RAG ") else {
@@ -19,15 +21,45 @@ final class ConceptLocalStoreTests: XCTestCase {
         do {
             _ = try await service.generateConcept(from: draft)
             XCTFail("Expected generation to fail")
-        } catch TestError.expectedFailure {
+        } catch SiftAPIError.httpStatus {
             XCTAssertEqual(draft.displayTitle, "Offline RAG")
             XCTAssertEqual(draft.captureStatus, CaptureStatus.generationFailed.rawValue)
+            XCTAssertNil(draft.captureGenerationIdempotencyKey)
         }
 
         let concepts = try context.fetch(FetchDescriptor<Concept>())
         XCTAssertEqual(concepts.count, 1)
         XCTAssertEqual(concepts.first?.id, draft.id)
         XCTAssertEqual(concepts.first?.captureStatus, CaptureStatus.generationFailed.rawValue)
+    }
+
+    func testCaptureGenerationKeySurvivesLocalReload() throws {
+        let context = try makeModelContext()
+        let store = ConceptLocalStore(modelContext: context)
+        let draft = store.createDraft(rawCapture: "Agent runtime")
+        let key = store.beginCaptureGeneration(for: draft)
+        try context.save()
+
+        let reloadedContext = ModelContext(context.container)
+        let concepts = try reloadedContext.fetch(FetchDescriptor<Concept>())
+
+        XCTAssertEqual(concepts.first?.captureGenerationIdempotencyKey, key.uuidString)
+        XCTAssertEqual(
+            concepts.first?.captureGenerationOperationStatus,
+            LocalOperationStatus.inFlight.rawValue
+        )
+    }
+
+    func testFailedFollowUpOperationIsNotReturnedAsTimelineTurn() throws {
+        let context = try makeModelContext()
+        let store = ConceptLocalStore(modelContext: context)
+        let concept = store.createDraft(rawCapture: "RAG")
+
+        store.recordInitialCaptureQuestion(concept: concept, question: "RAG")
+        store.recordFailedFollowUpDraft(concept: concept, question: "retry me")
+
+        let turns = store.localConversationTurns(for: concept)
+        XCTAssertEqual(turns.map(\.content), ["RAG"])
     }
 
     func testSuccessfulGenerationReplacesLocalDraftWithRemoteConcept() async throws {
@@ -349,6 +381,189 @@ final class ConceptLocalStoreTests: XCTestCase {
     }
 }
 
+final class SiftAPIClientIdempotencyTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        URLProtocolRequestRecorder.reset()
+        URLProtocolRequestRecorder.handler = { request in
+            let path = request.url?.path ?? ""
+            if path.hasSuffix("/turns/stream") {
+                return HTTPURLProtocolResponse(
+                    statusCode: 200,
+                    contentType: "application/x-ndjson",
+                    body: self.terminalStreamBody()
+                )
+            }
+            return HTTPURLProtocolResponse(
+                statusCode: 200,
+                contentType: "application/json",
+                body: self.responseBody(for: path)
+            )
+        }
+    }
+
+    func testCreateStreamAndMergeWriteProvidedIdempotencyHeader() async throws {
+        let client = makeHTTPClient()
+        let key = UUID(uuidString: "00000000-0000-0000-0000-00000000CAFE")!
+
+        _ = try await client.createConcept(
+            CreateConceptRequest(rawCapture: "RAG", locale: "en"),
+            idempotencyKey: key
+        )
+        let stream = client.streamTurn(
+            conceptId: UUID(uuidString: "00000000-0000-0000-0000-000000000111")!,
+            request: ConceptTurnRequest(question: "How does it work?"),
+            idempotencyKey: key
+        )
+        var streamEvents: [ConceptTurnStreamEvent] = []
+        for try await event in stream {
+            streamEvents.append(event)
+        }
+        _ = try await client.mergeProposal(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000222")!,
+            idempotencyKey: key
+        )
+
+        let requests = URLProtocolRequestRecorder.requests()
+        XCTAssertEqual(streamEvents.map(\.type), ["completed"])
+        XCTAssertEqual(
+            requests.map { $0.value(forHTTPHeaderField: "Idempotency-Key") },
+            [key.uuidString, key.uuidString, key.uuidString]
+        )
+    }
+
+    func testGetAndPatchDoNotWriteIdempotencyHeader() async throws {
+        let client = makeHTTPClient()
+        let conceptId = UUID(uuidString: "00000000-0000-0000-0000-000000000111")!
+
+        _ = try await client.getConcept(id: conceptId)
+        _ = try await client.updateConceptSummary(
+            id: conceptId,
+            request: UpdateConceptSummaryRequest(
+                displayTitle: "RAG",
+                oneLineExplanation: "Updated."
+            )
+        )
+
+        let requests = URLProtocolRequestRecorder.requests()
+        XCTAssertEqual(requests.map(\.httpMethod), ["GET", "PATCH"])
+        XCTAssertEqual(
+            requests.map { $0.value(forHTTPHeaderField: "Idempotency-Key") },
+            [nil, nil]
+        )
+    }
+
+    private func makeHTTPClient() -> HTTPSiftAPIClient {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [URLProtocolRequestRecorder.self]
+        return HTTPSiftAPIClient(
+            baseURL: URL(string: "http://127.0.0.1:8000")!,
+            urlSession: URLSession(configuration: configuration)
+        )
+    }
+
+    private func responseBody(for path: String) -> Data {
+        if path.contains("/turns") {
+            return encoded(turnResponse())
+        }
+        return encoded(conceptDTO())
+    }
+
+    private func terminalStreamBody() -> Data {
+        let event = ConceptTurnStreamEvent(type: "completed", delta: nil, response: turnResponse())
+        return encoded(event) + Data("\n".utf8)
+    }
+
+    private func turnResponse() -> ConceptTurnResponse {
+        ConceptTurnResponse(
+            answer: "A terminal answer.",
+            answerSource: AnswerSourceDTO(
+                sourceType: AnswerSourceType.modelKnowledge.rawValue,
+                confidence: 0.5,
+                uncertaintyNote: "Test response."
+            ),
+            updateMode: UpdateMode.none.rawValue,
+            concept: conceptDTO(),
+            proposal: nil
+        )
+    }
+
+    private func conceptDTO() -> ConceptDTO {
+        ConceptDTO(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000111")!,
+            canonicalTitle: "RAG",
+            displayTitle: "RAG",
+            oneLineExplanation: "Retrieval augmented generation.",
+            maturity: ConceptMaturity.initial.rawValue,
+            captureStatus: CaptureStatus.ready.rawValue,
+            noteRevision: 1,
+            blocks: []
+        )
+    }
+
+    private func encoded<T: Encodable>(_ value: T) -> Data {
+        try! JSONEncoder().encode(value)
+    }
+}
+
+private struct HTTPURLProtocolResponse {
+    var statusCode: Int
+    var contentType: String
+    var body: Data
+}
+
+private final class URLProtocolRequestRecorder: URLProtocol {
+    nonisolated(unsafe) static var handler: ((URLRequest) -> HTTPURLProtocolResponse)?
+    private nonisolated(unsafe) static var recordedRequests: [URLRequest] = []
+    private nonisolated(unsafe) static var lock = NSLock()
+
+    static func reset() {
+        lock.lock()
+        recordedRequests = []
+        handler = nil
+        lock.unlock()
+    }
+
+    static func requests() -> [URLRequest] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordedRequests
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        Self.lock.lock()
+        Self.recordedRequests.append(request)
+        let handler = Self.handler
+        Self.lock.unlock()
+
+        guard let response = handler?(request),
+              let url = request.url,
+              let httpResponse = HTTPURLResponse(
+                url: url,
+                statusCode: response.statusCode,
+                httpVersion: nil,
+                headerFields: ["Content-Type": response.contentType]
+              ) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+
+        client?.urlProtocol(self, didReceive: httpResponse, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: response.body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
 private enum TestError: Error {
     case expectedFailure
     case unimplemented
@@ -356,6 +571,7 @@ private enum TestError: Error {
 
 private struct TestAPIClient: SiftAPIClient {
     var createConceptResult: Result<ConceptDTO, Error>
+    var createConceptIdempotencyKey: UUID?
 
     var backendDescription: String {
         "test"
@@ -445,6 +661,13 @@ private struct TestAPIClient: SiftAPIClient {
     }
 
     func createConcept(_ request: CreateConceptRequest) async throws -> ConceptDTO {
+        try await createConcept(request, idempotencyKey: nil)
+    }
+
+    func createConcept(
+        _ request: CreateConceptRequest,
+        idempotencyKey: UUID?
+    ) async throws -> ConceptDTO {
         switch createConceptResult {
         case .success(let dto):
             return dto

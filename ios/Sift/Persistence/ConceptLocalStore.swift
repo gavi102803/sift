@@ -89,6 +89,9 @@ struct ConceptLocalStore {
         guard let conversation = concept.conversation else { return [] }
         return conversation.messages
             .sorted { $0.createdAt < $1.createdAt }
+            .filter { message in
+                message.updateMode != failedFollowUpUpdateMode
+            }
             .map { message in
                 ConceptHistoryTurnDTO(
                     id: message.id,
@@ -130,6 +133,82 @@ struct ConceptLocalStore {
         concept.oneLineExplanation = "Review possible existing concepts before generating."
         concept.updatedAt = .now
         return concept
+    }
+
+    func beginCaptureGeneration(for concept: Concept) -> UUID {
+        if let existing = concept.captureGenerationIdempotencyKey,
+           let uuid = UUID(uuidString: existing),
+           concept.captureGenerationOperationStatus != LocalOperationStatus.failed.rawValue,
+           concept.captureGenerationOperationStatus != LocalOperationStatus.completed.rawValue {
+            concept.captureStatus = CaptureStatus.generating.rawValue
+            concept.captureGenerationOperationStatus = LocalOperationStatus.inFlight.rawValue
+            concept.updatedAt = .now
+            return uuid
+        }
+
+        let key = UUID()
+        concept.captureGenerationIdempotencyKey = key.uuidString
+        concept.captureGenerationOperationStatus = LocalOperationStatus.inFlight.rawValue
+        concept.captureStatus = CaptureStatus.generating.rawValue
+        concept.updatedAt = .now
+        return key
+    }
+
+    func markCaptureGenerationUnknown(_ concept: Concept) {
+        concept.captureStatus = CaptureStatus.pendingGeneration.rawValue
+        concept.captureGenerationOperationStatus = LocalOperationStatus.pending.rawValue
+        concept.updatedAt = .now
+    }
+
+    func markCaptureGenerationTerminalFailure(_ concept: Concept, error: Error) {
+        concept.captureStatus = CaptureStatus.generationFailed.rawValue
+        concept.captureGenerationOperationStatus = LocalOperationStatus.failed.rawValue
+        concept.captureGenerationIdempotencyKey = nil
+        concept.updatedAt = .now
+        recordInitialGenerationFailure(concept: concept, error: error)
+    }
+
+    func markCaptureGenerationCompleted(_ concept: Concept) {
+        concept.captureGenerationOperationStatus = LocalOperationStatus.completed.rawValue
+        concept.captureGenerationIdempotencyKey = nil
+        concept.updatedAt = .now
+    }
+
+    func reserveFollowUpOperation(concept: Concept, question: String) -> UUID {
+        let conversation = ensureConversation(for: concept)
+        if let existing = conversation.pendingFollowUpIdempotencyKey,
+           let uuid = UUID(uuidString: existing),
+           conversation.pendingFollowUpQuestion == question,
+           conversation.pendingFollowUpOperationStatus != LocalOperationStatus.failed.rawValue,
+           conversation.pendingFollowUpOperationStatus != LocalOperationStatus.completed.rawValue {
+            conversation.pendingFollowUpOperationStatus = LocalOperationStatus.inFlight.rawValue
+            conversation.updatedAt = .now
+            return uuid
+        }
+
+        let key = UUID()
+        conversation.pendingFollowUpIdempotencyKey = key.uuidString
+        conversation.pendingFollowUpQuestion = question
+        conversation.pendingFollowUpOperationStatus = LocalOperationStatus.inFlight.rawValue
+        conversation.updatedAt = .now
+        return key
+    }
+
+    func markFollowUpOperationFailed(concept: Concept, question: String, key: UUID) {
+        let conversation = ensureConversation(for: concept)
+        conversation.pendingFollowUpIdempotencyKey = key.uuidString
+        conversation.pendingFollowUpQuestion = question
+        conversation.pendingFollowUpOperationStatus = LocalOperationStatus.failed.rawValue
+        conversation.updatedAt = .now
+    }
+
+    func clearFollowUpOperation(concept: Concept, key: UUID) {
+        let conversation = ensureConversation(for: concept)
+        guard conversation.pendingFollowUpIdempotencyKey == key.uuidString else { return }
+        conversation.pendingFollowUpOperationStatus = LocalOperationStatus.completed.rawValue
+        conversation.pendingFollowUpIdempotencyKey = nil
+        conversation.pendingFollowUpQuestion = nil
+        conversation.updatedAt = .now
     }
 
     func upsertConcept(from dto: ConceptDTO) throws -> Concept {
@@ -384,6 +463,30 @@ struct ConceptLocalStore {
         }
 
         return proposal
+    }
+
+    func mergeIdempotencyKey(for proposal: ConceptUpdateProposal) -> UUID {
+        if let existing = proposal.mergeIdempotencyKey,
+           let uuid = UUID(uuidString: existing),
+           proposal.mergeOperationStatus != LocalOperationStatus.failed.rawValue,
+           proposal.mergeOperationStatus != LocalOperationStatus.completed.rawValue {
+            proposal.mergeOperationStatus = LocalOperationStatus.inFlight.rawValue
+            return uuid
+        }
+        let key = UUID()
+        proposal.mergeIdempotencyKey = key.uuidString
+        proposal.mergeOperationStatus = LocalOperationStatus.inFlight.rawValue
+        return key
+    }
+
+    func markProposalMergeCompleted(_ proposal: ConceptUpdateProposal) {
+        proposal.mergeOperationStatus = LocalOperationStatus.completed.rawValue
+        proposal.mergeIdempotencyKey = nil
+        proposal.resolvedAt = .now
+    }
+
+    func markProposalMergeFailed(_ proposal: ConceptUpdateProposal) {
+        proposal.mergeOperationStatus = LocalOperationStatus.failed.rawValue
     }
 
     func markProposal(id: UUID, status: ProposalStatus) throws {

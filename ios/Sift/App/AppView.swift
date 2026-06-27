@@ -26,7 +26,9 @@ struct AppView: View {
                             selectedTab = .library
                         },
                         onOpenConcept: { conceptId, initialMode in
-                            recordPath.append(ConceptRoute(id: conceptId, initialMode: initialMode))
+                            recordPath.append(
+                                ConceptRoute(id: conceptId, initialMode: initialMode)
+                            )
                         },
                         onReplaceOpenedConcept: { oldId, newId in
                             replaceLastConcept(in: &recordPath, oldId: oldId, newId: newId)

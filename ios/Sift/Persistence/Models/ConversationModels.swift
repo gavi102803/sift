@@ -119,3 +119,15 @@ enum UpdateMode: String, Codable, CaseIterable {
     case needsConfirmation
 }
 
+/// Internal `ConversationMessage.updateMode` sentinels used to tag locally
+/// recorded messages that are not part of the normal merge flow. Single source
+/// of truth shared by the local store (which writes them) and the UI (which
+/// reconciles them) so neither side hardcodes the raw strings.
+enum LocalConversationMarker {
+    /// The original capture question and its first generated answer.
+    static let initialCapture = "initialCapture"
+    /// A follow-up the user wrote that failed to send, or a generation failure
+    /// notice. Never rendered as a real conversation turn.
+    static let failed = "failed"
+}
+

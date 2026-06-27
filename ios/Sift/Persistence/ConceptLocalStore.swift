@@ -542,11 +542,11 @@ struct ConceptLocalStore {
     }
 
     private var failedFollowUpUpdateMode: String {
-        "failed"
+        LocalConversationMarker.failed
     }
 
     private var initialCaptureUpdateMode: String {
-        "initialCapture"
+        LocalConversationMarker.initialCapture
     }
 }
 

@@ -104,8 +104,9 @@ struct ConceptDetailView: View {
                                 .frame(height: 1)
                                 .id("conversation-bottom")
                         }
-                        .padding(20)
-                        .padding(.bottom, 86)
+                        .padding(.horizontal, 18)
+                        .padding(.top, 12)
+                        .padding(.bottom, SiftLayout.tabBarClearance + 76)
                     }
                     .scrollContentBackground(.hidden)
                     .onChange(of: detailMode) { _, newValue in
@@ -223,25 +224,88 @@ struct ConceptDetailView: View {
     }
 
     private func header(for concept: Concept) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(concept.displayTitle)
-                .font(.system(size: 30, weight: .bold))
-                .lineLimit(3)
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 14) {
+                SiftIconTile(
+                    systemName: "sparkles",
+                    accent: true,
+                    size: 48,
+                    radius: 13
+                )
+                Text(concept.displayTitle)
+                    .font(SiftFont.pageTitle)
+                    .tracking(-0.6)
+                    .foregroundStyle(SiftColor.textPrimary)
+                    .lineLimit(3)
+            }
 
-            HStack(spacing: 8) {
-                StatusPill(title: concept.maturity, icon: "leaf", tint: .green)
-                StatusPill(title: concept.captureStatus, icon: "checkmark.seal", tint: .blue)
+            VStack(spacing: 12) {
+                PropertyRow(icon: "chart.line.uptrend.xyaxis", label: "Maturity") {
+                    if concept.maturity.lowercased() == "initial" {
+                        SiftChip(text: concept.maturity.capitalized)
+                    } else {
+                        AccentWashChip(text: concept.maturity.capitalized)
+                    }
+                }
+                PropertyRow(icon: "checkmark.seal", label: "Status") {
+                    SiftChip(text: statusLabel(concept.captureStatus))
+                }
+                if !conceptTopicNames.isEmpty {
+                    PropertyRow(icon: "folder", label: "Topics") {
+                        chipWrap(conceptTopicNames)
+                    }
+                }
+                if !conceptTagNames.isEmpty {
+                    PropertyRow(icon: "tag", label: "Tags") {
+                        chipWrap(conceptTagNames)
+                    }
+                }
             }
 
             if !concept.oneLineExplanation.isEmpty {
-                Text(concept.oneLineExplanation)
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                    .lineSpacing(3)
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "lightbulb")
+                        .font(.system(size: 16, weight: .regular))
+                        .foregroundStyle(SiftColor.accent)
+                        .padding(.top, 1)
+                    Text(concept.oneLineExplanation)
+                        .font(SiftFont.body)
+                        .foregroundStyle(SiftColor.textSecondary)
+                        .lineSpacing(4)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .background(SiftColor.surfaceSoft, in: RoundedRectangle(cornerRadius: SiftRadius.card, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: SiftRadius.card, style: .continuous)
+                        .strokeBorder(SiftColor.hairline, lineWidth: 1)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .siftCard(padding: 16)
+    }
+
+    @ViewBuilder
+    private func chipWrap(_ values: [String]) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                ForEach(values, id: \.self) { SiftChip(text: $0) }
+            }
+            HStack(spacing: 6) {
+                ForEach(values.prefix(2), id: \.self) { SiftChip(text: $0) }
+            }
+        }
+    }
+
+    private func statusLabel(_ status: String) -> String {
+        switch CaptureStatus(rawValue: status) {
+        case .ready: "Ready"
+        case .generating, .pendingGeneration, .draft: "Generating"
+        case .generationFailed: "Failed"
+        case .needsDisambiguation: "Review"
+        case .archived: "Archived"
+        case .none: status
+        }
     }
 
     private func compactKnowledgeCard(for concept: Concept) -> some View {
@@ -418,11 +482,27 @@ struct ConceptDetailView: View {
                 }
             } else {
                 ForEach(turns) { turn in
-                    TurnRow(turn: turn)
+                    TurnRow(
+                        turn: turn,
+                        isStreaming: isStreamingTurn(turn),
+                        showSavedChip: showsSavedChip(for: turn)
+                    )
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func isStreamingTurn(_ turn: ConceptHistoryTurnDTO) -> Bool {
+        isSubmittingFollowUp && turn.role == "assistant" && turn.id == turns.last?.id
+    }
+
+    private func showsSavedChip(for turn: ConceptHistoryTurnDTO) -> Bool {
+        !isSubmittingFollowUp
+            && turn.role == "assistant"
+            && turn.id == turns.last?.id
+            && lastAnswerSource != nil
+            && !turn.content.isEmpty
     }
 
     private func emptyConversationTitle(for concept: Concept) -> String {
@@ -516,11 +596,28 @@ struct ConceptDetailView: View {
         }
     }
 
+    private var canSubmitFollowUp: Bool {
+        ConceptStatusRules.canSubmitFollowUp(concept?.captureStatus ?? "")
+            && !followUpText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var followUpComposer: some View {
-        HStack(spacing: 10) {
-            TextField("Ask a follow-up", text: $followUpText, axis: .vertical)
-                .textFieldStyle(.plain)
-                .lineLimit(1...4)
+        HStack(spacing: 12) {
+            Image(systemName: "plus.circle")
+                .font(.system(size: 22, weight: .regular))
+                .foregroundStyle(SiftColor.textMuted)
+
+            TextField(
+                "",
+                text: $followUpText,
+                prompt: Text("Reply to Sift…").foregroundColor(Color(hex: 0x5E6166)),
+                axis: .vertical
+            )
+            .textFieldStyle(.plain)
+            .font(SiftFont.body)
+            .foregroundStyle(SiftColor.textPrimary)
+            .tint(SiftColor.accent)
+            .lineLimit(1...4)
 
             Button {
                 if let concept {
@@ -532,31 +629,36 @@ struct ConceptDetailView: View {
                     }
                 }
             } label: {
-                if isSubmittingFollowUp {
-                    ProgressView()
-                        .frame(width: 34, height: 34)
-                } else {
-                    Image(systemName: "arrow.up")
-                        .frame(width: 34, height: 34)
+                Group {
+                    if isSubmittingFollowUp {
+                        ProgressView().tint(.white)
+                    } else {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
                 }
+                .frame(width: 40, height: 40)
+                .background(
+                    SiftColor.accent.opacity(canSubmitFollowUp ? 1 : 0.4),
+                    in: RoundedRectangle(cornerRadius: SiftRadius.send, style: .continuous)
+                )
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(
-                isSubmittingFollowUp
-                    || !ConceptStatusRules.canSubmitFollowUp(concept?.captureStatus ?? "")
-                    || followUpText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            )
+            .buttonStyle(.plain)
+            .disabled(isSubmittingFollowUp || !canSubmitFollowUp)
             .accessibilityLabel("Submit follow-up")
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial, in: Capsule())
+        .padding(.leading, 16)
+        .padding(.trailing, 8)
+        .padding(.vertical, 8)
+        .background(SiftColor.surfaceSoft, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay {
-            Capsule().stroke(SiftTheme.border, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
         }
-        .shadow(color: Color.black.opacity(0.08), radius: 18, y: 8)
-        .padding(.horizontal, 20)
-        .padding(.bottom, 8)
+        .padding(.horizontal, 18)
+        .padding(.bottom, SiftLayout.tabBarClearance)
     }
 
     private func submitFollowUp(for concept: Concept) async {
@@ -655,12 +757,20 @@ struct ConceptDetailView: View {
 
     private func refreshTurns(_ conceptId: UUID) async {
         if let concept, ConceptStatusRules.isLocalOnly(concept.captureStatus) {
+            turns = ConceptLocalStore(modelContext: modelContext)
+                .localConversationTurns(for: concept)
             return
         }
         do {
             let remoteTurns = try await appServices.apiClient.listTurns(conceptId: conceptId)
-            if !remoteTurns.isEmpty || turns.isEmpty {
+            if !remoteTurns.isEmpty {
                 turns = remoteTurns
+            } else if let concept {
+                let localTurns = ConceptLocalStore(modelContext: modelContext)
+                    .localConversationTurns(for: concept)
+                if !localTurns.isEmpty || turns.isEmpty {
+                    turns = localTurns
+                }
             }
         } catch is CancellationError {
             return
@@ -880,6 +990,8 @@ struct ConceptDetailView: View {
 
 private struct TurnRow: View {
     var turn: ConceptHistoryTurnDTO
+    var isStreaming: Bool = false
+    var showSavedChip: Bool = false
 
     private var isAssistant: Bool {
         turn.role == "assistant"
@@ -887,22 +999,22 @@ private struct TurnRow: View {
 
     var body: some View {
         if isAssistant {
-            AssistantMessage(text: turn.content)
+            AssistantMessage(text: turn.content, isStreaming: isStreaming, showSavedChip: showSavedChip)
         } else {
             HStack {
                 Spacer(minLength: 44)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("You")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                    MarkdownText(turn.content)
-                }
-                .padding(12)
-                .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: SiftTheme.compactRadius))
-                .overlay {
-                    RoundedRectangle(cornerRadius: SiftTheme.compactRadius)
-                        .stroke(SiftTheme.border, lineWidth: 1)
-                }
+                MarkdownText(turn.content)
+                    .foregroundStyle(SiftColor.textPrimary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .background(
+                        SiftColor.surfaceSoftHi,
+                        in: UnevenRoundedRectangle(
+                            topLeadingRadius: 16, bottomLeadingRadius: 16,
+                            bottomTrailingRadius: 6, topTrailingRadius: 16,
+                            style: .continuous
+                        )
+                    )
             }
         }
     }
@@ -910,22 +1022,64 @@ private struct TurnRow: View {
 
 private struct AssistantMessage: View {
     var text: String
+    var isStreaming: Bool = false
+    var showSavedChip: Bool = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            SiftSymbol(size: 24)
-                .frame(width: 26, height: 26)
-                .padding(.top, 2)
-
-            VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 7) {
+                SiftSymbol(size: 18)
+                    .frame(width: 18, height: 18)
                 Text("Sift")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                MarkdownText(text)
+                    .font(SiftFont.sans(13, .semibold))
+                    .foregroundStyle(SiftColor.textPrimary)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(alignment: .bottom, spacing: 0) {
+                MarkdownText(text)
+                    .foregroundStyle(SiftColor.textSecondary)
+                if isStreaming {
+                    StreamingCaret()
+                        .padding(.leading, 2)
+                        .padding(.bottom, 3)
+                }
+            }
+
+            if showSavedChip {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .bold))
+                    Text("Saved to note")
+                        .font(SiftFont.sans(12, .medium))
+                }
+                .foregroundStyle(SiftColor.accentTextOnWash)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(SiftColor.accentWash, in: Capsule())
+                .overlay(Capsule().strokeBorder(SiftColor.accentBorder, lineWidth: 1))
+                .padding(.top, 2)
+            }
         }
-        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 4)
+    }
+}
+
+/// Blinking accent caret that trails streaming text (1s steps(1) blink).
+private struct StreamingCaret: View {
+    @State private var visible = true
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 2, style: .continuous)
+            .fill(SiftColor.accent)
+            .frame(width: 8, height: 17)
+            .opacity(visible ? 1 : 0)
+            .task {
+                while !Task.isCancelled {
+                    visible.toggle()
+                    try? await Task.sleep(for: .milliseconds(500))
+                }
+            }
     }
 }
 
@@ -945,9 +1099,49 @@ private struct MarkdownText: View {
 
     var body: some View {
         Text(attributedText)
-            .font(.body)
+            .font(SiftFont.body)
             .lineSpacing(5)
             .textSelection(.enabled)
+    }
+}
+
+/// A property row in the concept note: fixed label column + value chips.
+private struct PropertyRow<Value: View>: View {
+    var icon: String
+    var label: String
+    @ViewBuilder var value: Value
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            HStack(spacing: 7) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundStyle(SiftColor.textFaint)
+                Text(label)
+                    .font(SiftFont.sans(13))
+                    .foregroundStyle(SiftColor.textFaint)
+            }
+            .frame(width: 88, alignment: .leading)
+
+            value
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+/// Accent-wash text chip (e.g. Maturity = Growing).
+private struct AccentWashChip: View {
+    var text: String
+    var body: some View {
+        Text(text)
+            .font(SiftFont.tag)
+            .foregroundStyle(SiftColor.accentTextOnWash)
+            .padding(.horizontal, 9).padding(.vertical, 4)
+            .background(SiftColor.accentWash, in: RoundedRectangle(cornerRadius: SiftRadius.chip, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: SiftRadius.chip, style: .continuous)
+                    .strokeBorder(SiftColor.accentBorder, lineWidth: 1)
+            )
     }
 }
 
@@ -981,19 +1175,19 @@ private struct InitialConceptExchange: View {
             if isAssistant {
                 AssistantMessage(text: text)
             } else {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(label)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                    MarkdownText(text)
-                        .lineLimit(10)
-                }
-                .padding(12)
-                .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: SiftTheme.compactRadius))
-                .overlay {
-                    RoundedRectangle(cornerRadius: SiftTheme.compactRadius)
-                        .stroke(SiftTheme.border, lineWidth: 1)
-                }
+                MarkdownText(text)
+                    .foregroundStyle(SiftColor.textPrimary)
+                    .lineLimit(10)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .background(
+                        SiftColor.surfaceSoftHi,
+                        in: UnevenRoundedRectangle(
+                            topLeadingRadius: 16, bottomLeadingRadius: 16,
+                            bottomTrailingRadius: 6, topTrailingRadius: 16,
+                            style: .continuous
+                        )
+                    )
             }
             if isAssistant {
                 Spacer(minLength: 32)
@@ -1379,21 +1573,6 @@ private enum SiftStreamingError: LocalizedError {
 
     var errorDescription: String? {
         "The streamed response ended before Sift received the final answer."
-    }
-}
-
-private struct StatusPill: View {
-    var title: String
-    var icon: String
-    var tint: Color
-
-    var body: some View {
-        Label(title, systemImage: icon)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(tint)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .background(tint.opacity(0.12), in: Capsule())
     }
 }
 

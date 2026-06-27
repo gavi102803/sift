@@ -7,14 +7,20 @@ enum AppTab: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var label: some View {
+    var title: String {
         switch self {
-        case .record:
-            Label("Capture", systemImage: "plus.circle")
-        case .library:
-            Label("Library", systemImage: "books.vertical")
-        case .profile:
-            Label("Profile", systemImage: "person.fill")
+        case .record: "Capture"
+        case .library: "Library"
+        case .profile: "Profile"
+        }
+    }
+
+    /// SF Symbol approximating the lucide icon used in the mock.
+    var systemImage: String {
+        switch self {
+        case .record: "plus"
+        case .library: "books.vertical"
+        case .profile: "person"
         }
     }
 }

@@ -4,18 +4,25 @@ struct SiftLogo: View {
     var symbolSize: CGFloat = 42
     var showsWordmark = true
     var monochrome = false
+    /// Tint particles to the Sift accent + neutral grays for the dark canvas.
+    var onDark = true
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            SiftSymbol(size: symbolSize, monochrome: monochrome)
+            SiftSymbol(size: symbolSize, monochrome: monochrome, onDark: onDark)
             if showsWordmark {
                 Text("Sift")
                     .font(.system(size: symbolSize * 0.84, weight: .regular))
-                    .foregroundStyle(monochrome ? Color.primary : ink)
+                    .foregroundStyle(wordmarkColor)
             }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Sift")
+    }
+
+    private var wordmarkColor: Color {
+        if monochrome { return Color.primary }
+        return onDark ? SiftColor.textPrimary : ink
     }
 
     private var ink: Color {
@@ -26,10 +33,10 @@ struct SiftLogo: View {
 struct SiftSymbol: View {
     var size: CGFloat = 56
     var monochrome = false
-    var onDark = false
+    var onDark = true
 
     private var blue: Color {
-        monochrome ? ink : Color(red: 0.184, green: 0.42, blue: 1)
+        monochrome ? ink : SiftColor.accent
     }
 
     private var ink: Color {
@@ -37,7 +44,7 @@ struct SiftSymbol: View {
     }
 
     private var quietInk: Color {
-        onDark ? Color.white.opacity(0.84) : ink.opacity(0.86)
+        onDark ? SiftColor.textMuted : ink.opacity(0.86)
     }
 
     var body: some View {

@@ -1,38 +1,117 @@
 import SwiftUI
 
+// MARK: - Hex helper
+
+extension Color {
+    init(hex: UInt32, alpha: Double = 1) {
+        self.init(
+            .sRGB,
+            red: Double((hex >> 16) & 0xFF) / 255,
+            green: Double((hex >> 8) & 0xFF) / 255,
+            blue: Double(hex & 0xFF) / 255,
+            opacity: alpha
+        )
+    }
+}
+
+// MARK: - Color tokens (Sift dark redesign)
+
+enum SiftColor {
+    static let canvas = Color(hex: 0x0A0B0D)            // app background, every screen
+    static let surface = Color(hex: 0x16181C)           // block cards, grouped setting cards
+    static let surfaceSoft = Color.white.opacity(0.05)  // fields, chips, secondary buttons
+    static let surfaceSoftHi = Color.white.opacity(0.07) // active tab pill, user bubble
+    static let hairline = Color.white.opacity(0.07)     // card borders, dividers
+    static let hairlineSoft = Color.white.opacity(0.06) // inner dividers
+
+    static let accent = Color(hex: 0x3D7FFF)            // the single accent
+    static let accentWash = Color(hex: 0x3D7FFF, alpha: 0.12)
+    static let accentBorder = Color(hex: 0x3D7FFF, alpha: 0.20)
+    static let accentTextOnWash = Color(hex: 0x9CC0FF)
+
+    static let textPrimary = Color(hex: 0xF3F4F5)
+    static let textSecondary = Color(hex: 0xC7CACE)
+    static let textBody = Color(hex: 0xABAFB6)
+    static let textMuted = Color(hex: 0x8B8F96)
+    static let textFaint = Color(hex: 0x74787E)
+    static let textFaintest = Color(hex: 0x5B5E63)
+
+    static let danger = Color(hex: 0xFF6B6B)
+}
+
+// MARK: - Radii
+
+enum SiftRadius {
+    static let card: CGFloat = 16
+    static let group: CGFloat = 16
+    static let tile: CGFloat = 12
+    static let button: CGFloat = 13
+    static let field: CGFloat = 14
+    static let chip: CGFloat = 8
+    static let tabBar: CGFloat = 26
+    static let tabItem: CGFloat = 20
+    static let sheetTop: CGFloat = 26
+    static let send: CGFloat = 12
+}
+
+// MARK: - Typography ramp (SF Pro / SF Mono)
+
+enum SiftFont {
+    static func sans(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        .system(size: size, weight: weight)
+    }
+    static func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        .system(size: size, weight: weight, design: .monospaced)
+    }
+
+    static let screenTitle = sans(30, .bold)
+    static let hero = sans(26, .semibold)
+    static let pageTitle = sans(27, .bold)
+    static let navTitle = sans(16, .semibold)
+    static let cardTitle = sans(15, .semibold)
+    static let body = sans(15)
+    static let cardDesc = sans(13)
+    static let tag = sans(11)
+    static let tabLabel = sans(10, .medium)
+    static let eyebrow = mono(11)
+    static let fieldLabel = mono(10)
+}
+
+// MARK: - Shadows / elevation
+
+extension View {
+    func siftCardShadow() -> some View {
+        self
+            .shadow(color: .black.opacity(0.5), radius: 1, x: 0, y: 1)
+            .shadow(color: .black.opacity(0.5), radius: 8, x: 0, y: 6)
+    }
+    func siftTabBarShadow() -> some View {
+        shadow(color: .black.opacity(0.7), radius: 17, x: 0, y: 10)
+    }
+    func siftPrimaryGlow() -> some View {
+        shadow(color: SiftColor.accent.opacity(0.7), radius: 9, x: 0, y: 6)
+    }
+}
+
+// MARK: - Legacy SiftTheme surface (kept so existing call sites compile)
+
 enum SiftTheme {
-    static let cornerRadius: CGFloat = 14
-    static let compactRadius: CGFloat = 10
+    static let cornerRadius: CGFloat = SiftRadius.card
+    static let compactRadius: CGFloat = SiftRadius.tile
 
-    static var background: Color {
-        Color(uiColor: .systemGroupedBackground)
-    }
-
-    static var surface: Color {
-        Color(uiColor: .secondarySystemGroupedBackground)
-    }
-
-    static var elevatedSurface: Color {
-        Color(uiColor: .systemBackground)
-    }
-
-    static var subtleFill: Color {
-        Color(uiColor: .tertiarySystemFill)
-    }
-
-    static var accentSoft: Color {
-        Color.accentColor.opacity(0.12)
-    }
-
-    static var border: Color {
-        Color.primary.opacity(0.08)
-    }
+    static var background: Color { SiftColor.canvas }
+    static var surface: Color { SiftColor.surface }
+    static var elevatedSurface: Color { SiftColor.surface }
+    static var subtleFill: Color { SiftColor.surfaceSoft }
+    static var accentSoft: Color { SiftColor.accentWash }
+    static var border: Color { SiftColor.hairline }
+    static var accent: Color { SiftColor.accent }
 }
 
 struct SiftScreenBackground: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .background(SiftTheme.background.ignoresSafeArea())
+            .background(SiftColor.canvas.ignoresSafeArea())
     }
 }
 
@@ -42,12 +121,12 @@ struct SiftCardStyle: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(padding)
-            .background(SiftTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: SiftTheme.cornerRadius))
+            .background(SiftColor.surface, in: RoundedRectangle(cornerRadius: SiftRadius.card, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: SiftTheme.cornerRadius)
-                    .stroke(SiftTheme.border, lineWidth: 1)
+                RoundedRectangle(cornerRadius: SiftRadius.card, style: .continuous)
+                    .strokeBorder(SiftColor.hairline, lineWidth: 1)
             }
-            .shadow(color: Color.black.opacity(0.04), radius: 10, y: 4)
+            .siftCardShadow()
     }
 }
 
@@ -61,3 +140,168 @@ extension View {
     }
 }
 
+// MARK: - Reusable building blocks
+
+/// The universal rounded "block" card: surface fill + hairline + card shadow.
+struct SiftBlock<Content: View>: View {
+    var padding: CGFloat = 14
+    @ViewBuilder var content: Content
+    var body: some View {
+        content
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(SiftColor.surface, in: RoundedRectangle(cornerRadius: SiftRadius.card, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: SiftRadius.card, style: .continuous)
+                    .strokeBorder(SiftColor.hairline, lineWidth: 1)
+            )
+            .siftCardShadow()
+    }
+}
+
+/// Rounded-square glyph tile. Accent variant = focused/primary; neutral = default.
+struct SiftIconTile: View {
+    let systemName: String
+    var accent: Bool = false
+    var size: CGFloat = 38
+    var radius: CGFloat = SiftRadius.tile
+    var body: some View {
+        RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .fill(accent ? SiftColor.accentWash : SiftColor.surfaceSoft)
+            .overlay(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(accent ? SiftColor.accentBorder : SiftColor.hairline, lineWidth: 1)
+            )
+            .frame(width: size, height: size)
+            .overlay(
+                Image(systemName: systemName)
+                    .font(.system(size: size * 0.46, weight: .medium))
+                    .foregroundStyle(accent ? SiftColor.accent : SiftColor.textBody)
+            )
+    }
+}
+
+/// Tag / select chip.
+struct SiftChip: View {
+    let text: String
+    var selected: Bool = false
+    var body: some View {
+        Text(text)
+            .font(SiftFont.tag)
+            .foregroundStyle(selected ? .white : SiftColor.textBody)
+            .lineLimit(1)
+            .padding(.horizontal, 9).padding(.vertical, 4)
+            .background(selected ? SiftColor.accent : SiftColor.surfaceSoft,
+                        in: RoundedRectangle(cornerRadius: SiftRadius.chip, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: SiftRadius.chip, style: .continuous)
+                    .strokeBorder(selected ? .clear : SiftColor.hairline, lineWidth: 1)
+            )
+    }
+}
+
+/// Mono ALL-CAPS section eyebrow (e.g. RUNTIME, ALL CONCEPTS).
+struct SiftEyebrow: View {
+    let text: String
+    var trailing: String? = nil
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(text.uppercased())
+                .font(SiftFont.eyebrow)
+                .tracking(0.6)
+                .foregroundStyle(SiftColor.textFaint)
+            if let trailing {
+                Text(trailing)
+                    .font(SiftFont.eyebrow)
+                    .tracking(0.6)
+                    .foregroundStyle(SiftColor.textFaintest)
+            }
+        }
+    }
+}
+
+enum SiftButtonKind { case primary, secondary }
+
+/// Primary (accent) / secondary (soft) button.
+struct SiftButton: View {
+    let title: String
+    var systemImage: String? = nil
+    var kind: SiftButtonKind = .primary
+    var height: CGFloat = 48
+    var isLoading: Bool = false
+    var action: () -> Void = {}
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                if isLoading {
+                    ProgressView()
+                        .tint(kind == .primary ? .white : SiftColor.textSecondary)
+                } else {
+                    if let systemImage { Image(systemName: systemImage) }
+                    Text(title).font(SiftFont.sans(15, kind == .primary ? .semibold : .medium))
+                }
+            }
+            .frame(maxWidth: .infinity).frame(height: height)
+            .foregroundStyle(kind == .primary ? .white : SiftColor.textSecondary)
+            .background(
+                kind == .primary ? SiftColor.accent : SiftColor.surfaceSoft,
+                in: RoundedRectangle(cornerRadius: SiftRadius.button, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: SiftRadius.button, style: .continuous)
+                    .strokeBorder(kind == .secondary ? Color.white.opacity(0.10) : .clear, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .modifier(SiftConditionalGlow(on: kind == .primary && height >= 48))
+    }
+}
+
+private struct SiftConditionalGlow: ViewModifier {
+    let on: Bool
+    func body(content: Content) -> some View { on ? AnyView(content.siftPrimaryGlow()) : AnyView(content) }
+}
+
+// MARK: - Provider brand mark
+
+/// A provider brand logo on a white rounded chip, keyed by provider id.
+/// Falls back to a globe glyph for unknown providers.
+struct ProviderBrandMark: View {
+    let providerId: String
+    var size: CGFloat = 34
+    var cornerRadius: CGFloat = 9
+
+    private var assetName: String? {
+        switch providerId.lowercased() {
+        case "deepseek": return "brand-deepseek"
+        case "anthropic", "anthropic_messages": return "brand-anthropic"
+        case "alibaba", "dashscope", "alibabacloud": return "brand-alibabacloud"
+        case "arcee": return "brand-arcee"
+        case "gmi", "gmicloud": return "brand-gmicloud"
+        case "openrouter": return "brand-openrouter"
+        default: return nil
+        }
+    }
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(.white)
+            .frame(width: size, height: size)
+            .overlay {
+                if let assetName {
+                    Image(assetName)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: size * 0.62, height: size * 0.62)
+                } else {
+                    Image(systemName: "globe")
+                        .font(.system(size: size * 0.46, weight: .medium))
+                        .foregroundStyle(SiftColor.canvas)
+                }
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(.black.opacity(0.06), lineWidth: 1)
+            )
+    }
+}

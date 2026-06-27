@@ -78,24 +78,18 @@ struct ConceptLibraryView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 16) {
+                titleRow
                 searchField
                 filterBar
 
-                HStack {
-                    Text("All Concepts")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("\(filteredConcepts.count) items")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                SiftEyebrow(text: "All Concepts", trailing: "\(filteredConcepts.count)")
+                    .padding(.top, 4)
 
                 if isRefreshing && concepts.isEmpty {
                     HStack {
                         Spacer()
-                        ProgressView()
+                        ProgressView().tint(SiftColor.textMuted)
                         Spacer()
                     }
                 }
@@ -121,30 +115,26 @@ struct ConceptLibraryView: View {
                     .frame(maxWidth: .infinity)
                     .siftCard(padding: 18)
                 } else {
-                    ForEach(filteredConcepts) { concept in
-                        ConceptLibraryCard(
-                            concept: concept,
-                            tags: tagNames(for: concept),
-                            topics: topicNames(for: concept),
-                            organization: organizationText(for: concept)
-                        )
+                    VStack(spacing: 10) {
+                        ForEach(Array(filteredConcepts.enumerated()), id: \.element.id) { index, concept in
+                            ConceptLibraryCard(
+                                concept: concept,
+                                tags: tagNames(for: concept),
+                                topics: topicNames(for: concept),
+                                organization: organizationText(for: concept),
+                                emphasized: index == 0
+                            )
+                        }
                     }
                 }
             }
-            .padding(20)
-            .padding(.bottom, 20)
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+            .padding(.bottom, SiftLayout.tabBarClearance)
         }
         .scrollContentBackground(.hidden)
         .siftScreenBackground()
-        .navigationTitle("Library")
-        .toolbar {
-            Button {
-                prepareCategoryAction()
-            } label: {
-                Image(systemName: selectedCategory == nil ? "plus" : "rectangle.stack.badge.plus")
-            }
-            .accessibilityLabel(selectedCategory == nil ? "Create category" : "Add concepts to category")
-        }
+        .navigationBarHidden(true)
         .sheet(isPresented: $isShowingCreateCategory) {
             NavigationStack {
                 CategoryEditorSheet(
@@ -189,19 +179,52 @@ struct ConceptLibraryView: View {
         }
     }
 
+    private var titleRow: some View {
+        HStack(alignment: .center) {
+            Text("Library")
+                .font(SiftFont.screenTitle)
+                .tracking(-0.8)
+                .foregroundStyle(SiftColor.textPrimary)
+            Spacer()
+            Button {
+                prepareCategoryAction()
+            } label: {
+                Image(systemName: selectedCategory == nil ? "plus" : "rectangle.stack.badge.plus")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(SiftColor.textSecondary)
+                    .frame(width: 38, height: 38)
+                    .background(SiftColor.surfaceSoft, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 11, style: .continuous)
+                            .strokeBorder(SiftColor.hairline, lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(selectedCategory == nil ? "Create category" : "Add concepts to category")
+        }
+    }
+
     private var searchField: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-            TextField("Search concepts...", text: $searchText)
-                .textFieldStyle(.plain)
-                .textInputAutocapitalization(.never)
+                .font(.system(size: 16, weight: .regular))
+                .foregroundStyle(SiftColor.textMuted)
+            TextField(
+                "",
+                text: $searchText,
+                prompt: Text("Search concepts & tags").foregroundColor(SiftColor.textFaint)
+            )
+            .textFieldStyle(.plain)
+            .font(SiftFont.body)
+            .foregroundStyle(SiftColor.textPrimary)
+            .tint(SiftColor.accent)
+            .textInputAutocapitalization(.never)
             if !searchText.isEmpty {
                 Button {
                     searchText = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(SiftColor.textFaint)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Clear search")
@@ -209,9 +232,10 @@ struct ConceptLibraryView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(SiftTheme.elevatedSurface, in: Capsule())
+        .background(SiftColor.surfaceSoft, in: RoundedRectangle(cornerRadius: SiftRadius.field, style: .continuous))
         .overlay {
-            Capsule().stroke(SiftTheme.border, lineWidth: 1)
+            RoundedRectangle(cornerRadius: SiftRadius.field, style: .continuous)
+                .strokeBorder(SiftColor.hairline, lineWidth: 1)
         }
     }
 
@@ -223,16 +247,17 @@ struct ConceptLibraryView: View {
                         selectedFilter = name
                     } label: {
                         Text(name)
-                            .font(.caption.weight(.medium))
-                            .padding(.horizontal, 12)
+                            .font(SiftFont.sans(13, .medium))
+                            .padding(.horizontal, 13)
                             .padding(.vertical, 8)
-                            .foregroundStyle(selectedFilter == name ? .white : .primary)
+                            .foregroundStyle(selectedFilter == name ? .white : SiftColor.textBody)
                             .background(
-                                selectedFilter == name ? Color.accentColor : SiftTheme.elevatedSurface,
-                                in: Capsule()
+                                selectedFilter == name ? SiftColor.accent : SiftColor.surfaceSoft,
+                                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
                             )
                             .overlay {
-                                Capsule().stroke(SiftTheme.border, lineWidth: 1)
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .strokeBorder(selectedFilter == name ? .clear : SiftColor.hairline, lineWidth: 1)
                             }
                     }
                     .buttonStyle(.plain)
@@ -360,6 +385,7 @@ private struct ConceptLibraryCard: View {
     var tags: [String]
     var topics: [String]
     var organization: String
+    var emphasized: Bool = false
 
     private var chips: [String] {
         Array((topics + tags).prefix(3))
@@ -368,70 +394,78 @@ private struct ConceptLibraryCard: View {
     var body: some View {
         NavigationLink(value: concept.id) {
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "link")
-                    .font(.headline)
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 38, height: 38)
-                    .background(SiftTheme.accentSoft, in: RoundedRectangle(cornerRadius: 10))
+                SiftIconTile(systemName: ConceptGlyph.symbol(for: concept), accent: emphasized, size: 40)
 
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .top, spacing: 8) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(concept.displayTitle)
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                            Text(concept.oneLineExplanation.isEmpty ? concept.captureStatus : concept.oneLineExplanation)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                        }
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(concept.displayTitle)
+                            .font(SiftFont.cardTitle)
+                            .foregroundStyle(SiftColor.textPrimary)
+                            .lineLimit(1)
                         Spacer(minLength: 8)
                         Text(relativeTime(for: concept.updatedAt))
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
+                            .font(SiftFont.mono(10))
+                            .tracking(0.5)
+                            .foregroundStyle(SiftColor.textFaintest)
                     }
+
+                    Text(concept.oneLineExplanation.isEmpty ? statusText : concept.oneLineExplanation)
+                        .font(SiftFont.cardDesc)
+                        .foregroundStyle(SiftColor.textMuted)
+                        .lineLimit(1)
+                        .lineSpacing(2)
 
                     if !chips.isEmpty {
                         HStack(spacing: 6) {
                             ForEach(chips, id: \.self) { chip in
-                                Text(chip)
-                                    .font(.caption2.weight(.medium))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                                    .frame(maxWidth: 86)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(SiftTheme.subtleFill, in: Capsule())
+                                SiftChip(text: chip)
                             }
                         }
+                        .padding(.top, 2)
                     } else if !organization.isEmpty {
                         Text(organization)
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
+                            .font(SiftFont.tag)
+                            .foregroundStyle(SiftColor.textFaint)
                             .lineLimit(1)
                     }
                 }
-
-                Image(systemName: "ellipsis")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 2)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .siftCard(padding: 12)
+            .siftCard(padding: 14)
         }
         .buttonStyle(.plain)
     }
 
+    private var statusText: String {
+        concept.captureStatus.replacingOccurrences(of: "Generation", with: "generation")
+    }
+
     private func relativeTime(for date: Date) -> String {
-        if abs(date.timeIntervalSinceNow) < 60 {
-            return "now"
-        }
+        let interval = -date.timeIntervalSinceNow
+        if interval < 60 { return "NOW" }
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter.localizedString(for: date, relativeTo: .now)
+            .uppercased()
+            .replacingOccurrences(of: " AGO", with: "")
+            .replacingOccurrences(of: " ", with: "")
+    }
+}
+
+/// Deterministic SF Symbol per concept, so cards read like distinct entries.
+private enum ConceptGlyph {
+    private static let symbols = [
+        "cylinder.split.1x2", "shippingbox", "arrow.triangle.swap",
+        "circle.grid.cross", "point.3.connected.trianglepath.dotted",
+        "square.stack.3d.up", "function", "waveform.path.ecg"
+    ]
+
+    static func symbol(for concept: Concept) -> String {
+        var hash = 5381
+        for byte in concept.id.uuidString.utf8 {
+            hash = ((hash << 5) &+ hash) &+ Int(byte)
+        }
+        return symbols[abs(hash) % symbols.count]
     }
 }
 

@@ -14,7 +14,7 @@ struct RecordView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
+            VStack(alignment: .leading, spacing: 24) {
                 brandHeader
                 captureHero
                 if let errorMessage {
@@ -25,13 +25,12 @@ struct RecordView: View {
                     }
                 }
             }
-            .padding(20)
-            .padding(.bottom, 92)
+            .padding(.horizontal, 24)
+            .padding(.bottom, SiftLayout.tabBarClearance + 84)
         }
         .scrollContentBackground(.hidden)
         .siftScreenBackground()
-        .navigationTitle("")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarHidden(true)
         .refreshable {
             await refreshConcepts()
         }
@@ -45,41 +44,52 @@ struct RecordView: View {
 
     private var brandHeader: some View {
         HStack {
-            SiftLogo(symbolSize: 54)
+            SiftLogo(symbolSize: 24)
             Spacer()
         }
-        .padding(.top, 8)
+        .padding(.top, 12)
     }
 
     private var captureHero: some View {
         VStack(spacing: 18) {
             Spacer(minLength: 0)
-            SiftSymbol(size: 82)
+            SiftSymbol(size: 98)
 
-            VStack(spacing: 8) {
+            VStack(spacing: 10) {
                 Text("What new concept did you hear?")
-                    .font(.title2.weight(.semibold))
+                    .font(SiftFont.hero)
+                    .tracking(-0.5)
+                    .foregroundStyle(SiftColor.textPrimary)
                     .multilineTextAlignment(.center)
-                Text("Capture it now.\nDeepen it later.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .lineSpacing(7)
+                Text("Capture it now. Deepen it later.")
+                    .font(SiftFont.body)
+                    .foregroundStyle(SiftColor.textFaint)
                     .multilineTextAlignment(.center)
-                    .lineSpacing(3)
             }
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity)
-        .frame(minHeight: 500)
+        .frame(minHeight: 460)
     }
 
     private var captureComposer: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "plus")
-                .foregroundStyle(.secondary)
+        HStack(spacing: 12) {
+            Image(systemName: "plus.circle")
+                .font(.system(size: 22, weight: .regular))
+                .foregroundStyle(SiftColor.textMuted)
 
-            TextField("Capture a concept", text: $captureText, axis: .vertical)
-                .textFieldStyle(.plain)
-                .lineLimit(1...3)
+            TextField(
+                "",
+                text: $captureText,
+                prompt: Text("Capture a concept…").foregroundColor(Color(hex: 0x5E6166)),
+                axis: .vertical
+            )
+            .textFieldStyle(.plain)
+            .font(SiftFont.body)
+            .foregroundStyle(SiftColor.textPrimary)
+            .tint(SiftColor.accent)
+            .lineLimit(1...3)
 
             Button {
                 Task {
@@ -87,10 +97,11 @@ struct RecordView: View {
                 }
             } label: {
                 Image(systemName: speechCapture.isRecording ? "mic.fill" : "mic")
-                    .frame(width: 30, height: 30)
+                    .font(.system(size: 18, weight: .regular))
+                    .frame(width: 28, height: 28)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(speechCapture.isRecording ? .red : .secondary)
+            .foregroundStyle(speechCapture.isRecording ? SiftColor.accent : SiftColor.textMuted)
             .disabled(isSubmitting)
             .accessibilityLabel(
                 speechCapture.isRecording ? "Stop voice input" : "Start voice input"
@@ -101,32 +112,43 @@ struct RecordView: View {
                     await captureConcept()
                 }
             } label: {
-                if isSubmitting {
-                    ProgressView()
-                        .frame(width: 34, height: 34)
-                } else {
-                    Image(systemName: "arrow.right")
-                        .font(.headline)
-                        .frame(width: 34, height: 34)
+                Group {
+                    if isSubmitting {
+                        ProgressView().tint(.white)
+                    } else {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
                 }
+                .frame(width: 40, height: 40)
+                .background(
+                    SiftColor.accent.opacity(canSubmit ? 1 : 0.4),
+                    in: RoundedRectangle(cornerRadius: SiftRadius.send, style: .continuous)
+                )
             }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.circle)
-            .disabled(
-                isSubmitting
-                    || captureText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            )
+            .buttonStyle(.plain)
+            .disabled(isSubmitting || !canSubmit)
             .accessibilityLabel("Capture concept")
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial, in: Capsule())
+        .padding(.leading, 16)
+        .padding(.trailing, 8)
+        .padding(.vertical, 8)
+        .background(SiftColor.surfaceSoft, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(
+            .ultraThinMaterial,
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
         .overlay {
-            Capsule().stroke(SiftTheme.border, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
         }
-        .shadow(color: Color.black.opacity(0.08), radius: 18, y: 8)
         .padding(.horizontal, 20)
-        .padding(.bottom, 8)
+        .padding(.bottom, SiftLayout.tabBarClearance)
+    }
+
+    private var canSubmit: Bool {
+        !captureText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func captureConcept() async {

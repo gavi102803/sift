@@ -13,87 +13,32 @@ struct ProfileView: View {
     @State private var isTestingWeb = false
 
     var body: some View {
-        List {
-            Section {
-                profileHeader
-            }
-            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
-            .listRowBackground(Color.clear)
-
-            Section("Runtime") {
-                NavigationLink {
-                    ModelProviderSettingsView()
-                } label: {
-                    SettingsValueRow(
-                        title: "Model Provider",
-                        value: modelSettings?.providerType ?? appStatus?.modelProvider ?? "Unavailable"
-                    )
-                }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                Text("Profile")
+                    .font(SiftFont.screenTitle)
+                    .tracking(-0.8)
+                    .foregroundStyle(SiftColor.textPrimary)
+                    .padding(.top, 8)
 
                 NavigationLink {
-                    WebSearchSettingsView()
+                    AccountDetailView(appStatus: appStatus)
                 } label: {
-                    SettingsValueRow(
-                        title: "Web Search",
-                        value: webSettingsLabel
-                    )
+                    profileHeader
                 }
+                .buttonStyle(.plain)
+
+                runtimeSection
+                diagnosticsSection
+                privacySection
             }
-
-            Section("Diagnostics") {
-                Button {
-                    Task {
-                        await runModelDiagnostic()
-                    }
-                } label: {
-                    DiagnosticButtonLabel(
-                        title: "Test Model",
-                        systemImage: "stethoscope",
-                        isLoading: isTestingModel
-                    )
-                }
-                .disabled(isTestingModel)
-
-                if let diagnostic {
-                    DiagnosticResultRow(diagnostic: diagnostic)
-                }
-
-                Button {
-                    Task {
-                        await runWebDiagnostic()
-                    }
-                } label: {
-                    DiagnosticButtonLabel(
-                        title: "Test Web Search",
-                        systemImage: "network",
-                        isLoading: isTestingWeb
-                    )
-                }
-                .disabled(isTestingWeb)
-
-                if let webDiagnostic {
-                    DiagnosticResultRow(diagnostic: webDiagnostic)
-                }
-
-                if let errorMessage {
-                    InlineErrorView(message: errorMessage) {
-                        Task {
-                            await refresh()
-                        }
-                    }
-                }
-            }
-
-            Section("Privacy") {
-                Text("Runtime API keys are stored by Sift Backend and returned to iOS only as a masked preview.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+            .padding(.bottom, SiftLayout.tabBarClearance)
         }
-        .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .siftScreenBackground()
-        .navigationTitle("Profile")
+        .navigationBarHidden(true)
         .refreshable {
             await refresh()
         }
@@ -104,40 +49,142 @@ struct ProfileView: View {
 
     private var profileHeader: some View {
         HStack(spacing: 14) {
-            SiftSymbol(size: 40)
+            SiftSymbol(size: 36)
                 .frame(width: 46, height: 46)
-                .background(Color.white, in: RoundedRectangle(cornerRadius: 12))
+                .background(SiftColor.accentWash, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(SiftTheme.border, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(SiftColor.accentBorder, lineWidth: 1)
                 }
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text("Sift User")
-                    .font(.headline)
+                    .font(SiftFont.sans(16, .semibold))
+                    .foregroundStyle(SiftColor.textPrimary)
                 Text(appStatus?.env ?? "development")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .font(SiftFont.cardDesc)
+                    .foregroundStyle(SiftColor.textFaint)
             }
 
             Spacer()
             Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(SiftColor.textFaint)
         }
-        .padding(14)
-        .background(SiftTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: SiftTheme.cornerRadius))
+        .padding(16)
+        .background(SiftColor.surface, in: RoundedRectangle(cornerRadius: SiftRadius.card, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: SiftTheme.cornerRadius)
-                .stroke(SiftTheme.border, lineWidth: 1)
+            RoundedRectangle(cornerRadius: SiftRadius.card, style: .continuous)
+                .strokeBorder(SiftColor.hairline, lineWidth: 1)
         }
+        .siftCardShadow()
+    }
+
+    private var runtimeSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SiftEyebrow(text: "Runtime")
+            SiftGroupedCard {
+                NavigationLink {
+                    ModelProviderSettingsView()
+                } label: {
+                    SiftSettingRow(icon: "cpu", title: "Model Provider") {
+                        HStack(spacing: 8) {
+                            ProviderBrandMark(providerId: providerId, size: 18, cornerRadius: 5)
+                            Text(providerId)
+                                .font(SiftFont.mono(12))
+                                .foregroundStyle(SiftColor.textBody)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+
+                SiftGroupDivider()
+
+                NavigationLink {
+                    WebSearchSettingsView()
+                } label: {
+                    SiftSettingRow(icon: "globe", title: "Web Search") {
+                        Text(webSettingsLabel)
+                            .font(SiftFont.mono(12))
+                            .foregroundStyle(SiftColor.textBody)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var diagnosticsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SiftEyebrow(text: "Diagnostics")
+            HStack(spacing: 10) {
+                SiftButton(
+                    title: "Test model",
+                    systemImage: "testtube.2",
+                    kind: .primary,
+                    height: 44,
+                    isLoading: isTestingModel
+                ) {
+                    Task { await runModelDiagnostic() }
+                }
+
+                SiftButton(
+                    title: "Web search",
+                    systemImage: "globe",
+                    kind: .secondary,
+                    height: 44,
+                    isLoading: isTestingWeb
+                ) {
+                    Task { await runWebDiagnostic() }
+                }
+            }
+
+            if let diagnostic {
+                DiagnosticAlert(diagnostic: diagnostic)
+            }
+            if let webDiagnostic {
+                DiagnosticAlert(diagnostic: webDiagnostic)
+            }
+            if let errorMessage {
+                InlineErrorView(message: errorMessage) {
+                    Task { await refresh() }
+                }
+            }
+        }
+    }
+
+    private var privacySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SiftEyebrow(text: "Privacy")
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "lock")
+                    .font(.system(size: 16, weight: .regular))
+                    .foregroundStyle(SiftColor.textMuted)
+                    .padding(.top, 1)
+                Text("Runtime API keys are stored by Sift Backend and returned to iOS only as a masked preview.")
+                    .font(SiftFont.cardDesc)
+                    .foregroundStyle(SiftColor.textMuted)
+                    .lineSpacing(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
+            .background(SiftColor.surfaceSoft, in: RoundedRectangle(cornerRadius: SiftRadius.card, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: SiftRadius.card, style: .continuous)
+                    .strokeBorder(SiftColor.hairline, lineWidth: 1)
+            }
+        }
+    }
+
+    private var providerId: String {
+        modelSettings?.providerType ?? appStatus?.modelProvider ?? "—"
     }
 
     private var webSettingsLabel: String {
         guard let webSettings else {
-            return appStatus?.webSearchEnabled == true ? "On" : "Off"
+            return appStatus?.webSearchEnabled == true ? "on" : "off"
         }
-        return webSettings.webSearchEnabled ? webSettings.providerType : "Off"
+        return webSettings.webSearchEnabled ? webSettings.providerType : "off"
     }
 
     private func refresh() async {
@@ -194,6 +241,42 @@ struct ProfileView: View {
     }
 }
 
+// MARK: - Account detail (pushed from the user card)
+
+private struct AccountDetailView: View {
+    var appStatus: AppStatusDTO?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                SiftEyebrow(text: "Account")
+                SiftGroupedCard {
+                    SiftSettingRow(icon: "person", title: "Name", showsChevron: false) {
+                        Text("Sift User")
+                            .font(SiftFont.body)
+                            .foregroundStyle(SiftColor.textBody)
+                    }
+                    SiftGroupDivider()
+                    SiftSettingRow(icon: "hammer", title: "Environment", showsChevron: false) {
+                        Text(appStatus?.env ?? "development")
+                            .font(SiftFont.mono(12))
+                            .foregroundStyle(SiftColor.textBody)
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+            .padding(.bottom, SiftLayout.tabBarClearance)
+        }
+        .scrollContentBackground(.hidden)
+        .siftScreenBackground()
+        .navigationTitle("Account")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+// MARK: - Model provider settings (screen 06)
+
 private struct ModelProviderSettingsView: View {
     @Environment(\.appServices) private var appServices
     @State private var providers: [RuntimeProviderOptionDTO] = []
@@ -210,117 +293,147 @@ private struct ModelProviderSettingsView: View {
     @State private var picker: ProviderPickerPresentation?
 
     var body: some View {
-        List {
-            if isLoading {
-                Section {
-                    HStack {
-                        Text("Loading")
-                        Spacer()
-                        ProgressView()
-                    }
-                }
-            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                SiftEyebrow(text: "Configuration")
+                    .padding(.bottom, 2)
 
-            Section("Configuration") {
-                Button {
-                    picker = ProviderPickerPresentation()
-                } label: {
-                    SettingsValueRow(
-                        title: "Model Provider",
-                        value: selectedProvider?.name ?? providerType
-                    )
-                }
-                .buttonStyle(.plain)
-
-                TextField("Base URL", text: $baseURL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .disabled(selectedProvider?.adapter == "mock")
-
-                SecureField(apiKeyPlaceholder, text: $apiKey)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .disabled(selectedProvider?.requiresApiKey == false)
-
-                HStack {
-                    TextField("Model", text: $model)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-
-                    Menu {
-                        if providerModels.isEmpty {
-                            Text("No models loaded")
-                        } else {
-                            ForEach(providerModels) { option in
-                                Button(option.id) {
-                                    model = option.id
-                                }
+                SiftGroupedCard {
+                    Button {
+                        picker = ProviderPickerPresentation()
+                    } label: {
+                        SiftSettingRow(icon: "cpu", title: "Provider") {
+                            HStack(spacing: 8) {
+                                ProviderBrandMark(providerId: providerType, size: 18, cornerRadius: 5)
+                                Text(selectedProvider?.name ?? providerType)
+                                    .font(SiftFont.body)
+                                    .foregroundStyle(SiftColor.textBody)
                             }
                         }
-                    } label: {
-                        Image(systemName: "list.bullet")
                     }
-                    .disabled(providerModels.isEmpty)
-                    .accessibilityLabel("Choose model")
-                }
-            }
+                    .buttonStyle(.plain)
 
-            Section {
-                Button {
-                    Task {
-                        await loadModels()
+                    SiftGroupDivider()
+                    fieldRow(label: "Base URL") {
+                        TextField("", text: $baseURL, prompt: Text("https://…").foregroundColor(SiftColor.textFaint))
+                            .textFieldStyle(.plain)
+                            .font(SiftFont.mono(13))
+                            .foregroundStyle(SiftColor.textSecondary)
+                            .tint(SiftColor.accent)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .disabled(selectedProvider?.adapter == "mock")
                     }
-                } label: {
-                    DiagnosticButtonLabel(
-                        title: "Load Models",
-                        systemImage: "arrow.down.circle",
-                        isLoading: isLoadingModels
-                    )
-                }
-                .disabled(isLoadingModels || selectedProvider?.supportsModelListing == false)
 
-                Button {
-                    Task {
-                        await save()
+                    SiftGroupDivider()
+                    fieldRow(label: "API Key") {
+                        SecureField(apiKeyPlaceholder, text: $apiKey)
+                            .textFieldStyle(.plain)
+                            .font(SiftFont.mono(13))
+                            .foregroundStyle(SiftColor.textSecondary)
+                            .tint(SiftColor.accent)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .disabled(selectedProvider?.requiresApiKey == false)
                     }
-                } label: {
-                    DiagnosticButtonLabel(
-                        title: "Save",
-                        systemImage: "checkmark",
-                        isLoading: isSaving
-                    )
-                }
-                .disabled(isSaving || !canSave)
-            }
 
-            if let errorMessage {
-                Section {
-                    InlineErrorView(message: errorMessage) {
-                        Task {
-                            await load()
+                    SiftGroupDivider()
+                    fieldRow(label: "Model") {
+                        HStack(spacing: 8) {
+                            TextField("", text: $model, prompt: Text("model-id").foregroundColor(SiftColor.textFaint))
+                                .textFieldStyle(.plain)
+                                .font(SiftFont.mono(13))
+                                .foregroundStyle(SiftColor.textSecondary)
+                                .tint(SiftColor.accent)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+
+                            Menu {
+                                if providerModels.isEmpty {
+                                    Text("No models loaded")
+                                } else {
+                                    ForEach(providerModels) { option in
+                                        Button(option.id) {
+                                            model = option.id
+                                        }
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: "list.bullet")
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundStyle(providerModels.isEmpty ? SiftColor.textFaint : SiftColor.accent)
+                            }
+                            .disabled(providerModels.isEmpty)
+                            .accessibilityLabel("Choose model")
                         }
                     }
                 }
+
+                VStack(spacing: 10) {
+                    SiftButton(
+                        title: "Load models",
+                        systemImage: "arrow.down.circle",
+                        kind: .secondary,
+                        isLoading: isLoadingModels
+                    ) {
+                        Task { await loadModels() }
+                    }
+                    .disabled(isLoadingModels || selectedProvider?.supportsModelListing == false)
+
+                    SiftButton(
+                        title: "Save changes",
+                        systemImage: "checkmark",
+                        kind: .primary,
+                        isLoading: isSaving
+                    ) {
+                        Task { await save() }
+                    }
+                    .disabled(isSaving || !canSave)
+                }
+                .padding(.top, 6)
+
+                if let errorMessage {
+                    InlineErrorView(message: errorMessage) {
+                        Task { await load() }
+                    }
+                }
             }
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+            .padding(.bottom, SiftLayout.tabBarClearance)
         }
-        .navigationTitle("Model Provider")
-        .navigationBarTitleDisplayMode(.inline)
-        .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .siftScreenBackground()
+        .navigationTitle("Model Provider")
+        .navigationBarTitleDisplayMode(.inline)
         .task {
             await load()
         }
         .sheet(item: $picker) { _ in
             ProviderPickerSheet(
-                title: "Model Provider",
+                title: "Select Provider",
                 providers: visibleProviders,
                 selectedID: providerType
             ) { provider in
                 apply(provider)
             }
             .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.hidden)
         }
+    }
+
+    @ViewBuilder
+    private func fieldRow<Content: View>(label: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label.uppercased())
+                .font(SiftFont.fieldLabel)
+                .tracking(0.5)
+                .foregroundStyle(SiftColor.textFaintest)
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 13)
     }
 
     private var visibleProviders: [RuntimeProviderOptionDTO] {
@@ -343,7 +456,7 @@ private struct ModelProviderSettingsView: View {
 
     private var apiKeyPlaceholder: String {
         if let preview = selectedProvider?.apiKeyPreview ?? settings?.apiKeyPreview {
-            return "API Key (\(preview))"
+            return "•••••••••••• \(preview)"
         }
         return "API Key"
     }
@@ -444,6 +557,8 @@ private struct ModelProviderSettingsView: View {
     }
 }
 
+// MARK: - Web search settings
+
 private struct WebSearchSettingsView: View {
     @Environment(\.appServices) private var appServices
     @State private var providers: [WebProviderOptionDTO] = []
@@ -457,59 +572,77 @@ private struct WebSearchSettingsView: View {
     @State private var picker: WebProviderPickerPresentation?
 
     var body: some View {
-        List {
-            Section {
-                Toggle("Web Search", isOn: $isEnabled)
-            }
-
-            Section("Configuration") {
-                Button {
-                    picker = WebProviderPickerPresentation()
-                } label: {
-                    SettingsValueRow(
-                        title: "Provider",
-                        value: selectedProvider?.name ?? providerType
-                    )
-                }
-                .buttonStyle(.plain)
-
-                if selectedProvider?.requiresApiKey == true {
-                    SecureField(apiKeyPlaceholder, text: $apiKey)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                }
-            }
-
-            Section {
-                Button {
-                    Task {
-                        await save()
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                SiftGroupedCard {
+                    SiftSettingRow(icon: "globe", title: "Web Search", showsChevron: false) {
+                        Toggle("", isOn: $isEnabled)
+                            .labelsHidden()
+                            .tint(SiftColor.accent)
                     }
-                } label: {
-                    DiagnosticButtonLabel(
-                        title: "Save",
-                        systemImage: "checkmark",
-                        isLoading: isSaving
-                    )
                 }
-                .disabled(isSaving || selectedProvider?.status == "comingSoon")
-            }
 
-            if let errorMessage {
-                Section {
-                    InlineErrorView(message: errorMessage) {
-                        Task {
-                            await load()
+                SiftEyebrow(text: "Configuration")
+                    .padding(.top, 4)
+
+                SiftGroupedCard {
+                    Button {
+                        picker = WebProviderPickerPresentation()
+                    } label: {
+                        SiftSettingRow(icon: "magnifyingglass", title: "Provider") {
+                            Text(selectedProvider?.name ?? providerType)
+                                .font(SiftFont.body)
+                                .foregroundStyle(SiftColor.textBody)
                         }
                     }
+                    .buttonStyle(.plain)
+
+                    if selectedProvider?.requiresApiKey == true {
+                        SiftGroupDivider()
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("API KEY")
+                                .font(SiftFont.fieldLabel)
+                                .tracking(0.5)
+                                .foregroundStyle(SiftColor.textFaintest)
+                            SecureField(apiKeyPlaceholder, text: $apiKey)
+                                .textFieldStyle(.plain)
+                                .font(SiftFont.mono(13))
+                                .foregroundStyle(SiftColor.textSecondary)
+                                .tint(SiftColor.accent)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 13)
+                    }
+                }
+
+                SiftButton(
+                    title: "Save changes",
+                    systemImage: "checkmark",
+                    kind: .primary,
+                    isLoading: isSaving
+                ) {
+                    Task { await save() }
+                }
+                .disabled(isSaving || selectedProvider?.status == "comingSoon")
+                .padding(.top, 6)
+
+                if let errorMessage {
+                    InlineErrorView(message: errorMessage) {
+                        Task { await load() }
+                    }
                 }
             }
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+            .padding(.bottom, SiftLayout.tabBarClearance)
         }
-        .navigationTitle("Web Search")
-        .navigationBarTitleDisplayMode(.inline)
-        .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .siftScreenBackground()
+        .navigationTitle("Web Search")
+        .navigationBarTitleDisplayMode(.inline)
         .task {
             await load()
         }
@@ -522,6 +655,7 @@ private struct WebSearchSettingsView: View {
                 apply(provider)
             }
             .presentationDetents([.medium])
+            .presentationDragIndicator(.hidden)
         }
     }
 
@@ -531,7 +665,7 @@ private struct WebSearchSettingsView: View {
 
     private var apiKeyPlaceholder: String {
         if let preview = selectedProvider?.apiKeyPreview ?? settings?.apiKeyPreview {
-            return "API Key (\(preview))"
+            return "•••••••••••• \(preview)"
         }
         return "API Key"
     }
@@ -606,6 +740,8 @@ private struct WebProviderPickerPresentation: Identifiable {
     let id = UUID()
 }
 
+// MARK: - Provider picker bottom sheet (screen 07)
+
 private struct ProviderPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     var title: String
@@ -614,29 +750,20 @@ private struct ProviderPickerSheet: View {
     var onSelect: (RuntimeProviderOptionDTO) -> Void
 
     var body: some View {
-        NavigationStack {
-            List(providers) { provider in
+        SiftSheetScaffold(title: title, onClose: { dismiss() }) {
+            ForEach(providers) { provider in
                 Button {
                     onSelect(provider)
                     dismiss()
                 } label: {
-                    ProviderOptionRow(
-                        title: provider.name,
-                        subtitle: provider.description,
-                        status: provider.status,
+                    ProviderPickerRow(
+                        brandId: provider.id,
+                        name: provider.name,
+                        description: provider.description,
                         isSelected: provider.id == selectedID
                     )
                 }
                 .buttonStyle(.plain)
-            }
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
             }
         }
     }
@@ -650,124 +777,212 @@ private struct WebProviderPickerSheet: View {
     var onSelect: (WebProviderOptionDTO) -> Void
 
     var body: some View {
-        NavigationStack {
-            List(providers) { provider in
+        SiftSheetScaffold(title: title, onClose: { dismiss() }) {
+            ForEach(providers) { provider in
                 Button {
                     onSelect(provider)
                     dismiss()
                 } label: {
-                    ProviderOptionRow(
-                        title: provider.name,
-                        subtitle: provider.description,
-                        status: provider.status,
+                    ProviderPickerRow(
+                        brandId: provider.id,
+                        name: provider.name,
+                        description: provider.description,
                         isSelected: provider.id == selectedID
                     )
                 }
                 .buttonStyle(.plain)
             }
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
+        }
+    }
+}
+
+/// Dark bottom-sheet container with grab handle, title and close button.
+private struct SiftSheetScaffold<Content: View>: View {
+    var title: String
+    var onClose: () -> Void
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            Color(hex: 0x131418).ignoresSafeArea()
+            VStack(spacing: 0) {
+                Capsule()
+                    .fill(Color.white.opacity(0.18))
+                    .frame(width: 36, height: 5)
+                    .padding(.top, 10)
+
+                HStack {
+                    Text(title)
+                        .font(SiftFont.sans(17, .semibold))
+                        .foregroundStyle(SiftColor.textPrimary)
+                    Spacer()
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(SiftColor.textBody)
+                            .frame(width: 30, height: 30)
+                            .background(SiftColor.surfaceSoft, in: Circle())
+                            .overlay(Circle().strokeBorder(SiftColor.hairline, lineWidth: 1))
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Close")
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 14)
+                .padding(.bottom, 12)
+
+                ScrollView {
+                    VStack(spacing: 8) {
+                        content
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 24)
                 }
             }
         }
+        .presentationBackground(Color(hex: 0x131418))
     }
 }
 
-private struct SettingsValueRow: View {
-    var title: String
-    var value: String
-
-    var body: some View {
-        HStack {
-            Text(title)
-            Spacer()
-            Text(value)
-                .foregroundStyle(.secondary)
-        }
-    }
-}
-
-private struct ProviderOptionRow: View {
-    var title: String
-    var subtitle: String
-    var status: String
+private struct ProviderPickerRow: View {
+    var brandId: String
+    var name: String
+    var description: String
     var isSelected: Bool
 
     var body: some View {
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text(title)
-                    if status != "available" {
-                        Text(status)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Text(subtitle)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+            ProviderBrandMark(providerId: brandId, size: 34)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                    .font(SiftFont.sans(15, .medium))
+                    .foregroundStyle(SiftColor.textPrimary)
+                Text(description)
+                    .font(SiftFont.sans(12))
+                    .foregroundStyle(isSelected ? SiftColor.accentTextOnWash : SiftColor.textFaint)
+                    .lineLimit(1)
             }
-            Spacer()
+            Spacer(minLength: 8)
             if isSelected {
                 Image(systemName: "checkmark")
-                    .foregroundStyle(.blue)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(SiftColor.accent)
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .background(
+            isSelected ? SiftColor.accentWash : Color.clear,
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(isSelected ? SiftColor.accentBorder : .clear, lineWidth: 1)
         }
     }
 }
 
-private struct DiagnosticButtonLabel: View {
+// MARK: - Grouped settings building blocks
+
+private struct SiftGroupedCard<Content: View>: View {
+    @ViewBuilder var content: Content
+    var body: some View {
+        VStack(spacing: 0) {
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(SiftColor.surface, in: RoundedRectangle(cornerRadius: SiftRadius.group, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: SiftRadius.group, style: .continuous)
+                .strokeBorder(SiftColor.hairline, lineWidth: 1)
+        }
+        .siftCardShadow()
+    }
+}
+
+private struct SiftGroupDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(SiftColor.hairlineSoft)
+            .frame(height: 1)
+            .padding(.leading, 14)
+    }
+}
+
+private struct SiftSettingRow<Trailing: View>: View {
+    var icon: String
     var title: String
-    var systemImage: String
-    var isLoading: Bool
+    var showsChevron: Bool = true
+    @ViewBuilder var trailing: Trailing
 
     var body: some View {
-        HStack {
-            if isLoading {
-                ProgressView()
-            } else {
-                Label(title, systemImage: systemImage)
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .regular))
+                .foregroundStyle(SiftColor.textBody)
+                .frame(width: 30, height: 30)
+                .background(SiftColor.surfaceSoft, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(SiftColor.hairline, lineWidth: 1)
+                )
+
+            Text(title)
+                .font(SiftFont.sans(15))
+                .foregroundStyle(SiftColor.textPrimary)
+
+            Spacer(minLength: 8)
+            trailing
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(SiftColor.textFaint)
             }
-            Spacer()
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 14)
+        .contentShape(Rectangle())
     }
 }
 
-private struct DiagnosticResultRow: View {
+private struct DiagnosticAlert: View {
     var diagnostic: ModelDiagnosticDTO
 
+    private var ok: Bool { diagnostic.ok }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label(
-                diagnostic.message,
-                systemImage: diagnostic.ok ? "checkmark.circle" : "xmark.octagon"
-            )
-            .foregroundStyle(diagnostic.ok ? .green : .red)
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(ok ? SiftColor.accent : SiftColor.danger)
+                .padding(.top, 1)
 
-            HStack(spacing: 12) {
-                Text("Provider: \(diagnostic.provider)")
-                Text("Model: \(diagnostic.model)")
-            }
-            .foregroundStyle(.secondary)
-
-            if let webSearchUsed = diagnostic.webSearchUsed {
-                HStack(spacing: 12) {
-                    Text("Web Search Used: \(webSearchUsed ? "Yes" : "No")")
-                    if let citationCount = diagnostic.citationCount {
-                        Text("Citations: \(citationCount)")
-                    }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(diagnostic.message)
+                    .font(SiftFont.sans(14))
+                    .foregroundStyle(SiftColor.textSecondary)
+                Text("\(diagnostic.provider) · \(diagnostic.model)")
+                    .font(SiftFont.mono(11))
+                    .foregroundStyle(ok ? SiftColor.accentTextOnWash : SiftColor.textFaint)
+                if let used = diagnostic.webSearchUsed {
+                    Text("web search \(used ? "used" : "not used")\(diagnostic.citationCount.map { " · \($0) citations" } ?? "")")
+                        .font(SiftFont.mono(11))
+                        .foregroundStyle(SiftColor.textFaint)
                 }
-                .foregroundStyle(webSearchUsed ? .green : .orange)
             }
         }
-        .font(.footnote)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(
+            (ok ? SiftColor.accentWash : SiftColor.danger.opacity(0.10)),
+            in: RoundedRectangle(cornerRadius: SiftRadius.card, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: SiftRadius.card, style: .continuous)
+                .strokeBorder(ok ? SiftColor.accentBorder : SiftColor.danger.opacity(0.25), lineWidth: 1)
+        }
     }
 }
 

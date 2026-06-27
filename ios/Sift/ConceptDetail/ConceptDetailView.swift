@@ -332,11 +332,17 @@ struct ConceptDetailView: View {
         let assistantTurnId = UUID()
         turns.append(ConceptHistoryTurnDTO(id: userTurnId, role: "user", content: question))
         turns.append(ConceptHistoryTurnDTO(id: assistantTurnId, role: "assistant", content: ""))
+        // Reserve a per-action idempotency key. A retry of the same question
+        // reuses the key while in-flight, so a network-interrupted send doesn't
+        // double-write; a terminal failure releases it (see catch).
+        let store = ConceptLocalStore(modelContext: modelContext)
+        let operationKey = store.reserveFollowUpOperation(concept: concept, question: question)
         do {
             var finalResponse: ConceptTurnResponse?
             for try await event in appServices.apiClient.streamTurn(
                 conceptId: concept.id,
-                request: ConceptTurnRequest(question: question)
+                request: ConceptTurnRequest(question: question),
+                idempotencyKey: operationKey
             ) {
                 if let delta = event.delta, !delta.isEmpty {
                     appendAssistantDelta(delta, turnId: assistantTurnId)
@@ -348,13 +354,13 @@ struct ConceptDetailView: View {
             guard let response = finalResponse else {
                 throw SiftStreamingError.incomplete
             }
-            let store = ConceptLocalStore(modelContext: modelContext)
             _ = try store.upsertConcept(from: response.concept)
             refreshOrganization(for: response.concept.id)
             if let proposal = response.proposal {
                 _ = try store.upsertProposal(proposal, conceptId: response.concept.id)
             }
             store.clearFailedFollowUpDrafts(for: concept, matching: question)
+            store.clearFollowUpOperation(concept: concept, key: operationKey)
             lastAnswerSource = response.answerSource
             // Terminal-only streams (e.g. an idempotent retry) carry no deltas;
             // fall back to the authoritative final answer so no blank bubble remains.
@@ -375,10 +381,13 @@ struct ConceptDetailView: View {
             turns.removeAll { turn in
                 turn.id == assistantTurnId || turn.id == userTurnId
             }
-            ConceptLocalStore(modelContext: modelContext).recordFailedFollowUpDraft(
-                concept: concept,
-                question: question
-            )
+            store.recordFailedFollowUpDraft(concept: concept, question: question)
+            // Terminal (server-rejected) failures release the key so a retry uses
+            // a fresh one. Network/unknown failures keep it in-flight so a retry
+            // reuses the same key and the backend dedupes.
+            if isTerminalFailure(error) {
+                store.markFollowUpOperationFailed(concept: concept, question: question, key: operationKey)
+            }
             if followUpText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 followUpText = question
             }
@@ -506,16 +515,32 @@ struct ConceptDetailView: View {
     private func mergeProposal(_ proposal: ConceptUpdateProposal) async {
         resolvingProposalId = proposal.id
         errorMessage = nil
+        let store = ConceptLocalStore(modelContext: modelContext)
+        // Per-proposal idempotency key, reused across retries of the same merge.
+        let mergeKey = store.mergeIdempotencyKey(for: proposal)
         do {
-            let concept = try await appServices.apiClient.mergeProposal(id: proposal.id)
-            let store = ConceptLocalStore(modelContext: modelContext)
+            let concept = try await appServices.apiClient.mergeProposal(
+                id: proposal.id,
+                idempotencyKey: mergeKey
+            )
             _ = try store.upsertConcept(from: concept)
             refreshOrganization(for: concept.id)
             try store.markProposal(id: proposal.id, status: .accepted)
+            store.markProposalMergeCompleted(proposal)
+            companion?.noteSuccess()
         } catch {
+            store.markProposalMergeFailed(proposal)
             present(error)
         }
         resolvingProposalId = nil
+    }
+
+    /// A terminal failure is one the backend explicitly rejected (an HTTP
+    /// status). Network/transport errors are treated as unknown so retries can
+    /// safely reuse the same idempotency key.
+    private func isTerminalFailure(_ error: Error) -> Bool {
+        if case SiftAPIError.httpStatus = error { return true }
+        return false
     }
 
     private func dismissProposal(_ proposal: ConceptUpdateProposal) async {

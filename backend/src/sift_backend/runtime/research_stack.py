@@ -1,6 +1,3 @@
-import ipaddress
-import socket
-from collections.abc import Callable
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Protocol
@@ -8,6 +5,12 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
+from sift_backend.runtime.outbound_safety import (
+    AddressResolver,
+    extraction_policy,
+    resolve_host_addresses,
+    validate_outbound_url,
+)
 from sift_backend.runtime.tools import RuntimeCitation, RuntimeExtractedDocument
 from sift_backend.runtime.types import SiftRuntimeError
 
@@ -24,9 +27,6 @@ class RuntimeExtractProvider(Protocol):
 
     async def extract(self, urls: list[str]) -> list[RuntimeExtractedDocument]:
         ...
-
-
-AddressResolver = Callable[[str], list[str]]
 
 
 @dataclass(frozen=True)
@@ -48,7 +48,7 @@ class SiftReadabilityExtractProvider:
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.limits = limits or ReadabilityExtractorLimits()
-        self.resolver = resolver or _resolve_host_addresses
+        self.resolver = resolver or resolve_host_addresses
         self.client = client
 
     async def extract(self, urls: list[str]) -> list[RuntimeExtractedDocument]:
@@ -121,40 +121,10 @@ class SiftReadabilityExtractProvider:
 
 def _validate_extract_url(url: str, resolver: AddressResolver) -> str:
     parsed = urlparse(url.strip())
-    if parsed.scheme not in {"http", "https"}:
-        raise SiftRuntimeError("extract_url_blocked", "Only HTTP(S) URLs can be extracted.")
-    if not parsed.hostname:
-        raise SiftRuntimeError("extract_url_blocked", "Extract URL must include a host.")
-    for address in resolver(parsed.hostname):
-        if _is_blocked_address(address):
-            raise SiftRuntimeError(
-                "extract_url_blocked",
-                "Extract URL resolves to a blocked network address.",
-            )
-    return parsed.geturl()
-
-
-def _resolve_host_addresses(host: str) -> list[str]:
-    return sorted(
-        {
-            result[4][0]
-            for result in socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
-        }
-    )
-
-
-def _is_blocked_address(address: str) -> bool:
-    ip = ipaddress.ip_address(address)
-    return any(
-        (
-            ip.is_loopback,
-            ip.is_private,
-            ip.is_link_local,
-            ip.is_multicast,
-            ip.is_unspecified,
-            ip.is_reserved,
-            address == "169.254.169.254",
-        )
+    return validate_outbound_url(
+        parsed.geturl(),
+        policy=extraction_policy(),
+        resolver=resolver,
     )
 
 

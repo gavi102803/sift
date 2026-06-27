@@ -72,7 +72,7 @@ class CandidateUpdate(SiftBaseModel):
         default=TimeSensitivity.stable,
         alias="timeSensitivity",
     )
-    source_ids: list[UUID] = Field(default_factory=list, alias="sourceIds")
+    source_ids: list[str] = Field(default_factory=list, alias="sourceIds")
 
 
 class InitialNoteBlockOutput(SiftBaseModel):

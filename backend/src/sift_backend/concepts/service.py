@@ -950,9 +950,11 @@ class ConceptService:
         request: ConceptTurnRequest,
         result: ConceptTurnResult,
     ) -> ConceptTurnResponse:
+        source_id_map = self._persist_answer_sources(concept.id, result.answer_source)
         concept, candidate_proposal, candidate_claims = self._apply_candidate_updates(
             concept,
             result,
+            source_id_map,
         )
         if result.update_mode == UpdateMode.auto_merge and result.auto_patch:
             concept = self._apply_auto_patch(concept, result.auto_patch)
@@ -964,7 +966,7 @@ class ConceptService:
 
         if candidate_claims and hasattr(self.store, "add_claims"):
             self.store.add_claims(concept.id, candidate_claims)
-        self._persist_turn_knowledge(concept, result)
+        self._persist_turn_learning_state(concept, result)
 
         self.store.append_turn_pair(
             concept.id,
@@ -981,14 +983,27 @@ class ConceptService:
             proposal=proposal,
         )
 
-    def _persist_turn_knowledge(
+    def _persist_answer_sources(
+        self,
+        concept_id: UUID,
+        answer_source: AnswerSourceDTO,
+    ) -> dict[str, UUID]:
+        sources = _sources_from_answer_source(concept_id, answer_source)
+        if sources and hasattr(self.store, "add_sources"):
+            persisted = self.store.add_sources(concept_id, sources)
+        else:
+            persisted = sources
+        return {
+            citation.source_id: source.id
+            for citation, source in zip(answer_source.citations, persisted, strict=False)
+            if citation.source_id is not None
+        }
+
+    def _persist_turn_learning_state(
         self,
         concept: ConceptDTO,
         result: ConceptTurnResult,
     ) -> None:
-        sources = _sources_from_answer_source(concept.id, result.answer_source)
-        if sources and hasattr(self.store, "add_sources"):
-            self.store.add_sources(concept.id, sources)
         learning_updates = [
             *result.learning_state_updates,
             *_learning_updates_from_memory_patch(result.memory_patch),
@@ -1000,6 +1015,7 @@ class ConceptService:
         self,
         concept: ConceptDTO,
         result: ConceptTurnResult,
+        source_id_map: dict[str, UUID] | None = None,
     ) -> tuple[ConceptDTO, UpdateProposalDTO | None, list[ClaimDTO]]:
         if not result.candidate_updates:
             return concept, None, []
@@ -1019,7 +1035,13 @@ class ConceptService:
                     proposal_rationales.append(_candidate_rationale(update))
                 continue
             if update.operation == CandidateUpdateOperation.add_claim and update.content:
-                claims.append(_claim_from_candidate(concept.id, update))
+                claim = _claim_from_candidate(
+                    concept.id,
+                    update,
+                    source_id_map or {},
+                )
+                if claim is not None:
+                    claims.append(claim)
                 continue
             operation = _candidate_to_patch_operation(update, concept)
             if operation is not None:
@@ -1288,7 +1310,10 @@ def _sources_from_answer_source(
     concept_id: UUID,
     answer_source: AnswerSourceDTO,
 ) -> list[SourceDTO]:
-    if answer_source.source_type != AnswerSourceType.web_verified:
+    if answer_source.source_type not in {
+        AnswerSourceType.search_discovered,
+        AnswerSourceType.source_read,
+    }:
         return []
     return [
         SourceDTO(
@@ -1299,6 +1324,7 @@ def _sources_from_answer_source(
             sourceType=SourceType.secondary,
         )
         for citation in answer_source.citations
+        if citation.source_id is not None
     ]
 
 
@@ -1398,7 +1424,20 @@ def _append_target_block_id(concept: ConceptDTO, update: CandidateUpdate) -> UUI
     return concept.blocks[-1].id
 
 
-def _claim_from_candidate(concept_id: UUID, update: CandidateUpdate) -> ClaimDTO:
+def _claim_from_candidate(
+    concept_id: UUID,
+    update: CandidateUpdate,
+    source_id_map: dict[str, UUID],
+) -> ClaimDTO | None:
+    source_ids = [
+        source_id_map[source_id]
+        for source_id in update.source_ids
+        if source_id in source_id_map
+    ]
+    if update.evidence_status == EvidenceStatus.source_backed and not source_ids:
+        return None
+    if update.evidence_status != EvidenceStatus.source_backed:
+        source_ids = []
     return ClaimDTO(
         id=uuid4(),
         conceptId=concept_id,
@@ -1406,7 +1445,7 @@ def _claim_from_candidate(concept_id: UUID, update: CandidateUpdate) -> ClaimDTO
         type=update.claim_type or ClaimType.fact,
         evidenceStatus=update.evidence_status,
         timeSensitivity=update.time_sensitivity,
-        sourceIds=update.source_ids,
+        sourceIds=source_ids,
     )
 
 

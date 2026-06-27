@@ -7,6 +7,7 @@ import httpx
 
 from sift_backend.runtime.anthropic_messages_driver import AnthropicMessagesDriver
 from sift_backend.runtime.gemini_driver import GeminiDriver
+from sift_backend.runtime.outbound_safety import model_endpoint_policy, validate_outbound_url
 from sift_backend.runtime.payload_mappers import build_chat_completions_payload
 from sift_backend.runtime.provider_presets import MODEL_PROVIDER_PRESETS
 from sift_backend.runtime.responses_driver import ResponsesDriver
@@ -107,6 +108,10 @@ class ChatCompletionsDriver:
         return models
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        validate_outbound_url(
+            self.base_url,
+            policy=model_endpoint_policy(self.provider_name),
+        )
         headers = self._headers()
         async with httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout) as client:
             try:

@@ -204,6 +204,67 @@ class CandidateAndAutoPatchModelService(MockConceptModelService):
         )
 
 
+class ClaimProvenanceModelService(MockConceptModelService):
+    async def answer_turn(
+        self,
+        concept: ConceptDTO,
+        request: ConceptTurnRequest,
+        recent_turns: list[RecentTurn] | None = None,
+        card_memory: str = "",
+    ) -> ConceptTurnResult:
+        return ConceptTurnResult(
+            answer="A2A has a source-backed claim and a model-only claim.",
+            answerSource={
+                "sourceType": AnswerSourceType.source_read,
+                "confidence": 0.8,
+                "retrievalUsed": True,
+                "citations": [
+                    {
+                        "sourceId": "src_001",
+                        "title": "A2A Protocol",
+                        "url": "https://example.com/a2a",
+                    },
+                    {
+                        "sourceId": "src_002",
+                        "title": "Other Source",
+                        "url": "https://example.com/other",
+                    },
+                ],
+            },
+            updateDecision={
+                "mode": UpdateMode.none,
+                "reason": "Candidate policy handles claims.",
+            },
+            candidateUpdates=[
+                {
+                    "operation": CandidateUpdateOperation.add_claim,
+                    "content": "A2A is designed for agent-to-agent communication.",
+                    "claimType": "definition",
+                    "evidenceStatus": EvidenceStatus.source_backed,
+                    "timeSensitivity": "stable",
+                    "sourceIds": ["src_001"],
+                },
+                {
+                    "operation": CandidateUpdateOperation.add_claim,
+                    "content": "This missing-source claim should be dropped.",
+                    "claimType": "fact",
+                    "evidenceStatus": EvidenceStatus.source_backed,
+                    "timeSensitivity": "stable",
+                    "sourceIds": [],
+                },
+                {
+                    "operation": CandidateUpdateOperation.add_claim,
+                    "content": "A2A is often discussed alongside MCP.",
+                    "claimType": "distinction",
+                    "evidenceStatus": EvidenceStatus.model_explanation,
+                    "timeSensitivity": "stable",
+                    "sourceIds": ["src_002"],
+                },
+            ],
+            modelMeta=ModelMeta(provider="test", model="claim-provenance-test"),
+        )
+
+
 class RecordingRuntimeProvider:
     provider_name = "test-runtime"
 
@@ -448,6 +509,29 @@ async def test_submit_turn_keeps_candidate_claim_when_auto_patch_also_saves() ->
 
     assert "retrieved context" in updated.blocks[0].content
     assert updated.claims[0].statement == "RAG combines retrieval with generation."
+
+
+@pytest.mark.asyncio
+async def test_submit_turn_maps_candidate_claim_source_ids_to_persisted_sources() -> None:
+    service = ConceptService(model_service=ClaimProvenanceModelService())
+    concept = service.create_concept(CreateConceptRequest(rawCapture="A2A"))
+
+    await service.submit_turn(
+        concept.id,
+        ConceptTurnRequest(question="Verify source for A2A."),
+    )
+    updated = service.get_concept(concept.id)
+
+    assert [source.url for source in updated.sources] == [
+        "https://example.com/a2a",
+        "https://example.com/other",
+    ]
+    assert [claim.statement for claim in updated.claims] == [
+        "A2A is designed for agent-to-agent communication.",
+        "A2A is often discussed alongside MCP.",
+    ]
+    assert updated.claims[0].source_ids == [updated.sources[0].id]
+    assert updated.claims[1].source_ids == []
 
 
 @pytest.mark.asyncio

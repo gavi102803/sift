@@ -75,6 +75,8 @@ final class AnswerSource {
 enum AnswerSourceType: String, Codable, CaseIterable {
     case modelKnowledge
     case userProvided
+    case searchDiscovered
+    case sourceRead
+    case sourceVerified
     case webVerified
 }
-

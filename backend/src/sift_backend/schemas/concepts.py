@@ -99,6 +99,7 @@ class ConceptHistoryTurnDTO(SiftBaseModel):
 class CitationDTO(SiftBaseModel):
     title: str
     url: str
+    source_id: str | None = Field(default=None, alias="sourceId")
 
 
 class SourceDTO(SiftBaseModel):

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 
 from sift_backend.runtime.capability_policies import resolve_capability_policy
 from sift_backend.runtime.capability_probe import (
@@ -71,6 +72,29 @@ async def run_model_driver_conformance(
         model_list=model_list,
         selected_structured_output=probe.selected_structured_output,
     )
+
+
+def model_driver_conformance_artifact(
+    result: ModelDriverConformanceResult,
+) -> dict[str, Any]:
+    return {
+        "kind": "sift.modelDriverConformance",
+        "provider": result.provider,
+        "model": result.model,
+        "ok": result.ok,
+        "selectedStructuredOutput": result.selected_structured_output,
+        "cases": {
+            "plainCompletion": _case_artifact(result.plain_completion),
+            "streaming": _case_artifact(result.streaming),
+            "structuredOutput": _case_artifact(result.structured_output),
+            "parameterPolicy": _case_artifact(result.parameter_policy),
+            "modelList": _case_artifact(result.model_list),
+        },
+    }
+
+
+def _case_artifact(result: ConformanceCaseResult) -> dict[str, Any]:
+    return {"ok": result.ok, "message": result.message}
 
 
 def _from_probe_case(probe: CapabilityProbeResult) -> ConformanceCaseResult:

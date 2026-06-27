@@ -3,7 +3,10 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from sift_backend.runtime.conformance import run_model_driver_conformance
+from sift_backend.runtime.conformance import (
+    model_driver_conformance_artifact,
+    run_model_driver_conformance,
+)
 from sift_backend.runtime.types import (
     RuntimeModelCompleted,
     RuntimeModelDelta,
@@ -90,6 +93,27 @@ async def test_model_driver_conformance_allows_disabled_model_listing(
     assert result.ok is True
     assert result.model_list.ok is True
     assert result.model_list.message == "model listing disabled by provider profile"
+
+
+@pytest.mark.asyncio
+async def test_model_driver_conformance_artifact_is_machine_readable_and_secret_free(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SIFT_CAPABILITY_PROBE_CACHE_PATH", str(tmp_path / "probes.json"))
+
+    result = await run_model_driver_conformance(
+        PassingProvider(),
+        provider_name="custom",
+        model="local-model",
+    )
+    artifact = model_driver_conformance_artifact(result)
+
+    assert artifact["kind"] == "sift.modelDriverConformance"
+    assert artifact["provider"] == "custom"
+    assert artifact["model"] == "local-model"
+    assert artifact["cases"]["streaming"]["ok"] is True
+    assert "secret" not in json.dumps(artifact).casefold()
 
 
 class PassingProvider:

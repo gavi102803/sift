@@ -1,0 +1,60 @@
+name: Live Provider Conformance
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 9 * * 1"
+
+jobs:
+  live-conformance:
+    name: Live model driver conformance
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend
+        run: python -m pip install -e ".[dev]"
+      - name: Write provider settings
+        env:
+          SIFT_RUNTIME_PROVIDER: ${{ vars.SIFT_RUNTIME_PROVIDER }}
+          SIFT_RUNTIME_BASE_URL: ${{ vars.SIFT_RUNTIME_BASE_URL }}
+          SIFT_RUNTIME_MODEL: ${{ vars.SIFT_RUNTIME_MODEL }}
+          SIFT_RUNTIME_API_KEY: ${{ secrets.SIFT_RUNTIME_API_KEY }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/sift"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          provider = os.environ.get("SIFT_RUNTIME_PROVIDER") or "mock"
+          settings = {
+              "runtime_provider": provider,
+              "runtime_provider_settings": {
+                  provider: {
+                      "base_url": os.environ.get("SIFT_RUNTIME_BASE_URL", ""),
+                      "model": os.environ.get("SIFT_RUNTIME_MODEL", ""),
+                      "api_key": os.environ.get("SIFT_RUNTIME_API_KEY", ""),
+                  }
+              },
+          }
+          Path(os.environ["RUNNER_TEMP"], "sift", "provider.json").write_text(
+              json.dumps(settings),
+              encoding="utf-8",
+          )
+          PY
+      - name: Run live conformance
+        env:
+          SIFT_ENV: test
+          SIFT_PROVIDER_SETTINGS_PATH: ${{ runner.temp }}/sift/provider.json
+          SIFT_CAPABILITY_PROBE_CACHE_PATH: ${{ runner.temp }}/sift/capability-probes.json
+        run: python scripts/run_live_conformance.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: live-conformance
+          path: backend/.data/live-conformance.json

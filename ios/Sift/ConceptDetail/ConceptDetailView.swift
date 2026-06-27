@@ -9,6 +9,7 @@ enum ConceptDetailMode: Hashable {
 struct ConceptDetailView: View {
     @Environment(\.appServices) private var appServices
     @Environment(\.modelContext) private var modelContext
+    @Environment(CompanionMonitor.self) private var companion: CompanionMonitor?
     @Query private var concepts: [Concept]
     @Query(sort: \Concept.displayTitle) private var allConcepts: [Concept]
     @Query private var proposals: [ConceptUpdateProposal]
@@ -33,14 +34,21 @@ struct ConceptDetailView: View {
     @State private var draftTopics = ""
     @State private var draftBlockContent = ""
     @State private var detailMode: ConceptDetailMode = .overview
+    @State private var isReadingOffline = false
+    @State private var isRetryingGeneration = false
 
     private var conceptId: UUID
+    /// Called when a retry produces a concept with a new id, so the navigation
+    /// route can follow it. A no-op (and id-stable) once retries are idempotent.
+    private var onConceptReplaced: (UUID, UUID) -> Void
 
     init(
         conceptId: UUID,
-        initialMode: ConceptDetailMode = .overview
+        initialMode: ConceptDetailMode = .overview,
+        onConceptReplaced: @escaping (UUID, UUID) -> Void = { _, _ in }
     ) {
         self.conceptId = conceptId
+        self.onConceptReplaced = onConceptReplaced
         _detailMode = State(initialValue: initialMode)
         _concepts = Query(filter: #Predicate<Concept> { concept in
             concept.id == conceptId
@@ -81,10 +89,11 @@ struct ConceptDetailView: View {
                             if isRefreshingConcept {
                                 ProgressView()
                             }
+                            if isReadingOffline {
+                                CompanionNotice(text: CompanionCopy.readingOffline, tone: .info)
+                            }
                             if let errorMessage {
-                                Text(errorMessage)
-                                    .font(.footnote)
-                                    .foregroundStyle(SiftColor.danger)
+                                CompanionNotice(text: errorMessage, tone: .warning)
                             }
                             if detailMode == .overview {
                                 if let activeProposal {
@@ -102,7 +111,9 @@ struct ConceptDetailView: View {
                                     concept: concept,
                                     turns: turns,
                                     isSubmitting: isSubmittingFollowUp,
-                                    lastAnswerSource: lastAnswerSource
+                                    lastAnswerSource: lastAnswerSource,
+                                    isRetryingGeneration: isRetryingGeneration,
+                                    onRetryGeneration: { Task { await retryGeneration(concept) } }
                                 )
                             }
                             Color.clear
@@ -346,8 +357,15 @@ struct ConceptDetailView: View {
             store.clearFailedFollowUpDrafts(for: concept, matching: question)
             lastAnswerSource = response.answerSource
             replaceAssistantAnswer(response.answer, turnId: assistantTurnId)
+            companion?.noteSuccess()
+            isReadingOffline = false
             await refreshTurns(concept.id)
+        } catch is CancellationError {
+            turns.removeAll { $0.id == assistantTurnId || $0.id == userTurnId }
         } catch {
+            // Remove the optimistic bubbles (no blank assistant left behind),
+            // persist the draft, restore the composer text, and show a quiet,
+            // sanitized hint — never the raw error.
             turns.removeAll { turn in
                 turn.id == assistantTurnId || turn.id == userTurnId
             }
@@ -355,9 +373,48 @@ struct ConceptDetailView: View {
                 concept: concept,
                 question: question
             )
-            errorMessage = error.localizedDescription
+            if followUpText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                followUpText = question
+            }
+            present(error)
         }
         isSubmittingFollowUp = false
+    }
+
+    /// Retry a failed initial generation via the existing CaptureFlowService
+    /// path. The regenerated concept may have a new id (until retries are
+    /// idempotent), so the navigation route is updated to follow it.
+    private func retryGeneration(_ concept: Concept) async {
+        guard !isRetryingGeneration else { return }
+        isRetryingGeneration = true
+        errorMessage = nil
+        defer { isRetryingGeneration = false }
+        let service = CaptureFlowService(
+            localStore: ConceptLocalStore(modelContext: modelContext),
+            apiClient: appServices.apiClient
+        )
+        do {
+            let regenerated = try await service.retryGeneration(for: concept)
+            companion?.noteSuccess()
+            isReadingOffline = false
+            if regenerated.id != concept.id {
+                onConceptReplaced(concept.id, regenerated.id)
+            } else {
+                await refreshTurns(regenerated.id)
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            present(error)
+        }
+    }
+
+    /// Set a sanitized, user-facing hint and record the failure category. Never
+    /// stores a raw error string.
+    private func present(_ error: Error) {
+        let kind = CompanionErrorKind(error)
+        errorMessage = CompanionCopy.hint(for: kind)
+        companion?.note(error)
     }
 
     private func appendAssistantDelta(_ delta: String, turnId: UUID) {
@@ -399,10 +456,14 @@ struct ConceptDetailView: View {
             let concept = try await appServices.apiClient.getConcept(id: conceptId)
             _ = try ConceptLocalStore(modelContext: modelContext).upsertConcept(from: concept)
             refreshOrganization(for: conceptId)
+            companion?.noteSuccess()
+            isReadingOffline = false
         } catch is CancellationError {
             return
         } catch {
-            errorMessage = error.localizedDescription
+            // Passive read: never block the saved card. Note offline quietly.
+            companion?.note(error)
+            isReadingOffline = (CompanionErrorKind(error) == .unreachable)
         }
     }
 
@@ -419,15 +480,18 @@ struct ConceptDetailView: View {
             let remoteTurns = try await appServices.apiClient.listTurns(conceptId: conceptId)
             // Backend history is authoritative; the local exchange is superseded.
             turns = ConversationTimeline.displayTurns(localInitial: localInitial, remote: remoteTurns)
+            companion?.noteSuccess()
+            isReadingOffline = false
         } catch is CancellationError {
             return
         } catch {
             // Offline / failed: keep the optimistic exchange visible rather than
-            // blanking an unsynced timeline.
+            // blanking an unsynced timeline. Stay quiet; this is a passive read.
             if turns.isEmpty {
                 turns = localInitial
             }
-            errorMessage = error.localizedDescription
+            companion?.note(error)
+            isReadingOffline = (CompanionErrorKind(error) == .unreachable)
         }
     }
 
@@ -443,7 +507,7 @@ struct ConceptDetailView: View {
             refreshOrganization(for: concept.id)
             try store.markProposal(id: proposal.id, status: .accepted)
         } catch {
-            errorMessage = error.localizedDescription
+            present(error)
         }
         resolvingProposalId = nil
     }
@@ -458,7 +522,7 @@ struct ConceptDetailView: View {
                 status: .dismissed
             )
         } catch {
-            errorMessage = error.localizedDescription
+            present(error)
         }
         resolvingProposalId = nil
     }
@@ -497,7 +561,7 @@ struct ConceptDetailView: View {
             refreshOrganization(for: concept.id)
             isEditingSummary = false
         } catch {
-            errorMessage = error.localizedDescription
+            present(error)
         }
     }
 
@@ -519,7 +583,7 @@ struct ConceptDetailView: View {
             _ = try ConceptLocalStore(modelContext: modelContext).upsertConcept(from: updated)
             editingBlockId = nil
         } catch {
-            errorMessage = error.localizedDescription
+            present(error)
         }
     }
 
@@ -554,7 +618,7 @@ struct ConceptDetailView: View {
                     lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
                 }
         } catch {
-            errorMessage = error.localizedDescription
+            // Local SwiftData read — not a companion failure; stay silent.
         }
     }
 
@@ -610,7 +674,7 @@ struct ConceptDetailView: View {
             )
             _ = try ConceptLocalStore(modelContext: modelContext).upsertConcept(from: updated)
         } catch {
-            errorMessage = error.localizedDescription
+            present(error)
         }
     }
 
@@ -627,7 +691,7 @@ struct ConceptDetailView: View {
             )
             _ = try ConceptLocalStore(modelContext: modelContext).upsertConcept(from: updated)
         } catch {
-            errorMessage = error.localizedDescription
+            present(error)
         }
     }
 }

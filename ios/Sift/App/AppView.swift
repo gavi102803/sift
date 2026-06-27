@@ -12,10 +12,12 @@ enum SiftLayout {
 }
 
 struct AppView: View {
+    @Environment(\.appServices) private var appServices
     @State private var selectedTab: AppTab = .record
     @State private var librarySearchText = ""
     @State private var recordPath: [ConceptRoute] = []
     @State private var libraryPath: [UUID] = []
+    @State private var companion = CompanionMonitor()
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -35,7 +37,13 @@ struct AppView: View {
                         }
                     )
                     .navigationDestination(for: ConceptRoute.self) { route in
-                        ConceptDetailView(conceptId: route.id, initialMode: route.initialMode)
+                        ConceptDetailView(
+                            conceptId: route.id,
+                            initialMode: route.initialMode,
+                            onConceptReplaced: { oldId, newId in
+                                replaceLastConcept(in: &recordPath, oldId: oldId, newId: newId)
+                            }
+                        )
                     }
                 }
                 .toolbar(.hidden, for: .tabBar)
@@ -44,7 +52,12 @@ struct AppView: View {
                 NavigationStack(path: $libraryPath) {
                     ConceptLibraryView(searchText: $librarySearchText)
                         .navigationDestination(for: UUID.self) { conceptId in
-                            ConceptDetailView(conceptId: conceptId)
+                            ConceptDetailView(
+                                conceptId: conceptId,
+                                onConceptReplaced: { oldId, newId in
+                                    replaceLastConcept(in: &libraryPath, oldId: oldId, newId: newId)
+                                }
+                            )
                         }
                 }
                 .toolbar(.hidden, for: .tabBar)
@@ -61,6 +74,17 @@ struct AppView: View {
         }
         .preferredColorScheme(.dark)
         .tint(SiftColor.accent)
+        .environment(companion)
+        .task {
+            await companion.refresh(using: appServices)
+        }
+    }
+
+    private func replaceLastConcept(in path: inout [UUID], oldId: UUID, newId: UUID) {
+        guard oldId != newId else { return }
+        if path.last == oldId {
+            path[path.count - 1] = newId
+        }
     }
 
     private func replaceLastConcept(in path: inout [ConceptRoute], oldId: UUID, newId: UUID) {

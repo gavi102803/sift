@@ -8,6 +8,8 @@ struct ConceptFollowUpView: View {
     var turns: [ConceptHistoryTurnDTO]
     var isSubmitting: Bool
     var lastAnswerSource: AnswerSourceDTO?
+    var isRetryingGeneration: Bool = false
+    var onRetryGeneration: () -> Void = {}
 
     private var status: CaptureStatus? {
         CaptureStatus(rawValue: concept.captureStatus)
@@ -35,7 +37,7 @@ struct ConceptFollowUpView: View {
             if isGenerating {
                 GeneratingAnswerRow()
             } else if status == .generationFailed {
-                GenerationFailureCard()
+                GenerationFailureCard(isRetrying: isRetryingGeneration, onRetry: onRetryGeneration)
             } else if turns.isEmpty {
                 emptyPrompt
             }
@@ -91,22 +93,43 @@ private struct GeneratingAnswerRow: View {
     }
 }
 
-/// Independent failure card with a retry path — not a fake assistant answer.
+/// Independent failure card with an inline retry — not a fake assistant answer.
+/// The original question is preserved (as the user turn above) and the saved
+/// draft survives app restarts, so retry never asks the user to retype.
 private struct GenerationFailureCard: View {
+    var isRetrying: Bool = false
+    var onRetry: () -> Void = {}
+
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 16, weight: .regular))
                 .foregroundStyle(SiftColor.danger)
                 .padding(.top, 1)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Couldn’t generate this card")
+            VStack(alignment: .leading, spacing: 6) {
+                Text(CompanionCopy.generationTitle)
                     .font(SiftFont.sans(14, .semibold))
                     .foregroundStyle(SiftColor.textPrimary)
-                Text("Return to Capture to retry or archive this saved capture.")
+                Text(CompanionCopy.generationBody)
                     .font(SiftFont.cardDesc)
                     .foregroundStyle(SiftColor.textMuted)
                     .lineSpacing(2)
+                Button(action: onRetry) {
+                    HStack(spacing: 6) {
+                        if isRetrying {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Try again")
+                                .font(SiftFont.sans(13, .semibold))
+                        }
+                    }
+                    .foregroundStyle(SiftColor.accent)
+                }
+                .buttonStyle(.plain)
+                .disabled(isRetrying)
+                .padding(.top, 2)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

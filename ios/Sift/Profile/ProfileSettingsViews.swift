@@ -621,6 +621,7 @@ struct AppearanceSettingsView: View {
 
 struct DeveloperToolsView: View {
     @Environment(\.appServices) private var appServices
+    @Environment(CompanionMonitor.self) private var companion: CompanionMonitor?
     @State private var appStatus: AppStatusDTO?
     @State private var modelSettings: ModelProviderSettingsDTO?
     @State private var webSettings: WebProviderSettingsDTO?
@@ -633,6 +634,7 @@ struct DeveloperToolsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
+                companionSection
                 diagnosticsSection
                 environmentSection
                 rawConfigSection
@@ -646,7 +648,25 @@ struct DeveloperToolsView: View {
         .siftScreenBackground()
         .navigationTitle("Developer")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await refresh() }
+        .task {
+            await companion?.refresh(using: appServices)
+            await refresh()
+        }
+    }
+
+    /// Local companion reachability — the one place mock vs unavailable is shown
+    /// explicitly, plus endpoint and the most recent error category (no secrets).
+    private var companionSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SiftEyebrow(text: "Local companion")
+            SiftGroupedCard {
+                infoRow("Status", value: (companion?.status ?? .unknown).developerLabel)
+                SiftGroupDivider()
+                infoRow("Endpoint", value: companion?.endpoint ?? appServices.apiClient.backendDescription)
+                SiftGroupDivider()
+                infoRow("Last error", value: companion?.lastErrorKind?.developerLabel ?? "None")
+            }
+        }
     }
 
     private var diagnosticsSection: some View {

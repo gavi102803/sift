@@ -4,6 +4,7 @@ import SwiftUI
 struct RecordView: View {
     @Environment(\.appServices) private var appServices
     @Environment(\.modelContext) private var modelContext
+    @Environment(CompanionMonitor.self) private var companion: CompanionMonitor?
     var onSearch: () -> Void = {}
     var onOpenConcept: (UUID, ConceptDetailMode) -> Void = { _, _ in }
     var onReplaceOpenedConcept: (UUID, UUID) -> Void = { _, _ in }
@@ -179,7 +180,8 @@ struct RecordView: View {
                 draft = newDraft
             }
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = "Sift couldn’t start that capture. Try again."
+            companion?.note(error)
             isSubmitting = false
             return
         }
@@ -189,9 +191,12 @@ struct RecordView: View {
         isSubmitting = false
         do {
             let generated = try await service.generateConcept(from: draft)
+            companion?.noteSuccess()
             onReplaceOpenedConcept(draft.id, generated.id)
         } catch {
-            errorMessage = error.localizedDescription
+            // The user is now on the concept; its status becomes generationFailed
+            // and the detail view shows the retry card. Record stays clean.
+            companion?.note(error)
         }
     }
 
@@ -206,7 +211,7 @@ struct RecordView: View {
                 captureText = transcript
             }
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = "Sift couldn’t start voice capture."
         }
     }
 
@@ -217,10 +222,12 @@ struct RecordView: View {
             try store.upsertConcepts(from: concepts)
             try store.pruneLocalMirrorsMissingFromRemote(keeping: Set(concepts.map(\.id)))
             errorMessage = nil
+            companion?.noteSuccess()
         } catch is CancellationError {
             return
         } catch {
-            errorMessage = error.localizedDescription
+            // Passive sync on the capture screen — stay quiet, just record it.
+            companion?.note(error)
         }
     }
 }

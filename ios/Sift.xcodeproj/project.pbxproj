@@ -39,6 +39,7 @@
 		100000000000000000000125 /* ProfileComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000025 /* ProfileComponents.swift */; };
 		100000000000000000000126 /* ProfileSettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000026 /* ProfileSettingsViews.swift */; };
 		100000000000000000000127 /* ProfilePreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000027 /* ProfilePreviews.swift */; };
+		100000000000000000000128 /* CompanionStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000028 /* CompanionStatus.swift */; };
 		200000000000000000000101 /* ConceptLocalStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000001 /* ConceptLocalStoreTests.swift */; };
 		200000000000000000000102 /* ProductLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000002 /* ProductLogicTests.swift */; };
 		300000000000000000000101 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 300000000000000000000001 /* Assets.xcassets */; };
@@ -87,6 +88,7 @@
 		100000000000000000000025 /* ProfileComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Profile/ProfileComponents.swift; sourceTree = "<group>"; };
 		100000000000000000000026 /* ProfileSettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Profile/ProfileSettingsViews.swift; sourceTree = "<group>"; };
 		100000000000000000000027 /* ProfilePreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Profile/ProfilePreviews.swift; sourceTree = "<group>"; };
+		100000000000000000000028 /* CompanionStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/CompanionStatus.swift; sourceTree = "<group>"; };
 		200000000000000000000002 /* ProductLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductLogicTests.swift; sourceTree = "<group>"; };
 		100000000000000000000201 /* Sift.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Sift.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		200000000000000000000001 /* ConceptLocalStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConceptLocalStoreTests.swift; sourceTree = "<group>"; };
@@ -130,6 +132,7 @@
 				100000000000000000000004 /* AppServices.swift */,
 				100000000000000000000005 /* AppTab.swift */,
 				100000000000000000000006 /* AppView.swift */,
+				100000000000000000000028 /* CompanionStatus.swift */,
 				100000000000000000000013 /* InlineErrorView.swift */,
 				100000000000000000000017 /* SiftTheme.swift */,
 				100000000000000000000018 /* SiftLogo.swift */,
@@ -296,6 +299,7 @@
 				100000000000000000000125 /* ProfileComponents.swift in Sources */,
 				100000000000000000000126 /* ProfileSettingsViews.swift in Sources */,
 				100000000000000000000127 /* ProfilePreviews.swift in Sources */,
+				100000000000000000000128 /* CompanionStatus.swift in Sources */,
 				100000000000000000000108 /* ConceptLibraryView.swift in Sources */,
 				100000000000000000000114 /* ConceptSearchIndex.swift in Sources */,
 				100000000000000000000109 /* ConceptLocalStore.swift in Sources */,

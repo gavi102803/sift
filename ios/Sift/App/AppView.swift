@@ -3,6 +3,9 @@ import SwiftUI
 private struct ConceptRoute: Hashable {
     var id: UUID
     var initialMode: ConceptDetailMode
+    /// In-memory only: the user's original capture text, shown as a temporary
+    /// fallback bubble while the first card generates. Never persisted.
+    var captureFallbackText: String?
 }
 
 /// Height the floating tab bar occupies above the safe-area bottom.
@@ -25,15 +28,25 @@ struct AppView: View {
                         onSearch: {
                             selectedTab = .library
                         },
-                        onOpenConcept: { conceptId, initialMode in
-                            recordPath.append(ConceptRoute(id: conceptId, initialMode: initialMode))
+                        onOpenConcept: { conceptId, initialMode, fallbackText in
+                            recordPath.append(
+                                ConceptRoute(
+                                    id: conceptId,
+                                    initialMode: initialMode,
+                                    captureFallbackText: fallbackText
+                                )
+                            )
                         },
                         onReplaceOpenedConcept: { oldId, newId in
                             replaceLastConcept(in: &recordPath, oldId: oldId, newId: newId)
                         }
                     )
                     .navigationDestination(for: ConceptRoute.self) { route in
-                        ConceptDetailView(conceptId: route.id, initialMode: route.initialMode)
+                        ConceptDetailView(
+                            conceptId: route.id,
+                            initialMode: route.initialMode,
+                            captureFallbackText: route.captureFallbackText
+                        )
                     }
                 }
                 .toolbar(.hidden, for: .tabBar)

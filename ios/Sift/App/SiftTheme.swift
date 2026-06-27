@@ -262,6 +262,82 @@ private struct SiftConditionalGlow: ViewModifier {
     func body(content: Content) -> some View { on ? AnyView(content.siftPrimaryGlow()) : AnyView(content) }
 }
 
+// MARK: - Grouped settings building blocks (shared by Profile + ConceptDetail)
+
+/// A rounded "grouped" container (iOS Settings style): surface fill + hairline.
+/// Rows inside are separated with `SiftGroupDivider`.
+struct SiftGroupedCard<Content: View>: View {
+    @ViewBuilder var content: Content
+    var body: some View {
+        VStack(spacing: 0) {
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(SiftColor.surface, in: RoundedRectangle(cornerRadius: SiftRadius.group, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: SiftRadius.group, style: .continuous)
+                .strokeBorder(SiftColor.hairline, lineWidth: 1)
+        }
+        .siftCardShadow()
+    }
+}
+
+/// Hairline divider inset to align with row content (used between grouped rows).
+struct SiftGroupDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(SiftColor.hairlineSoft)
+            .frame(height: 1)
+            .padding(.leading, 14)
+    }
+}
+
+/// A single settings row: glyph tile + title + trailing value (+ optional chevron).
+struct SiftSettingRow<Trailing: View>: View {
+    var icon: String
+    var title: String
+    var showsChevron: Bool = true
+    @ViewBuilder var trailing: Trailing
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .regular))
+                .foregroundStyle(SiftColor.textBody)
+                .frame(width: 30, height: 30)
+                .background(SiftColor.surfaceSoft, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(SiftColor.hairline, lineWidth: 1)
+                )
+
+            Text(title)
+                .font(SiftFont.sans(15))
+                .foregroundStyle(SiftColor.textPrimary)
+
+            Spacer(minLength: 8)
+            trailing
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(SiftColor.textFaint)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 14)
+        .contentShape(Rectangle())
+    }
+}
+
+extension SiftSettingRow where Trailing == EmptyView {
+    init(icon: String, title: String, showsChevron: Bool = true) {
+        self.icon = icon
+        self.title = title
+        self.showsChevron = showsChevron
+        self.trailing = EmptyView()
+    }
+}
+
 // MARK: - Provider brand mark
 
 /// A provider brand logo on a white rounded chip, keyed by provider id.

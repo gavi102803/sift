@@ -31,7 +31,16 @@
 		100000000000000000000111 /* RecordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000011 /* RecordView.swift */; };
 		100000000000000000000112 /* SiftApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000012 /* SiftApp.swift */; };
 		100000000000000000000116 /* SpeechCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000016 /* SpeechCaptureService.swift */; };
+		100000000000000000000120 /* ConceptReadingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000020 /* ConceptReadingView.swift */; };
+		100000000000000000000121 /* ConceptFollowUpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000021 /* ConceptFollowUpView.swift */; };
+		100000000000000000000122 /* ConceptProposalCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000022 /* ConceptProposalCard.swift */; };
+		100000000000000000000123 /* ConceptDetailSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000023 /* ConceptDetailSupport.swift */; };
+		100000000000000000000124 /* ConceptDetailPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000024 /* ConceptDetailPreviews.swift */; };
+		100000000000000000000125 /* ProfileComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000025 /* ProfileComponents.swift */; };
+		100000000000000000000126 /* ProfileSettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000026 /* ProfileSettingsViews.swift */; };
+		100000000000000000000127 /* ProfilePreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000027 /* ProfilePreviews.swift */; };
 		200000000000000000000101 /* ConceptLocalStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000001 /* ConceptLocalStoreTests.swift */; };
+		200000000000000000000102 /* ProductLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000002 /* ProductLogicTests.swift */; };
 		300000000000000000000101 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 300000000000000000000001 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -70,6 +79,15 @@
 		100000000000000000000011 /* RecordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Record/RecordView.swift; sourceTree = "<group>"; };
 		100000000000000000000012 /* SiftApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SiftApp.swift; sourceTree = "<group>"; };
 		100000000000000000000016 /* SpeechCaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Record/SpeechCaptureService.swift; sourceTree = "<group>"; };
+		100000000000000000000020 /* ConceptReadingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConceptDetail/ConceptReadingView.swift; sourceTree = "<group>"; };
+		100000000000000000000021 /* ConceptFollowUpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConceptDetail/ConceptFollowUpView.swift; sourceTree = "<group>"; };
+		100000000000000000000022 /* ConceptProposalCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConceptDetail/ConceptProposalCard.swift; sourceTree = "<group>"; };
+		100000000000000000000023 /* ConceptDetailSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConceptDetail/ConceptDetailSupport.swift; sourceTree = "<group>"; };
+		100000000000000000000024 /* ConceptDetailPreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConceptDetail/ConceptDetailPreviews.swift; sourceTree = "<group>"; };
+		100000000000000000000025 /* ProfileComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Profile/ProfileComponents.swift; sourceTree = "<group>"; };
+		100000000000000000000026 /* ProfileSettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Profile/ProfileSettingsViews.swift; sourceTree = "<group>"; };
+		100000000000000000000027 /* ProfilePreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Profile/ProfilePreviews.swift; sourceTree = "<group>"; };
+		200000000000000000000002 /* ProductLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductLogicTests.swift; sourceTree = "<group>"; };
 		100000000000000000000201 /* Sift.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Sift.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		200000000000000000000001 /* ConceptLocalStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConceptLocalStoreTests.swift; sourceTree = "<group>"; };
 		200000000000000000000201 /* SiftTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SiftTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -116,6 +134,11 @@
 				100000000000000000000017 /* SiftTheme.swift */,
 				100000000000000000000018 /* SiftLogo.swift */,
 				100000000000000000000007 /* ConceptDetailView.swift */,
+				100000000000000000000020 /* ConceptReadingView.swift */,
+				100000000000000000000021 /* ConceptFollowUpView.swift */,
+				100000000000000000000022 /* ConceptProposalCard.swift */,
+				100000000000000000000023 /* ConceptDetailSupport.swift */,
+				100000000000000000000024 /* ConceptDetailPreviews.swift */,
 				100000000000000000000008 /* ConceptLibraryView.swift */,
 				100000000000000000000014 /* ConceptSearchIndex.swift */,
 				100000000000000000000009 /* ConceptLocalStore.swift */,
@@ -126,6 +149,9 @@
 				10000000000000000000000D /* OrganizationModels.swift */,
 				10000000000000000000000E /* ProposalModels.swift */,
 				10000000000000000000000F /* ProfileView.swift */,
+				100000000000000000000025 /* ProfileComponents.swift */,
+				100000000000000000000026 /* ProfileSettingsViews.swift */,
+				100000000000000000000027 /* ProfilePreviews.swift */,
 				100000000000000000000010 /* CaptureFlowService.swift */,
 				100000000000000000000011 /* RecordView.swift */,
 				100000000000000000000016 /* SpeechCaptureService.swift */,
@@ -148,6 +174,7 @@
 			isa = PBXGroup;
 			children = (
 				200000000000000000000001 /* ConceptLocalStoreTests.swift */,
+				200000000000000000000002 /* ProductLogicTests.swift */,
 			);
 			path = SiftTests;
 			sourceTree = "<group>";
@@ -261,6 +288,14 @@
 				100000000000000000000117 /* SiftTheme.swift in Sources */,
 				100000000000000000000118 /* SiftLogo.swift in Sources */,
 				100000000000000000000107 /* ConceptDetailView.swift in Sources */,
+				100000000000000000000120 /* ConceptReadingView.swift in Sources */,
+				100000000000000000000121 /* ConceptFollowUpView.swift in Sources */,
+				100000000000000000000122 /* ConceptProposalCard.swift in Sources */,
+				100000000000000000000123 /* ConceptDetailSupport.swift in Sources */,
+				100000000000000000000124 /* ConceptDetailPreviews.swift in Sources */,
+				100000000000000000000125 /* ProfileComponents.swift in Sources */,
+				100000000000000000000126 /* ProfileSettingsViews.swift in Sources */,
+				100000000000000000000127 /* ProfilePreviews.swift in Sources */,
 				100000000000000000000108 /* ConceptLibraryView.swift in Sources */,
 				100000000000000000000114 /* ConceptSearchIndex.swift in Sources */,
 				100000000000000000000109 /* ConceptLocalStore.swift in Sources */,
@@ -283,6 +318,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				200000000000000000000101 /* ConceptLocalStoreTests.swift in Sources */,
+				200000000000000000000102 /* ProductLogicTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

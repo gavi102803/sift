@@ -5,7 +5,7 @@ struct RecordView: View {
     @Environment(\.appServices) private var appServices
     @Environment(\.modelContext) private var modelContext
     var onSearch: () -> Void = {}
-    var onOpenConcept: (UUID, ConceptDetailMode) -> Void = { _, _ in }
+    var onOpenConcept: (UUID, ConceptDetailMode, String?) -> Void = { _, _, _ in }
     var onReplaceOpenedConcept: (UUID, UUID) -> Void = { _, _ in }
     @State private var captureText = ""
     @State private var errorMessage: String?
@@ -158,6 +158,8 @@ struct RecordView: View {
         )
         let draft: Concept
 
+        let originalCapture = captureText.trimmingCharacters(in: .whitespacesAndNewlines)
+
         isSubmitting = true
         errorMessage = nil
         do {
@@ -167,7 +169,7 @@ struct RecordView: View {
                 return
             case .existing(let concept):
                 captureText = ""
-                onOpenConcept(concept.id, .followUp)
+                onOpenConcept(concept.id, .followUp, nil)
                 isSubmitting = false
                 return
             case .needsDisambiguation(_, let matches):
@@ -185,7 +187,7 @@ struct RecordView: View {
         }
 
         captureText = ""
-        onOpenConcept(draft.id, .followUp)
+        onOpenConcept(draft.id, .followUp, originalCapture)
         isSubmitting = false
         do {
             let generated = try await service.generateConcept(from: draft)

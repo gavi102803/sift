@@ -150,20 +150,20 @@ struct ConceptDetailView: View {
             }
         }
         .siftScreenBackground()
-        // In follow-up a compact concept pill lives in the nav bar (GPT-style),
-        // always floating at the top; the default frosted nav bar handles
-        // content scrolling under it. Overview shows the title normally.
-        .navigationTitle(detailMode == .followUp ? "" : (concept?.displayTitle ?? "Concept"))
+        // The concept pill sits at the leading edge (next to Back), GPT-style,
+        // and carries the title — so the nav bar has no centered title. It is a
+        // toggle: card ⇄ conversation.
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .animation(.spring(response: 0.42, dampingFraction: 0.86), value: detailMode)
         .toolbar {
-            if detailMode == .followUp, let concept {
-                ToolbarItem(placement: .principal) {
+            if let concept {
+                ToolbarItem(placement: .topBarLeading) {
                     conceptAnchorPill(for: concept)
                 }
             }
             if concept != nil {
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         beginSummaryEdit()
                     } label: {
@@ -230,37 +230,44 @@ struct ConceptDetailView: View {
         )
     }
 
-    /// Compact concept pill in the nav bar (GPT model-selector style). Always
-    /// floats at the top; tapping returns to the reading card.
+    /// Leading concept pill in the nav bar (GPT model-selector style). Sized and
+    /// glassed to sit alongside the Back / Edit buttons. Toggles card ⇄ chat.
     private func conceptAnchorPill(for concept: Concept) -> some View {
         Button {
             withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
-                detailMode = .overview
+                detailMode = (detailMode == .followUp) ? .overview : .followUp
             }
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
                 if activeProposal != nil {
                     Circle()
                         .fill(SiftColor.accent)
                         .frame(width: 6, height: 6)
                 }
-                Text(concept.displayTitle)
+                Text(pillTitle(concept.displayTitle))
                     .font(SiftFont.sans(15, .semibold))
                     .foregroundStyle(SiftColor.textPrimary)
                     .lineLimit(1)
-                    .truncationMode(.tail)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(SiftColor.textFaint)
+                    .rotationEffect(.degrees(detailMode == .followUp ? 180 : 0))
             }
+            // Leading toolbar items get a tight width proposal; size to content
+            // so the title isn't squeezed out (it's pre-capped by pillTitle).
+            .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .frame(maxWidth: 220)
-            .background(SiftColor.surfaceSoft, in: Capsule())
-            .overlay(Capsule().strokeBorder(SiftColor.hairline, lineWidth: 1))
+            .padding(.vertical, 7)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(SiftColor.hairline, lineWidth: 0.5))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Show concept card")
+        .accessibilityLabel(detailMode == .followUp ? "Show concept card" : "Show conversation")
+    }
+
+    /// Cap the pill title so it never crowds the Edit button.
+    private func pillTitle(_ title: String) -> String {
+        title.count > 16 ? String(title.prefix(15)).trimmingCharacters(in: .whitespaces) + "…" : title
     }
 
     private func scrollToConversationBottom(

@@ -31,6 +31,15 @@ def build_concept_turn_context_pack(
                 "Answer the user's current question, then emit candidateUpdates and "
                 "learningStateUpdates for anything worth cautiously preserving."
             ),
+            (
+                "Use the language of the user's current question when it is clear. "
+                "Do not switch language just because the existing card uses another language."
+            ),
+            (
+                "If the user's question is unrelated, casual, a test string, or not durable "
+                "knowledge for this concept, answer normally and set updateDecision.mode to none "
+                "with empty autoPatch and empty candidateUpdates."
+            ),
             "Never overwrite user-locked note blocks.",
             "Do not rewrite the whole card. The card is a materialized current view.",
             (
@@ -129,8 +138,13 @@ def build_initial_concept_context_pack(raw_capture: str, locale: str) -> Context
             "Prefer a concise explanation over an encyclopedia entry.",
             "Return only structured JSON matching the schema.",
             (
-                "Use the user's locale when it is clear; otherwise use the language of "
-                "the captured text."
+                "Use the language of the captured text when it is clear. Use locale only "
+                "as a fallback when the captured text is ambiguous."
+            ),
+            (
+                "The answer field is a natural conversational opening reply to the captured "
+                "concept. It should be useful on its own and must not be assembled by copying "
+                "block headings."
             ),
             (
                 "Create 3 to 5 note blocks covering what it is, why it matters, an "
@@ -160,6 +174,7 @@ def initial_concept_response_format() -> dict[str, Any]:
             "canonicalTitle",
             "displayTitle",
             "oneLineExplanation",
+            "answer",
             "blocks",
             "suggestedTags",
             "suggestedTopics",
@@ -170,6 +185,7 @@ def initial_concept_response_format() -> dict[str, Any]:
             "canonicalTitle": {"type": "string"},
             "displayTitle": {"type": "string"},
             "oneLineExplanation": {"type": "string"},
+            "answer": {"type": "string"},
             "blocks": {
                 "type": "array",
                 "minItems": 2,

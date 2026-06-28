@@ -238,8 +238,7 @@ struct ConceptLocalStore {
         note.updatedBy = "backend"
         concept.note = note
 
-        note.blocks.removeAll()
-        note.blocks = dto.blocks.map { blockDTO in
+        let replacementBlocks = dto.blocks.map { blockDTO in
             NoteBlock(
                 id: blockDTO.id,
                 blockType: blockDTO.blockType,
@@ -250,6 +249,7 @@ struct ConceptLocalStore {
                 note: note
             )
         }
+        note.blocks = replacementBlocks
 
         try replaceConceptTags(conceptId: concept.id, names: dto.tags)
         try replaceConceptTopics(conceptId: concept.id, names: dto.topics)

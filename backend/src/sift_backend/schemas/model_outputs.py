@@ -84,6 +84,7 @@ class ConceptInitialResult(SiftBaseModel):
     canonical_title: str = Field(alias="canonicalTitle")
     display_title: str = Field(alias="displayTitle")
     one_line_explanation: str = Field(alias="oneLineExplanation")
+    answer: str
     blocks: list[InitialNoteBlockOutput]
     suggested_tags: list[TagSuggestion] = Field(
         default_factory=list,

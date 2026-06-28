@@ -321,6 +321,7 @@ def _initial_concept_payload(
             "canonicalTitle": "A2A Protocol",
             "displayTitle": "A2A Protocol",
             "oneLineExplanation": "A2A coordinates communication between agents.",
+            "answer": "A2A coordinates communication between agents.",
             "blocks": [
                 {
                     "blockType": "whatItIs",

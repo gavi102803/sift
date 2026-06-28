@@ -16,6 +16,7 @@ struct ConceptDetailView: View {
     @Query private var relations: [ConceptRelation]
     @State private var followUpText = ""
     @State private var lastAnswerSource: AnswerSourceDTO?
+    @State private var savedFollowUpTurnIds: Set<UUID> = []
     @State private var turns: [ConceptHistoryTurnDTO] = []
     @State private var conceptTagNames: [String] = []
     @State private var conceptTopicNames: [String] = []
@@ -111,7 +112,7 @@ struct ConceptDetailView: View {
                                     concept: concept,
                                     turns: turns,
                                     isSubmitting: isSubmittingFollowUp,
-                                    lastAnswerSource: lastAnswerSource,
+                                    savedTurnIds: savedFollowUpTurnIds,
                                     isRetryingGeneration: isRetryingGeneration,
                                     onRetryGeneration: { Task { await retryGeneration(concept) } }
                                 )
@@ -127,7 +128,7 @@ struct ConceptDetailView: View {
                     .scrollContentBackground(.hidden)
                     .onChange(of: detailMode) { _, newValue in
                         guard newValue == .followUp else { return }
-                        scrollToConversationBottom(proxy)
+                        scrollToConversationBottom(proxy, aggressively: true)
                     }
                     .onChange(of: turns.count) { _, _ in
                         scrollToConversationBottom(proxy)
@@ -243,11 +244,22 @@ struct ConceptDetailView: View {
         )
     }
 
-    private func scrollToConversationBottom(_ proxy: ScrollViewProxy) {
+    private func scrollToConversationBottom(
+        _ proxy: ScrollViewProxy,
+        aggressively: Bool = false
+    ) {
         guard detailMode == .followUp else { return }
+        withAnimation(aggressively ? nil : .easeOut(duration: 0.22)) {
+            proxy.scrollTo("conversation-bottom", anchor: .bottom)
+        }
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(60))
             withAnimation(.easeOut(duration: 0.22)) {
+                proxy.scrollTo("conversation-bottom", anchor: .bottom)
+            }
+            guard aggressively else { return }
+            try? await Task.sleep(for: .milliseconds(180))
+            withAnimation(.easeOut(duration: 0.18)) {
                 proxy.scrollTo("conversation-bottom", anchor: .bottom)
             }
         }
@@ -334,6 +346,7 @@ struct ConceptDetailView: View {
         }
         let userTurnId = UUID()
         let assistantTurnId = UUID()
+        savedFollowUpTurnIds.remove(assistantTurnId)
         turns.append(ConceptHistoryTurnDTO(id: userTurnId, role: "user", content: question))
         turns.append(ConceptHistoryTurnDTO(id: assistantTurnId, role: "assistant", content: ""))
         // Reserve a per-action idempotency key. A retry of the same question
@@ -373,11 +386,16 @@ struct ConceptDetailView: View {
                 ConversationTimeline.resolvedAssistantContent(streamed: streamed, finalAnswer: response.answer),
                 turnId: assistantTurnId
             )
+            if response.updateMode == UpdateMode.autoMerge.rawValue {
+                savedFollowUpTurnIds.insert(assistantTurnId)
+            } else {
+                savedFollowUpTurnIds.remove(assistantTurnId)
+            }
             companion?.noteSuccess()
             isReadingOffline = false
-            await refreshTurns(concept.id)
         } catch is CancellationError {
             turns.removeAll { $0.id == assistantTurnId || $0.id == userTurnId }
+            savedFollowUpTurnIds.remove(assistantTurnId)
         } catch {
             // Remove the optimistic bubbles (no blank assistant left behind),
             // persist the draft, restore the composer text, and show a quiet,
@@ -385,6 +403,7 @@ struct ConceptDetailView: View {
             turns.removeAll { turn in
                 turn.id == assistantTurnId || turn.id == userTurnId
             }
+            savedFollowUpTurnIds.remove(assistantTurnId)
             store.recordFailedFollowUpDraft(concept: concept, question: question)
             // Terminal (server-rejected) failures release the key so a retry uses
             // a fresh one. Network/unknown failures keep it in-flight so a retry
@@ -499,6 +518,7 @@ struct ConceptDetailView: View {
             let remoteTurns = try await appServices.apiClient.listTurns(conceptId: conceptId)
             // Backend history is authoritative; the local exchange is superseded.
             turns = ConversationTimeline.displayTurns(localInitial: localInitial, remote: remoteTurns)
+            savedFollowUpTurnIds.removeAll()
             companion?.noteSuccess()
             isReadingOffline = false
         } catch is CancellationError {

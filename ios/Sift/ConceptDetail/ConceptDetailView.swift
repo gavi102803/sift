@@ -83,9 +83,6 @@ struct ConceptDetailView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 20) {
-                            if detailMode == .followUp {
-                                Color.clear.frame(height: 92)
-                            }
                             if isRefreshingConcept {
                                 ProgressView()
                             }
@@ -136,22 +133,6 @@ struct ConceptDetailView: View {
                         scrollToConversationBottom(proxy)
                     }
                 }
-                .safeAreaInset(edge: .top) {
-                    if detailMode == .followUp {
-                        ConceptAnchorBar(
-                            concept: concept,
-                            hasPendingProposal: activeProposal != nil
-                        ) {
-                            withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
-                                detailMode = .overview
-                            }
-                        }
-                        .padding(.horizontal, 18)
-                        .padding(.top, 6)
-                        .padding(.bottom, 8)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                    }
-                }
                 .safeAreaInset(edge: .bottom) {
                     followUpComposer
                 }
@@ -168,22 +149,27 @@ struct ConceptDetailView: View {
             }
         }
         .siftScreenBackground()
-        // In follow-up the frosted anchor chip carries the title, so the nav bar
-        // stays title-less and background-less for a unified, GPT-style top.
-        // Overview keeps the default frosted nav bar so reading content stays
-        // legible when it scrolls under the bar.
+        // In follow-up a compact concept pill lives in the nav bar (GPT-style),
+        // always floating at the top; the default frosted nav bar handles
+        // content scrolling under it. Overview shows the title normally.
         .navigationTitle(detailMode == .followUp ? "" : (concept?.displayTitle ?? "Concept"))
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(detailMode == .followUp ? Visibility.hidden : Visibility.automatic, for: .navigationBar)
         .animation(.spring(response: 0.42, dampingFraction: 0.86), value: detailMode)
         .toolbar {
-            if concept != nil {
-                Button {
-                    beginSummaryEdit()
-                } label: {
-                    Image(systemName: "square.and.pencil")
+            if detailMode == .followUp, let concept {
+                ToolbarItem(placement: .principal) {
+                    conceptAnchorPill(for: concept)
                 }
-                .accessibilityLabel("Edit concept")
+            }
+            if concept != nil {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        beginSummaryEdit()
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .accessibilityLabel("Edit concept")
+                }
             }
         }
         .sheet(isPresented: $isEditingSummary) {
@@ -241,6 +227,39 @@ struct ConceptDetailView: View {
                 beginBlockEdit(block)
             }
         )
+    }
+
+    /// Compact concept pill in the nav bar (GPT model-selector style). Always
+    /// floats at the top; tapping returns to the reading card.
+    private func conceptAnchorPill(for concept: Concept) -> some View {
+        Button {
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
+                detailMode = .overview
+            }
+        } label: {
+            HStack(spacing: 6) {
+                if activeProposal != nil {
+                    Circle()
+                        .fill(SiftColor.accent)
+                        .frame(width: 6, height: 6)
+                }
+                Text(concept.displayTitle)
+                    .font(SiftFont.sans(15, .semibold))
+                    .foregroundStyle(SiftColor.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(SiftColor.textFaint)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .frame(maxWidth: 220)
+            .background(SiftColor.surfaceSoft, in: Capsule())
+            .overlay(Capsule().strokeBorder(SiftColor.hairline, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Show concept card")
     }
 
     private func scrollToConversationBottom(_ proxy: ScrollViewProxy) {

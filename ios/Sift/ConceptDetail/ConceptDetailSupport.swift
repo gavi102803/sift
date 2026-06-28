@@ -342,55 +342,6 @@ struct SiftSourceLink: View {
     }
 }
 
-// MARK: - Compact concept anchor (follow-up top inset)
-
-struct ConceptAnchorBar: View {
-    var concept: Concept
-    var hasPendingProposal: Bool
-    var onTap: () -> Void
-
-    var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(concept.displayTitle)
-                        .font(SiftFont.sans(15, .semibold))
-                        .foregroundStyle(SiftColor.textPrimary)
-                        .lineLimit(1)
-                    if hasPendingProposal {
-                        Text("An update is ready to review")
-                            .font(SiftFont.sans(12))
-                            .foregroundStyle(SiftColor.accentTextOnWash)
-                            .lineLimit(1)
-                    } else {
-                        Text(concept.oneLineExplanation.isEmpty
-                             ? "Back to card"
-                             : concept.oneLineExplanation)
-                            .font(SiftFont.sans(12))
-                            .foregroundStyle(SiftColor.textFaint)
-                            .lineLimit(1)
-                    }
-                }
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.up")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(SiftColor.textFaint)
-            }
-            .padding(.vertical, 10)
-            .padding(.horizontal, 14)
-            // Frosted-glass component over the unified background — no opaque
-            // gray card.
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: SiftRadius.card, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: SiftRadius.card, style: .continuous)
-                    .strokeBorder(hasPendingProposal ? SiftColor.accentBorder : SiftColor.hairline, lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Show concept card")
-    }
-}
-
 // MARK: - Editors
 
 struct ConceptSummaryEditor: View {

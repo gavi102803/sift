@@ -49,7 +49,7 @@ struct ConceptLibraryView: View {
 
     private var userCategories: [Topic] {
         topics
-            .filter { $0.source == "category" }
+            .filter { LibraryCategoryOwnership.isCategory($0) }
             .sorted { lhs, rhs in
                 lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
             }
@@ -62,7 +62,7 @@ struct ConceptLibraryView: View {
     private var selectedCategoryAssignments: [ConceptTopic] {
         guard let selectedCategory else { return [] }
         return conceptTopics.filter { assignment in
-            assignment.topicId == selectedCategory.id && assignment.source == "category"
+            assignment.topicId == selectedCategory.id && LibraryCategoryOwnership.isCategory(assignment)
         }
     }
 
@@ -70,7 +70,7 @@ struct ConceptLibraryView: View {
         guard let selectedCategory else { return [] }
         let assignedIds = Set(
             conceptTopics
-                .filter { $0.topicId == selectedCategory.id && $0.source == "category" }
+                .filter { $0.topicId == selectedCategory.id && LibraryCategoryOwnership.isCategory($0) }
                 .map(\.conceptId)
         )
         return visibleConcepts.filter { !assignedIds.contains($0.id) }
@@ -313,11 +313,11 @@ struct ConceptLibraryView: View {
 
     private func findOrCreateCategory(named name: String) -> Topic {
         if let existing = topics.first(where: { topic in
-            topic.source == "category" && topic.name.caseInsensitiveCompare(name) == .orderedSame
+            LibraryCategoryOwnership.isCategory(topic) && topic.name.caseInsensitiveCompare(name) == .orderedSame
         }) {
             return existing
         }
-        let topic = Topic(name: name, source: "category")
+        let topic = Topic(name: name, source: LibraryCategoryOwnership.categorySource)
         modelContext.insert(topic)
         return topic
     }
@@ -325,7 +325,7 @@ struct ConceptLibraryView: View {
     private func addConcepts(_ conceptIds: Set<UUID>, to category: Topic) {
         let existingConceptIds = Set(
             conceptTopics
-                .filter { $0.topicId == category.id && $0.source == "category" }
+                .filter { $0.topicId == category.id && LibraryCategoryOwnership.isCategory($0) }
                 .map(\.conceptId)
         )
         for conceptId in conceptIds where !existingConceptIds.contains(conceptId) {
@@ -333,7 +333,7 @@ struct ConceptLibraryView: View {
                 ConceptTopic(
                     conceptId: conceptId,
                     topicId: category.id,
-                    source: "category"
+                    source: LibraryCategoryOwnership.categorySource
                 )
             )
         }
@@ -369,14 +369,14 @@ struct ConceptLibraryView: View {
     }
 
     private func topicNames(for concept: Concept) -> [String] {
-        let assignedIds = Set(
-            conceptTopics
-                .filter { $0.conceptId == concept.id }
-                .map(\.topicId)
+        // Card-metadata topics only — local Library categories are surfaced via
+        // the filter bar, never as card chips, so a same-named category/topic
+        // pair never duplicates or confuses the source.
+        CardTopicProjection.cardTopicNames(
+            conceptId: concept.id,
+            assignments: conceptTopics,
+            topics: topics
         )
-        return topics
-            .filter { assignedIds.contains($0.id) }
-            .map(\.name)
     }
 }
 

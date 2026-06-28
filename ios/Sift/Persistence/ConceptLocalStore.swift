@@ -371,10 +371,14 @@ struct ConceptLocalStore {
         }
     }
 
+    /// Replace this concept's **backend-managed (card) topic** assignments with
+    /// `names`. Local Library category assignments (`source == "category"`) are
+    /// never touched — remote refresh / full-note save can't delete them.
+    /// See `LibraryCategoryOwnership` and docs/architecture/local-library-category-boundary.md.
     func replaceConceptTopics(conceptId: UUID, names: [String]) throws {
-        let existingAssignments = try modelContext.fetch(FetchDescriptor<ConceptTopic>())
-            .filter { $0.conceptId == conceptId }
-        for assignment in existingAssignments {
+        let cardAssignments = try modelContext.fetch(FetchDescriptor<ConceptTopic>())
+            .filter { $0.conceptId == conceptId && !LibraryCategoryOwnership.isCategory($0) }
+        for assignment in cardAssignments {
             modelContext.delete(assignment)
         }
 
@@ -667,9 +671,15 @@ struct ConceptLocalStore {
         return tag
     }
 
+    /// Find or create a **card-metadata** Topic. Local Library category Topics
+    /// (`source == "category"`) are excluded from lookup, so a card topic never
+    /// reuses a category `Topic` even when they share a name (no source pollution).
     private func findOrCreateTopic(named name: String) throws -> Topic {
         let topics = try modelContext.fetch(FetchDescriptor<Topic>())
-        if let existing = topics.first(where: { $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame }) {
+        if let existing = topics.first(where: {
+            !LibraryCategoryOwnership.isCategory($0)
+                && $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
+        }) {
             return existing
         }
         let topic = Topic(name: name, source: UpdateActor.user.rawValue)

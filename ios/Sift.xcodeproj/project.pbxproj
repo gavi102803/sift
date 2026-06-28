@@ -44,6 +44,7 @@
 		200000000000000000000101 /* ConceptLocalStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000001 /* ConceptLocalStoreTests.swift */; };
 		200000000000000000000102 /* ProductLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000002 /* ProductLogicTests.swift */; };
 		200000000000000000000103 /* LibraryCategoryOwnershipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000003 /* LibraryCategoryOwnershipTests.swift */; };
+		200000000000000000000104 /* LibraryCategoryIntegrityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000004 /* LibraryCategoryIntegrityTests.swift */; };
 		300000000000000000000101 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 300000000000000000000001 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -94,6 +95,7 @@
 		100000000000000000000029 /* LibraryCategoryOwnership.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence/LibraryCategoryOwnership.swift; sourceTree = "<group>"; };
 		200000000000000000000002 /* ProductLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductLogicTests.swift; sourceTree = "<group>"; };
 		200000000000000000000003 /* LibraryCategoryOwnershipTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryCategoryOwnershipTests.swift; sourceTree = "<group>"; };
+		200000000000000000000004 /* LibraryCategoryIntegrityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryCategoryIntegrityTests.swift; sourceTree = "<group>"; };
 		100000000000000000000201 /* Sift.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Sift.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		200000000000000000000001 /* ConceptLocalStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConceptLocalStoreTests.swift; sourceTree = "<group>"; };
 		200000000000000000000201 /* SiftTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SiftTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -184,6 +186,7 @@
 				200000000000000000000001 /* ConceptLocalStoreTests.swift */,
 				200000000000000000000002 /* ProductLogicTests.swift */,
 				200000000000000000000003 /* LibraryCategoryOwnershipTests.swift */,
+				200000000000000000000004 /* LibraryCategoryIntegrityTests.swift */,
 			);
 			path = SiftTests;
 			sourceTree = "<group>";
@@ -331,6 +334,7 @@
 				200000000000000000000101 /* ConceptLocalStoreTests.swift in Sources */,
 				200000000000000000000102 /* ProductLogicTests.swift in Sources */,
 				200000000000000000000103 /* LibraryCategoryOwnershipTests.swift in Sources */,
+				200000000000000000000104 /* LibraryCategoryIntegrityTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

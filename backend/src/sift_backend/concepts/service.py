@@ -968,23 +968,30 @@ class ConceptService:
         request: ConceptTurnRequest,
         result: ConceptTurnResult,
     ) -> ConceptTurnResponse:
+        starting_revision = concept.note_revision
+        allow_durable_updates = not _is_non_durable_followup(request.question)
         source_id_map = self._persist_answer_sources(concept.id, result.answer_source)
-        concept, candidate_proposal, candidate_claims = self._apply_candidate_updates(
-            concept,
-            result,
-            source_id_map,
-        )
-        if result.update_mode == UpdateMode.auto_merge and result.auto_patch:
+        if allow_durable_updates:
+            concept, candidate_proposal, candidate_claims = self._apply_candidate_updates(
+                concept,
+                result,
+                source_id_map,
+            )
+        else:
+            candidate_proposal = None
+            candidate_claims = []
+        if allow_durable_updates and result.update_mode == UpdateMode.auto_merge and result.auto_patch:
             concept = self._apply_auto_patch(concept, result.auto_patch)
             proposal = None
-        elif result.update_mode == UpdateMode.needs_confirmation and result.proposal:
+        elif allow_durable_updates and result.update_mode == UpdateMode.needs_confirmation and result.proposal:
             proposal = self._create_update_proposal(concept.id, result)
         else:
             proposal = candidate_proposal
 
         if candidate_claims and hasattr(self.store, "add_claims"):
             self.store.add_claims(concept.id, candidate_claims)
-        self._persist_turn_learning_state(concept, result)
+        if allow_durable_updates:
+            self._persist_turn_learning_state(concept, result)
 
         self.store.append_turn_pair(
             concept.id,
@@ -992,11 +999,18 @@ class ConceptService:
             result.answer,
             answer_source=result.answer_source,
         )
+        response_update_mode = result.update_mode
+        if proposal is not None:
+            response_update_mode = UpdateMode.needs_confirmation
+        elif concept.note_revision > starting_revision:
+            response_update_mode = UpdateMode.auto_merge
+        else:
+            response_update_mode = UpdateMode.none
 
         return ConceptTurnResponse(
             answer=result.answer,
             answerSource=result.answer_source,
-            updateMode=result.update_mode,
+            updateMode=response_update_mode,
             concept=concept,
             proposal=proposal,
         )
@@ -1152,7 +1166,7 @@ class ConceptService:
         self.store.append_turn_pair(
             concept.id,
             raw_capture,
-            concept.one_line_explanation,
+            (concept.initial_answer or concept.one_line_explanation).strip(),
             answer_source=concept.answer_source,
         )
 
@@ -1313,6 +1327,7 @@ def _concept_from_initial_result(title: str, result) -> ConceptDTO:
         canonicalTitle=canonical_title,
         displayTitle=display_title,
         oneLineExplanation=result.one_line_explanation.strip(),
+        initialAnswer=result.answer.strip(),
         maturity=ConceptMaturity.initial,
         captureStatus=CaptureStatus.ready,
         noteRevision=1,
@@ -1499,6 +1514,24 @@ def _answer_source_from_recent_turn(turn: RecentTurn) -> AnswerSourceDTO | None:
     except json.JSONDecodeError:
         return None
     return AnswerSourceDTO.model_validate(payload)
+
+
+def _is_non_durable_followup(question: str) -> bool:
+    normalized = question.strip()
+    if not normalized:
+        return True
+    if len(normalized) <= 3 and not any(char.isalpha() for char in normalized):
+        return True
+    return normalized.casefold() in {
+        "hi",
+        "hello",
+        "test",
+        "testing",
+        "ping",
+        "111",
+        "123",
+        "测试",
+    }
 
 
 def _idempotency_payload_hash(payload: Any) -> str:

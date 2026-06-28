@@ -46,6 +46,7 @@ class ConceptDTO(SiftBaseModel):
     canonical_title: str = Field(alias="canonicalTitle")
     display_title: str = Field(alias="displayTitle")
     one_line_explanation: str = Field(default="", alias="oneLineExplanation")
+    initial_answer: str | None = Field(default=None, alias="initialAnswer")
     maturity: ConceptMaturity = ConceptMaturity.initial
     capture_status: CaptureStatus = Field(
         default=CaptureStatus.draft,

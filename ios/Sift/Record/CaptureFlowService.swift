@@ -9,7 +9,7 @@ struct CaptureFlowService {
     func saveDraft(rawCapture: String) -> Concept? {
         let trimmed = rawCapture.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        return localStore.createDraft(rawCapture: trimmed)
+        return localStore.createDraft(rawCapture: trimmed, locale: inferredLocale(for: trimmed))
     }
 
     func resolveCapture(rawCapture: String) throws -> CaptureResolution {
@@ -20,10 +20,13 @@ struct CaptureFlowService {
         case .exact(let concept):
             return .existing(concept)
         case .ambiguous(let matches):
-            let draft = localStore.createDisambiguationDraft(rawCapture: trimmed)
+            let draft = localStore.createDisambiguationDraft(
+                rawCapture: trimmed,
+                locale: inferredLocale(for: trimmed)
+            )
             return .needsDisambiguation(draft, matches: matches)
         case .none:
-            let draft = localStore.createDraft(rawCapture: trimmed)
+            let draft = localStore.createDraft(rawCapture: trimmed, locale: inferredLocale(for: trimmed))
             localStore.recordInitialCaptureQuestion(concept: draft, question: trimmed)
             return .newDraft(draft)
         }
@@ -41,10 +44,17 @@ struct CaptureFlowService {
             )
             let concept = try localStore.upsertConcept(from: dto)
             localStore.markCaptureGenerationCompleted(draft)
+            let initialAnswer = dto.initialAnswer?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let conversationAnswer: String
+            if let initialAnswer, !initialAnswer.isEmpty {
+                conversationAnswer = initialAnswer
+            } else {
+                conversationAnswer = dto.oneLineExplanation
+            }
             localStore.recordInitialGenerationAnswer(
                 concept: concept,
                 question: draft.displayTitle,
-                answer: dto.oneLineExplanation
+                answer: conversationAnswer
             )
             if draft.id != concept.id {
                 localStore.deleteConcept(draft)
@@ -72,6 +82,15 @@ struct CaptureFlowService {
             return false
         }
         return false
+    }
+
+    private func inferredLocale(for text: String) -> String {
+        if text.unicodeScalars.contains(where: { scalar in
+            (0x4E00...0x9FFF).contains(Int(scalar.value))
+        }) {
+            return "zh-Hans"
+        }
+        return Locale.current.identifier
     }
 }
 

@@ -1,3 +1,4 @@
+import json
 from uuid import UUID
 
 from fastapi import APIRouter, Request, status
@@ -234,6 +235,15 @@ async def dismiss_update_proposal(request: Request, proposal_id: UUID) -> None:
 
 
 def _stream_line(event: ConceptTurnStreamEvent) -> str:
+    if event.response is not None:
+        return json.dumps(
+            {
+                "type": event.type,
+                "response": event.response.model_dump(mode="json", by_alias=True),
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ) + "\n"
     return event.model_dump_json(by_alias=True, exclude_none=True) + "\n"
 
 

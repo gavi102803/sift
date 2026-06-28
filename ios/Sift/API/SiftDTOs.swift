@@ -112,6 +112,7 @@ struct ConceptDTO: Codable, Identifiable {
     var canonicalTitle: String
     var displayTitle: String
     var oneLineExplanation: String
+    var initialAnswer: String?
     var maturity: String
     var captureStatus: String
     var noteRevision: Int
@@ -126,6 +127,7 @@ struct ConceptDTO: Codable, Identifiable {
         canonicalTitle: String,
         displayTitle: String,
         oneLineExplanation: String,
+        initialAnswer: String? = nil,
         maturity: String,
         captureStatus: String,
         noteRevision: Int,
@@ -139,6 +141,7 @@ struct ConceptDTO: Codable, Identifiable {
         self.canonicalTitle = canonicalTitle
         self.displayTitle = displayTitle
         self.oneLineExplanation = oneLineExplanation
+        self.initialAnswer = initialAnswer
         self.maturity = maturity
         self.captureStatus = captureStatus
         self.noteRevision = noteRevision
@@ -155,6 +158,7 @@ struct ConceptDTO: Codable, Identifiable {
         canonicalTitle = try container.decode(String.self, forKey: .canonicalTitle)
         displayTitle = try container.decode(String.self, forKey: .displayTitle)
         oneLineExplanation = try container.decode(String.self, forKey: .oneLineExplanation)
+        initialAnswer = try container.decodeIfPresent(String.self, forKey: .initialAnswer)
         maturity = try container.decode(String.self, forKey: .maturity)
         captureStatus = try container.decode(String.self, forKey: .captureStatus)
         noteRevision = try container.decode(Int.self, forKey: .noteRevision)

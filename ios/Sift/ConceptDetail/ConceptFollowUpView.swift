@@ -7,7 +7,7 @@ struct ConceptFollowUpView: View {
     var concept: Concept
     var turns: [ConceptHistoryTurnDTO]
     var isSubmitting: Bool
-    var lastAnswerSource: AnswerSourceDTO?
+    var savedTurnIds: Set<UUID> = []
     var isRetryingGeneration: Bool = false
     var onRetryGeneration: () -> Void = {}
 
@@ -60,10 +60,8 @@ struct ConceptFollowUpView: View {
     }
 
     private func showsSavedChip(_ turn: ConceptHistoryTurnDTO) -> Bool {
-        !isSubmitting
-            && turn.role == "assistant"
-            && turn.id == turns.last?.id
-            && lastAnswerSource != nil
+        turn.role == "assistant"
+            && savedTurnIds.contains(turn.id)
             && !turn.content.isEmpty
     }
 }

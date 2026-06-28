@@ -120,13 +120,15 @@ enum SiftFont {
 // MARK: - Shadows / elevation
 
 extension View {
+    // Shadows are tuned per appearance: deep on dark (separates same-ish darks),
+    // but very soft on light so white cards don't float with a hazy halo.
     func siftCardShadow() -> some View {
         self
-            .shadow(color: .black.opacity(0.5), radius: 1, x: 0, y: 1)
-            .shadow(color: .black.opacity(0.5), radius: 8, x: 0, y: 6)
+            .shadow(color: .adaptive(light: .black.opacity(0.04), dark: .black.opacity(0.5)), radius: 1, x: 0, y: 1)
+            .shadow(color: .adaptive(light: .black.opacity(0.05), dark: .black.opacity(0.5)), radius: 8, x: 0, y: 6)
     }
     func siftTabBarShadow() -> some View {
-        shadow(color: .black.opacity(0.7), radius: 17, x: 0, y: 10)
+        shadow(color: .adaptive(light: .black.opacity(0.10), dark: .black.opacity(0.7)), radius: 17, x: 0, y: 10)
     }
     func siftPrimaryGlow() -> some View {
         shadow(color: SiftColor.accent.opacity(0.7), radius: 9, x: 0, y: 6)

@@ -378,10 +378,12 @@ struct ConceptAnchorBar: View {
             }
             .padding(.vertical, 10)
             .padding(.horizontal, 14)
-            .background(SiftColor.surface, in: RoundedRectangle(cornerRadius: SiftRadius.card, style: .continuous))
+            // Frosted-glass component over the unified background — no opaque
+            // gray card.
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: SiftRadius.card, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: SiftRadius.card, style: .continuous)
-                    .strokeBorder(hasPendingProposal ? SiftColor.accentBorder : SiftColor.hairline, lineWidth: 1)
+                    .strokeBorder(hasPendingProposal ? SiftColor.accentBorder : Color.white.opacity(0.08), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)

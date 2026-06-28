@@ -149,7 +149,6 @@ struct ConceptDetailView: View {
                         .padding(.horizontal, 18)
                         .padding(.top, 6)
                         .padding(.bottom, 8)
-                        .background(.ultraThinMaterial)
                         .transition(.move(edge: .top).combined(with: .opacity))
                     }
                 }
@@ -169,8 +168,13 @@ struct ConceptDetailView: View {
             }
         }
         .siftScreenBackground()
-        .navigationTitle(concept?.displayTitle ?? "Concept")
+        // In follow-up the frosted anchor chip carries the title, so the nav bar
+        // stays title-less and background-less for a unified, GPT-style top.
+        // Overview keeps the default frosted nav bar so reading content stays
+        // legible when it scrolls under the bar.
+        .navigationTitle(detailMode == .followUp ? "" : (concept?.displayTitle ?? "Concept"))
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(detailMode == .followUp ? Visibility.hidden : Visibility.automatic, for: .navigationBar)
         .animation(.spring(response: 0.42, dampingFraction: 0.86), value: detailMode)
         .toolbar {
             if concept != nil {

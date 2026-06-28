@@ -573,17 +573,31 @@ struct AdvancedConnectionsView: View {
     }
 }
 
-// MARK: - Appearance (placeholders)
+// MARK: - Appearance
 
 struct AppearanceSettingsView: View {
+    @AppStorage(AppTheme.storageKey) private var themeRaw = AppTheme.system.rawValue
+
+    private var theme: Binding<AppTheme> {
+        Binding(
+            get: { AppTheme(rawValue: themeRaw) ?? .system },
+            set: { themeRaw = $0.rawValue }
+        )
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 SiftGroupedCard {
                     SiftSettingRow(icon: "circle.lefthalf.filled", title: "Theme", showsChevron: false) {
-                        Text("Dark")
-                            .font(SiftFont.body)
-                            .foregroundStyle(SiftColor.textBody)
+                        Picker("", selection: theme) {
+                            ForEach(AppTheme.allCases) { option in
+                                Text(option.label).tag(option)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .tint(SiftColor.textBody)
                     }
                     SiftGroupDivider()
                     placeholderRow(icon: "textformat.size", title: "Text size")
@@ -591,7 +605,7 @@ struct AppearanceSettingsView: View {
                     placeholderRow(icon: "iphone.radiowaves.left.and.right", title: "Haptics")
                 }
 
-                Text("Personalization is on the way. Sift currently uses a single quiet dark theme.")
+                Text("Theme follows your device by default. Text size and haptics are on the way.")
                     .font(SiftFont.cardDesc)
                     .foregroundStyle(SiftColor.textFaint)
                     .padding(.horizontal, 4)

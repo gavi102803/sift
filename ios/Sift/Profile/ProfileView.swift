@@ -7,6 +7,7 @@ struct ProfileView: View {
     @State private var webSettings: WebProviderSettingsDTO?
     @State private var errorMessage: String?
     @State private var isRefreshing = false
+    @AppStorage(AppTheme.storageKey) private var themeRaw = AppTheme.system.rawValue
 
     var body: some View {
         ScrollView {
@@ -126,7 +127,7 @@ struct ProfileView: View {
                     AppearanceSettingsView()
                 } label: {
                     SiftSettingRow(icon: "paintbrush", title: "Appearance") {
-                        Text("Dark")
+                        Text((AppTheme(rawValue: themeRaw) ?? .system).label)
                             .font(SiftFont.mono(12))
                             .foregroundStyle(SiftColor.textBody)
                     }

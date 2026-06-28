@@ -103,10 +103,10 @@ struct SiftSheetScaffold<Content: View>: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color(hex: 0x131418).ignoresSafeArea()
+            SiftColor.canvas.ignoresSafeArea()
             VStack(spacing: 0) {
                 Capsule()
-                    .fill(Color.white.opacity(0.18))
+                    .fill(Color.primary.opacity(0.2))
                     .frame(width: 36, height: 5)
                     .padding(.top, 10)
 
@@ -139,7 +139,7 @@ struct SiftSheetScaffold<Content: View>: View {
                 }
             }
         }
-        .presentationBackground(Color(hex: 0x131418))
+        .presentationBackground(SiftColor.canvas)
     }
 }
 

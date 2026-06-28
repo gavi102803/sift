@@ -50,7 +50,7 @@ struct SuggestedUpdateCard: View {
                         .background(SiftColor.surfaceSoft, in: RoundedRectangle(cornerRadius: SiftRadius.button, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: SiftRadius.button, style: .continuous)
-                                .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
+                                .strokeBorder(SiftColor.hairline, lineWidth: 1)
                         )
                 }
                 .buttonStyle(.plain)

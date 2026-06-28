@@ -83,7 +83,7 @@ struct RecordView: View {
             TextField(
                 "",
                 text: $captureText,
-                prompt: Text("Capture a concept…").foregroundColor(Color(hex: 0x5E6166)),
+                prompt: Text("Capture a concept…").foregroundColor(SiftColor.textFaint),
                 axis: .vertical
             )
             .textFieldStyle(.plain)
@@ -142,7 +142,7 @@ struct RecordView: View {
         )
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
+                .strokeBorder(SiftColor.hairline, lineWidth: 1)
         }
         .padding(.horizontal, 20)
         .padding(.bottom, SiftLayout.tabBarClearance)

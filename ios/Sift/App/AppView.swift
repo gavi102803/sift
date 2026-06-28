@@ -18,6 +18,9 @@ struct AppView: View {
     @State private var recordPath: [ConceptRoute] = []
     @State private var libraryPath: [UUID] = []
     @State private var companion = CompanionMonitor()
+    @AppStorage(AppTheme.storageKey) private var themeRaw = AppTheme.system.rawValue
+
+    private var theme: AppTheme { AppTheme(rawValue: themeRaw) ?? .system }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -72,7 +75,7 @@ struct AppView: View {
 
             FloatingTabBar(selection: $selectedTab)
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(theme.colorScheme)
         .tint(SiftColor.accent)
         .environment(companion)
         .task {

@@ -269,7 +269,7 @@ struct ConceptDetailView: View {
             TextField(
                 "",
                 text: $followUpText,
-                prompt: Text("Reply to Sift…").foregroundColor(Color(hex: 0x5E6166)),
+                prompt: Text("Reply to Sift…").foregroundColor(SiftColor.textFaint),
                 axis: .vertical
             )
             .textFieldStyle(.plain)
@@ -314,7 +314,7 @@ struct ConceptDetailView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
+                .strokeBorder(SiftColor.hairline, lineWidth: 1)
         }
         .padding(.horizontal, 18)
         .padding(.bottom, SiftLayout.tabBarClearance)

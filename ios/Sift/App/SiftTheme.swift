@@ -1,6 +1,7 @@
 import SwiftUI
+import UIKit
 
-// MARK: - Hex helper
+// MARK: - Hex + adaptive helpers
 
 extension Color {
     init(hex: UInt32, alpha: Double = 1) {
@@ -12,31 +13,70 @@ extension Color {
             opacity: alpha
         )
     }
+
+    /// Resolves `light` in light mode and `dark` in dark mode, so a single token
+    /// adapts to the active appearance (and Light / Dark / System theme).
+    static func adaptive(light: Color, dark: Color) -> Color {
+        Color(uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark ? UIColor(dark) : UIColor(light)
+        })
+    }
 }
 
-// MARK: - Color tokens (Sift dark redesign)
+// MARK: - Color tokens (appearance-adaptive)
 
 enum SiftColor {
-    static let canvas = Color(hex: 0x0A0B0D)            // app background, every screen
-    static let surface = Color(hex: 0x16181C)           // block cards, grouped setting cards
-    static let surfaceSoft = Color.white.opacity(0.05)  // fields, chips, secondary buttons
-    static let surfaceSoftHi = Color.white.opacity(0.07) // active tab pill, user bubble
-    static let hairline = Color.white.opacity(0.07)     // card borders, dividers
-    static let hairlineSoft = Color.white.opacity(0.06) // inner dividers
+    static let canvas = Color.adaptive(light: Color(hex: 0xF4F5F7), dark: Color(hex: 0x0A0B0D))     // app background
+    static let surface = Color.adaptive(light: Color(hex: 0xFFFFFF), dark: Color(hex: 0x16181C))    // cards, grouped rows
+    static let surfaceSoft = Color.adaptive(light: Color.black.opacity(0.04), dark: Color.white.opacity(0.05))
+    static let surfaceSoftHi = Color.adaptive(light: Color.black.opacity(0.06), dark: Color.white.opacity(0.07))
+    static let hairline = Color.adaptive(light: Color.black.opacity(0.10), dark: Color.white.opacity(0.07))
+    static let hairlineSoft = Color.adaptive(light: Color.black.opacity(0.07), dark: Color.white.opacity(0.06))
 
-    static let accent = Color(hex: 0x3D7FFF)            // the single accent
-    static let accentWash = Color(hex: 0x3D7FFF, alpha: 0.12)
-    static let accentBorder = Color(hex: 0x3D7FFF, alpha: 0.20)
-    static let accentTextOnWash = Color(hex: 0x9CC0FF)
+    static let accent = Color(hex: 0x3D7FFF)            // the single accent (both modes)
+    static let accentWash = Color.adaptive(light: Color(hex: 0x3D7FFF, alpha: 0.10), dark: Color(hex: 0x3D7FFF, alpha: 0.12))
+    static let accentBorder = Color.adaptive(light: Color(hex: 0x3D7FFF, alpha: 0.25), dark: Color(hex: 0x3D7FFF, alpha: 0.20))
+    static let accentTextOnWash = Color.adaptive(light: Color(hex: 0x2D63D6), dark: Color(hex: 0x9CC0FF))
 
-    static let textPrimary = Color(hex: 0xF3F4F5)
-    static let textSecondary = Color(hex: 0xC7CACE)
-    static let textBody = Color(hex: 0xABAFB6)
-    static let textMuted = Color(hex: 0x8B8F96)
-    static let textFaint = Color(hex: 0x74787E)
-    static let textFaintest = Color(hex: 0x5B5E63)
+    static let textPrimary = Color.adaptive(light: Color(hex: 0x15171A), dark: Color(hex: 0xF3F4F5))
+    static let textSecondary = Color.adaptive(light: Color(hex: 0x33363B), dark: Color(hex: 0xC7CACE))
+    static let textBody = Color.adaptive(light: Color(hex: 0x52555B), dark: Color(hex: 0xABAFB6))
+    static let textMuted = Color.adaptive(light: Color(hex: 0x6C7077), dark: Color(hex: 0x8B8F96))
+    static let textFaint = Color.adaptive(light: Color(hex: 0x8A8E95), dark: Color(hex: 0x74787E))
+    static let textFaintest = Color.adaptive(light: Color(hex: 0xAAAEB4), dark: Color(hex: 0x5B5E63))
 
-    static let danger = Color(hex: 0xFF6B6B)
+    static let danger = Color.adaptive(light: Color(hex: 0xE5484D), dark: Color(hex: 0xFF6B6B))
+}
+
+// MARK: - Appearance preference
+
+/// User-selectable theme. `system` follows the device appearance.
+enum AppTheme: String, CaseIterable, Identifiable {
+    case system
+    case light
+    case dark
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .system: "System"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+
+    /// The scheme to force, or nil to follow the system.
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+
+    /// Shared persistence key for `@AppStorage`.
+    static let storageKey = "siftTheme"
 }
 
 // MARK: - Radii

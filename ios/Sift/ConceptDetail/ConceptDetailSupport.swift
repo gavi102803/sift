@@ -383,7 +383,7 @@ struct ConceptAnchorBar: View {
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: SiftRadius.card, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: SiftRadius.card, style: .continuous)
-                    .strokeBorder(hasPendingProposal ? SiftColor.accentBorder : Color.white.opacity(0.08), lineWidth: 1)
+                    .strokeBorder(hasPendingProposal ? SiftColor.accentBorder : SiftColor.hairline, lineWidth: 1)
             )
         }
         .buttonStyle(.plain)

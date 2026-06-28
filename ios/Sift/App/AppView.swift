@@ -103,7 +103,7 @@ struct FloatingTabBar: View {
     @Binding var selection: AppTab
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 0) {
             ForEach(AppTab.allCases) { tab in
                 FloatingTabItem(
                     tab: tab,
@@ -117,17 +117,17 @@ struct FloatingTabBar: View {
                 }
             }
         }
-        .padding(.horizontal, 6)
+        .frame(maxWidth: .infinity)
         .frame(height: 60)
-        // Genuine iOS frosted glass — no opaque tint, content blurs through. The
-        // bar sizes to its items (compact) and centers, rather than spanning the
-        // full width.
+        // Genuine iOS frosted glass — no opaque tint, content blurs through. Its
+        // left edge lines up with the composer's text cursor (≈ 70pt inset).
         .background(.ultraThinMaterial, in: Capsule(style: .continuous))
         .overlay(
             Capsule(style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
         )
         .siftTabBarShadow()
+        .padding(.horizontal, 70)
         .padding(.bottom, 18)
     }
 }
@@ -145,8 +145,8 @@ private struct FloatingTabItem: View {
                     .font(SiftFont.tabLabel)
                     .foregroundStyle(isActive ? SiftColor.textPrimary : SiftColor.textFaint)
             }
-            .frame(width: 72)
             .padding(.vertical, 6)
+            .padding(.horizontal, 16)
             .background(
                 Group {
                     if isActive {
@@ -155,6 +155,7 @@ private struct FloatingTabItem: View {
                     }
                 }
             )
+            .frame(maxWidth: .infinity)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(tab.title)

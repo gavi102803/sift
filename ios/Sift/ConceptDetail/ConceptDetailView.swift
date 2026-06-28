@@ -254,14 +254,11 @@ struct ConceptDetailView: View {
                     .rotationEffect(.degrees(detailMode == .followUp ? 180 : 0))
             }
             // Leading toolbar items get a tight width proposal; size to content
-            // so the title isn't squeezed out (it's pre-capped by pillTitle).
+            // so the title isn't squeezed out (it's pre-capped by pillTitle). No
+            // custom background — the system applies the same glass as the
+            // Back / Edit buttons, so the text sits in one consistent component.
             .fixedSize(horizontal: true, vertical: false)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(SiftColor.hairline, lineWidth: 0.5))
         }
-        .buttonStyle(.plain)
         .accessibilityLabel(detailMode == .followUp ? "Show concept card" : "Show conversation")
     }
 

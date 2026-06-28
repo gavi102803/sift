@@ -38,10 +38,25 @@ struct CaptureFlowService {
         let idempotencyKey = localStore.beginCaptureGeneration(for: draft)
 
         do {
-            let dto = try await apiClient.createConcept(
-                CreateConceptRequest(rawCapture: draft.displayTitle, locale: draft.language),
-                idempotencyKey: idempotencyKey
-            )
+            let request = CreateConceptRequest(rawCapture: draft.displayTitle, locale: draft.language)
+            var dto: ConceptDTO?
+            var streamedAnswer = ""
+            for try await event in apiClient.streamCreateConcept(request, idempotencyKey: idempotencyKey) {
+                if let delta = event.delta, !delta.isEmpty {
+                    streamedAnswer += delta
+                    localStore.appendInitialGenerationAnswerDelta(
+                        concept: draft,
+                        question: draft.displayTitle,
+                        delta: delta
+                    )
+                }
+                if let concept = event.concept {
+                    dto = concept
+                }
+            }
+            guard let dto else {
+                throw SiftStreamingError.incomplete
+            }
             let concept = try localStore.upsertConcept(from: dto)
             localStore.markCaptureGenerationCompleted(draft)
             let initialAnswer = dto.initialAnswer?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -51,10 +66,14 @@ struct CaptureFlowService {
             } else {
                 conversationAnswer = dto.oneLineExplanation
             }
-            localStore.recordInitialGenerationAnswer(
+            let finalConversationAnswer = preferredInitialConversationAnswer(
+                streamed: streamedAnswer,
+                final: conversationAnswer
+            )
+            localStore.replaceInitialGenerationAnswer(
                 concept: concept,
                 question: draft.displayTitle,
-                answer: conversationAnswer
+                answer: finalConversationAnswer
             )
             if draft.id != concept.id {
                 localStore.deleteConcept(draft)
@@ -82,6 +101,15 @@ struct CaptureFlowService {
             return false
         }
         return false
+    }
+
+    private func preferredInitialConversationAnswer(streamed: String, final: String) -> String {
+        let streamed = streamed.trimmingCharacters(in: .whitespacesAndNewlines)
+        let final = final.trimmingCharacters(in: .whitespacesAndNewlines)
+        if streamed.count > final.count * 2 {
+            return streamed
+        }
+        return final.isEmpty ? streamed : final
     }
 
     private func inferredLocale(for text: String) -> String {

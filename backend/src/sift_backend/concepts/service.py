@@ -17,6 +17,7 @@ from sift_backend.notes.patch_engine import (
     content_hash,
 )
 from sift_backend.runtime.concept_runtime import (
+    ConceptInitialRuntimeResult,
     ConceptRuntimeDelta,
     ConceptRuntimeResult,
     LightweightHermesRuntime,
@@ -46,6 +47,7 @@ from sift_backend.schemas.concepts import (
     ConceptRelationDTO,
     ConceptTurnRequest,
     ConceptTurnResponse,
+    UpdateConceptNoteRequest,
     CreateConceptRelationRequest,
     CreateConceptRequest,
     LearningStateDTO,
@@ -61,6 +63,7 @@ from sift_backend.schemas.concepts import (
 )
 from sift_backend.schemas.model_outputs import (
     CandidateUpdate,
+    ConceptInitialResult,
     ConceptTurnResult,
     MemoryPatch,
     ModelMeta,
@@ -81,6 +84,11 @@ class ConceptTurnStreamDelta:
 @dataclass(frozen=True)
 class ConceptTurnStreamResult:
     response: ConceptTurnResponse
+
+
+@dataclass(frozen=True)
+class ConceptInitialStreamResult:
+    concept: ConceptDTO
 
 
 @dataclass(frozen=True)
@@ -109,6 +117,7 @@ class IdempotencyRecordDTO:
 
 
 ConceptTurnStreamEvent = ConceptTurnStreamDelta | ConceptTurnStreamResult
+ConceptInitialStreamEvent = ConceptTurnStreamDelta | ConceptInitialStreamResult
 
 LOCAL_DEV_OWNER_ID = "local-dev"
 
@@ -428,6 +437,18 @@ class MockConceptModelService:
     ) -> ConceptDTO:
         return _fallback_initial_concept(title)
 
+    async def stream_initial_concept(
+        self,
+        title: str,
+        locale: str,
+    ) -> AsyncIterator[ConceptRuntimeDelta | ConceptInitialRuntimeResult]:
+        concept = await self.create_initial_concept(title, locale)
+        answer = (concept.initial_answer or concept.one_line_explanation).strip()
+        for chunk in _chunk_text(answer):
+            yield ConceptRuntimeDelta(chunk)
+        payload = _initial_result_from_concept(concept)
+        yield ConceptInitialRuntimeResult(payload)
+
     def initial_blocks(self, title: str) -> list[NoteBlockDTO]:
         return [
             NoteBlockDTO(
@@ -559,6 +580,17 @@ class SiftRuntimeConceptModelService:
         )
         return _concept_from_initial_result(title, result)
 
+    async def stream_initial_concept(
+        self,
+        title: str,
+        locale: str,
+    ) -> AsyncIterator[ConceptRuntimeDelta | ConceptInitialRuntimeResult]:
+        async for event in self.runtime.stream_initial_concept(
+            raw_capture=title,
+            locale=locale,
+        ):
+            yield event
+
     async def answer_turn(
         self,
         concept: ConceptDTO,
@@ -689,6 +721,70 @@ class ConceptService:
             )
         return saved
 
+    async def create_concept_stream(
+        self,
+        request: CreateConceptRequest,
+        idempotency_key: str | None = None,
+    ) -> AsyncIterator[ConceptInitialStreamEvent]:
+        title = request.raw_capture.strip()
+        if idempotency_key:
+            payload_hash = _idempotency_payload_hash(request)
+            existing = self._existing_capture_result(idempotency_key, payload_hash)
+            if existing is not None:
+                yield ConceptInitialStreamResult(existing)
+                return
+            attempt = self.store.create_capture_attempt(
+                self.owner_id,
+                idempotency_key,
+                payload_hash,
+                title,
+                request.locale,
+            )
+        else:
+            attempt = None
+        final_result = None
+        try:
+            async for event in self.model_service.stream_initial_concept(
+                title=title,
+                locale=request.locale,
+            ):
+                if isinstance(event, ConceptRuntimeDelta):
+                    yield ConceptTurnStreamDelta(event.content)
+                if isinstance(event, ConceptInitialRuntimeResult):
+                    final_result = event.result
+        except SiftRuntimeError as error:
+            if attempt is not None:
+                self.store.update_capture_attempt(
+                    attempt.id,
+                    status="failed",
+                    failure_code=error.code,
+                    failure_message=str(error),
+                )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"code": error.code, "message": str(error)},
+            ) from error
+
+        if final_result is None:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"code": "stream_incomplete", "message": "Model stream ended early."},
+            )
+        concept = _concept_from_initial_result(title, final_result)
+        saved = self._save_concept_with_audit(
+            concept,
+            event_type="initialGeneration",
+            actor="ai",
+        )
+        self._append_initial_turn(saved, title)
+        if attempt is not None:
+            self.store.update_capture_attempt(
+                attempt.id,
+                status="succeeded",
+                concept_id=saved.id,
+            )
+        yield ConceptInitialStreamResult(saved)
+
     def list_concepts(self) -> list[ConceptDTO]:
         return self.store.list_concepts(owner_id=self.owner_id)
 
@@ -764,6 +860,84 @@ class ConceptService:
                 "maturity": ConceptMaturity.growing,
                 "note_revision": concept.note_revision + 1,
                 "blocks": blocks,
+            }
+        )
+        return self._save_concept_with_audit(
+            updated,
+            event_type="manualEdit",
+            actor="user",
+        )
+
+    def update_concept_note(
+        self,
+        concept_id: UUID,
+        request: UpdateConceptNoteRequest,
+    ) -> ConceptDTO:
+        concept = self.store.get_concept(concept_id, owner_id=self.owner_id)
+        display_title = request.display_title.strip()
+        if not display_title:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Concept title cannot be empty.",
+            )
+
+        existing_by_id = {block.id: block for block in concept.blocks}
+        blocks: list[NoteBlockDTO] = []
+        for position, block_request in enumerate(request.blocks):
+            content = block_request.content.strip()
+            if not content:
+                continue
+            if block_request.id is None:
+                blocks.append(
+                    NoteBlockDTO(
+                        id=uuid4(),
+                        blockType=block_request.block_type,
+                        content=content,
+                        source=NoteBlockSource.user,
+                        isUserLocked=True,
+                        revision=1,
+                        supportedClaimIds=[],
+                        position=position,
+                    )
+                )
+                continue
+
+            existing = existing_by_id.get(block_request.id)
+            if existing is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Note block does not belong to this concept.",
+                )
+            changed = (
+                existing.content != content
+                or existing.block_type != block_request.block_type
+            )
+            if changed:
+                blocks.append(
+                    existing.model_copy(
+                        update={
+                            "block_type": block_request.block_type,
+                            "content": content,
+                            "source": NoteBlockSource.user,
+                            "is_user_locked": True,
+                            "revision": existing.revision + 1,
+                            "position": position,
+                        }
+                    )
+                )
+            else:
+                blocks.append(existing.model_copy(update={"position": position}))
+
+        updated = concept.model_copy(
+            update={
+                "canonical_title": display_title,
+                "display_title": display_title,
+                "one_line_explanation": request.one_line_explanation.strip(),
+                "maturity": ConceptMaturity.growing,
+                "note_revision": concept.note_revision + 1,
+                "blocks": blocks,
+                "tags": _normalized_names(request.tags),
+                "topics": _normalized_names(request.topics),
             }
         )
         return self._save_concept_with_audit(
@@ -968,51 +1142,20 @@ class ConceptService:
         request: ConceptTurnRequest,
         result: ConceptTurnResult,
     ) -> ConceptTurnResponse:
-        starting_revision = concept.note_revision
-        allow_durable_updates = not _is_non_durable_followup(request.question)
-        source_id_map = self._persist_answer_sources(concept.id, result.answer_source)
-        if allow_durable_updates:
-            concept, candidate_proposal, candidate_claims = self._apply_candidate_updates(
-                concept,
-                result,
-                source_id_map,
-            )
-        else:
-            candidate_proposal = None
-            candidate_claims = []
-        if allow_durable_updates and result.update_mode == UpdateMode.auto_merge and result.auto_patch:
-            concept = self._apply_auto_patch(concept, result.auto_patch)
-            proposal = None
-        elif allow_durable_updates and result.update_mode == UpdateMode.needs_confirmation and result.proposal:
-            proposal = self._create_update_proposal(concept.id, result)
-        else:
-            proposal = candidate_proposal
-
-        if candidate_claims and hasattr(self.store, "add_claims"):
-            self.store.add_claims(concept.id, candidate_claims)
-        if allow_durable_updates:
-            self._persist_turn_learning_state(concept, result)
-
+        self._persist_answer_sources(concept.id, result.answer_source)
         self.store.append_turn_pair(
             concept.id,
             request.question,
             result.answer,
             answer_source=result.answer_source,
         )
-        response_update_mode = result.update_mode
-        if proposal is not None:
-            response_update_mode = UpdateMode.needs_confirmation
-        elif concept.note_revision > starting_revision:
-            response_update_mode = UpdateMode.auto_merge
-        else:
-            response_update_mode = UpdateMode.none
 
         return ConceptTurnResponse(
             answer=result.answer,
             answerSource=result.answer_source,
-            updateMode=response_update_mode,
+            updateMode=UpdateMode.none,
             concept=concept,
-            proposal=proposal,
+            proposal=None,
         )
 
     def _persist_answer_sources(
@@ -1269,36 +1412,8 @@ class ConceptService:
 
 
 def should_use_web_search(question: str) -> bool:
-    normalized = question.casefold()
-    freshness_markers = (
-        "latest",
-        "current",
-        "recent",
-        "today",
-        "yesterday",
-        "this week",
-        "this month",
-        "2025",
-        "2026",
-        "version",
-        "release",
-        "changelog",
-        "price",
-        "pricing",
-        "policy",
-        "news",
-        "now",
-        "最新版",
-        "最新",
-        "当前",
-        "今天",
-        "最近",
-        "价格",
-        "版本",
-        "政策",
-        "新闻",
-    )
-    return any(marker in normalized for marker in freshness_markers)
+    _ = question
+    return False
 
 
 def _fallback_initial_concept(title: str) -> ConceptDTO:
@@ -1310,7 +1425,10 @@ def _fallback_initial_concept(title: str) -> ConceptDTO:
         maturity=ConceptMaturity.initial,
         captureStatus=CaptureStatus.ready,
         noteRevision=1,
-        blocks=MockConceptModelService().initial_blocks(title),
+        blocks=[
+            block.model_copy(update={"position": position})
+            for position, block in enumerate(MockConceptModelService().initial_blocks(title))
+        ],
         answerSource=AnswerSourceDTO(
             sourceType=AnswerSourceType.model_knowledge,
             confidence=0.5,
@@ -1338,13 +1456,44 @@ def _concept_from_initial_result(title: str, result) -> ConceptDTO:
                 content=block.content.strip(),
                 source=NoteBlockSource.ai,
                 isUserLocked=False,
+                position=position,
             )
-            for block in result.blocks
+            for position, block in enumerate(result.blocks)
             if block.content.strip()
         ],
         tags=_names_from_suggestions(result.suggested_tags),
         topics=_names_from_suggestions(result.suggested_topics),
         answerSource=result.answer_source,
+    )
+
+
+def _initial_result_from_concept(concept: ConceptDTO) -> ConceptInitialResult:
+    return ConceptInitialResult(
+        canonicalTitle=concept.canonical_title,
+        displayTitle=concept.display_title,
+        oneLineExplanation=concept.one_line_explanation,
+        answer=(concept.initial_answer or concept.one_line_explanation).strip(),
+        blocks=[
+            {
+                "blockType": block.block_type,
+                "content": block.content,
+            }
+            for block in concept.blocks
+        ],
+        suggestedTags=[
+            {"name": tag, "confidence": 0.5}
+            for tag in concept.tags
+        ],
+        suggestedTopics=[
+            {"name": topic, "confidence": 0.5}
+            for topic in concept.topics
+        ],
+        answerSource=concept.answer_source or AnswerSourceDTO(
+            sourceType=AnswerSourceType.model_knowledge,
+            confidence=0.5,
+            uncertaintyNote=None,
+        ),
+        modelMeta=ModelMeta(provider="mock", model="sift-explain"),
     )
 
 

@@ -28,8 +28,8 @@ def build_concept_turn_context_pack(
         [
             "You are Sift's learning-note assistant for one concept card.",
             (
-                "Answer the user's current question, then emit candidateUpdates and "
-                "learningStateUpdates for anything worth cautiously preserving."
+                "Answer the user's current question. Do not attempt to save durable "
+                "note changes automatically; the user will decide what to add to the card."
             ),
             (
                 "Use the language of the user's current question when it is clear. "
@@ -43,8 +43,9 @@ def build_concept_turn_context_pack(
             "Never overwrite user-locked note blocks.",
             "Do not rewrite the whole card. The card is a materialized current view.",
             (
-                "Prefer candidateUpdates over direct patch operations. Use direct autoPatch/"
-                "proposal only for backwards-compatible simple patches."
+                "Set updateDecision.mode to none, autoPatch to [], proposal to null, "
+                "candidateUpdates to [], and learningStateUpdates to [] unless explicitly "
+                "asked to produce a structured update proposal."
             ),
             (
                 "Only create claims for core definitions, key distinctions, verifiable facts, "
@@ -145,6 +146,13 @@ def build_initial_concept_context_pack(raw_capture: str, locale: str) -> Context
                 "The answer field is a natural conversational opening reply to the captured "
                 "concept. It should be useful on its own and must not be assembled by copying "
                 "block headings."
+            ),
+            (
+                "Format the answer as readable Markdown with short paragraphs or bullets. "
+                "Use 3 or 4 short sections for non-trivial concepts. Each section heading "
+                "must be bold Markdown on its own line, followed by one blank line, then "
+                "the section body. Never write labels inline with the next sentence. "
+                "Good: **What it is**\\n\\n... Bad: **What it is**..."
             ),
             (
                 "Create 3 to 5 note blocks covering what it is, why it matters, an "

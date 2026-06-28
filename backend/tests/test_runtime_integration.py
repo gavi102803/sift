@@ -9,7 +9,12 @@ from sift_backend.runtime.concept_runtime import LightweightHermesRuntime
 from sift_backend.runtime.providers import OpenAICompatibleRuntimeProvider
 from sift_backend.runtime.research_stack import SiftReadabilityExtractProvider
 from sift_backend.runtime.tools import RuntimeCitation, RuntimeExtractedDocument, TavilyWebProvider
-from sift_backend.runtime.types import RuntimeModelRequest, RuntimeModelResponse, SiftRuntimeError
+from sift_backend.runtime.types import (
+    RuntimeModelRequest,
+    RuntimeModelResponse,
+    RuntimeToolCall,
+    SiftRuntimeError,
+)
 from sift_backend.schemas.common import AnswerSourceType
 from sift_backend.schemas.concepts import ConceptTurnRequest, CreateConceptRequest
 
@@ -33,6 +38,41 @@ async def test_runtime_service_uses_provider_profile_tool_dispatch_and_web_retri
         payload = kwargs["json"]
         captured_model_requests.append(payload)
         messages = payload["messages"]
+        if "tools" in payload:
+            user_content = next(
+                message["content"]
+                for message in reversed(messages)
+                if message["role"] == "user"
+            )
+            query = (
+                "Verify official source for A2A protocol"
+                if "Create a Sift concept card" in user_content
+                else "Verify source for how A2A differs from MCP"
+            )
+            return {
+                "model": payload["model"],
+                "choices": [
+                    {
+                        "message": {
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call_search",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "web_search",
+                                        "arguments": json.dumps(
+                                            {
+                                                "query": query
+                                            }
+                                        ),
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ],
+            }
         assert any("Runtime retrieval boundary" in message["content"] for message in messages)
 
         user_message = next(
@@ -105,8 +145,10 @@ async def test_runtime_service_uses_provider_profile_tool_dispatch_and_web_retri
         ConceptTurnRequest(question="Verify source for how A2A differs from MCP"),
     )
 
-    assert len(captured_model_requests) == 2
+    assert len(captured_model_requests) == 4
     assert [request["model"] for request in captured_model_requests] == [
+        "deepseek-chat",
+        "deepseek-chat",
         "deepseek-chat",
         "deepseek-chat",
     ]
@@ -127,7 +169,7 @@ async def test_runtime_service_uses_provider_profile_tool_dispatch_and_web_retri
 @pytest.mark.asyncio
 async def test_runtime_search_only_results_are_not_promoted_to_verified_sources() -> None:
     runtime = LightweightHermesRuntime(
-        model_provider=PayloadModelProvider(_initial_concept_payload(citation_source_id="src_001")),
+        model_provider=ToolCallingModelProvider(_initial_concept_payload(citation_source_id="src_001")),
         model="test-model",
         web_search_tool=SearchOnlyProvider(),
         web_extract_tool=FailingExtractProvider(),
@@ -142,8 +184,8 @@ async def test_runtime_search_only_results_are_not_promoted_to_verified_sources(
 
 
 @pytest.mark.asyncio
-async def test_runtime_required_retrieval_blocks_when_no_source_text_is_read() -> None:
-    model_provider = CapturingModelProvider(_initial_concept_payload())
+async def test_runtime_tool_call_with_no_source_text_stays_search_discovered() -> None:
+    model_provider = ToolCallingModelProvider(_initial_concept_payload(citation_source_id="src_001"))
     runtime = LightweightHermesRuntime(
         model_provider=model_provider,
         model="test-model",
@@ -152,10 +194,9 @@ async def test_runtime_required_retrieval_blocks_when_no_source_text_is_read() -
         web_search_enabled=True,
     )
 
-    with pytest.raises(SiftRuntimeError, match="no readable source text"):
-        await runtime.generate_initial_concept("Verify source for A2A protocol", "en")
+    result = await runtime.generate_initial_concept("Verify source for A2A protocol", "en")
 
-    assert model_provider.requests == []
+    assert result.answer_source.source_type == AnswerSourceType.search_discovered
 
 
 @pytest.mark.asyncio
@@ -179,7 +220,7 @@ async def test_runtime_stable_definition_does_not_retrieve_by_default() -> None:
 @pytest.mark.asyncio
 async def test_runtime_rejects_citation_source_id_outside_retrieval_context() -> None:
     runtime = LightweightHermesRuntime(
-        model_provider=PayloadModelProvider(_initial_concept_payload(citation_source_id="src_999")),
+        model_provider=ToolCallingModelProvider(_initial_concept_payload(citation_source_id="src_999")),
         model="test-model",
         web_search_tool=SearchOnlyProvider(),
         web_extract_tool=ReadabilityFixtureProvider(
@@ -195,7 +236,7 @@ async def test_runtime_rejects_citation_source_id_outside_retrieval_context() ->
 @pytest.mark.asyncio
 async def test_runtime_rejects_citation_without_source_id_when_retrieval_exists() -> None:
     runtime = LightweightHermesRuntime(
-        model_provider=PayloadModelProvider(_initial_concept_payload(citation_source_id="")),
+        model_provider=ToolCallingModelProvider(_initial_concept_payload(citation_source_id="")),
         model="test-model",
         web_search_tool=SearchOnlyProvider(),
         web_extract_tool=ReadabilityFixtureProvider("A2A is readable source text."),
@@ -223,7 +264,7 @@ async def test_runtime_rejects_citation_without_retrieval_context() -> None:
 @pytest.mark.asyncio
 async def test_runtime_overwrites_model_citation_title_and_url_from_source_id() -> None:
     runtime = LightweightHermesRuntime(
-        model_provider=PayloadModelProvider(
+        model_provider=ToolCallingModelProvider(
             _initial_concept_payload(
                 citation_source_id="src_001",
                 citation_title="Model Invented Title",
@@ -248,7 +289,7 @@ async def test_runtime_overwrites_model_citation_title_and_url_from_source_id() 
 @pytest.mark.asyncio
 async def test_runtime_does_not_auto_attach_unselected_evidence() -> None:
     runtime = LightweightHermesRuntime(
-        model_provider=PayloadModelProvider(_initial_concept_payload(citation_source_id="src_001")),
+        model_provider=ToolCallingModelProvider(_initial_concept_payload(citation_source_id="src_001")),
         model="test-model",
         web_search_tool=MultiSearchProvider(),
         web_extract_tool=ReadabilityFixtureProvider("Readable source text."),
@@ -262,7 +303,7 @@ async def test_runtime_does_not_auto_attach_unselected_evidence() -> None:
 
 @pytest.mark.asyncio
 async def test_runtime_wraps_prompt_injection_as_untrusted_evidence_payload() -> None:
-    model_provider = CapturingModelProvider(_initial_concept_payload())
+    model_provider = ToolCallingModelProvider(_initial_concept_payload())
     runtime = LightweightHermesRuntime(
         model_provider=model_provider,
         model="test-model",
@@ -277,13 +318,13 @@ async def test_runtime_wraps_prompt_injection_as_untrusted_evidence_payload() ->
     await runtime.generate_initial_concept("Verify source for A2A protocol", "en")
 
     system_messages = [
-        message.content
-        for message in model_provider.requests[0].messages
+            message.content
+            for message in model_provider.requests[-1].messages
         if message.role == "system" and "Runtime retrieval boundary" in message.content
     ]
     evidence_messages = [
-        message.content
-        for message in model_provider.requests[0].messages
+            message.content
+            for message in model_provider.requests[-1].messages
         if message.role == "user" and "sift_retrieval_evidence" in message.content
     ]
     assert len(system_messages) == 1
@@ -298,8 +339,8 @@ async def test_runtime_wraps_prompt_injection_as_untrusted_evidence_payload() ->
     assert '"kind": "sift_retrieval_evidence"' in evidence_message
     assert '"sourceId": "src_001"' in evidence_message
     assert '"status": "sourceRead"' in evidence_message
-    assert model_provider.requests[0].messages[-1].role == "user"
-    assert "Verify source for A2A protocol" in model_provider.requests[0].messages[-1].content
+    assert model_provider.requests[-1].messages[-1].role == "user"
+    assert "Verify source for A2A protocol" in model_provider.requests[-1].messages[-1].content
 
 
 def _initial_concept_payload(
@@ -423,6 +464,30 @@ class CapturingModelProvider(PayloadModelProvider):
     async def complete(self, request: RuntimeModelRequest) -> RuntimeModelResponse:
         self.requests.append(request)
         return await super().complete(request)
+
+
+class ToolCallingModelProvider(CapturingModelProvider):
+    async def complete(self, request: RuntimeModelRequest) -> RuntimeModelResponse:
+        self.requests.append(request)
+        if request.tools:
+            query = request.messages[-1].content
+            return RuntimeModelResponse(
+                content="",
+                provider=self.provider_name,
+                model=request.model,
+                tool_calls=(
+                    RuntimeToolCall(
+                        id="call_search",
+                        name="web_search",
+                        arguments={"query": query},
+                    ),
+                ),
+            )
+        return RuntimeModelResponse(
+            content=self.payload,
+            provider=self.provider_name,
+            model=request.model,
+        )
 
 
 class SearchOnlyProvider:

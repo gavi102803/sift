@@ -41,16 +41,18 @@ final class ProductLogicTests: XCTestCase {
 
     // MARK: Reading order
 
-    func testReadingOrderFollowsUnderstandingPriorityAndSkipsDisplayBlock() {
+    func testReadingOrderFollowsSavedPositionsAndShowsUnknownBlocks() {
         let blocks = [
-            NoteBlock(blockType: NoteBlockType.example.rawValue, content: "ex"),
+            NoteBlock(blockType: NoteBlockType.example.rawValue, content: "ex", position: 2),
             NoteBlock(blockType: NoteBlockType.relatedConceptsDisplay.rawValue, content: "should be skipped"),
-            NoteBlock(blockType: NoteBlockType.whatItIs.rawValue, content: "wii"),
-            NoteBlock(blockType: NoteBlockType.whyItMatters.rawValue, content: "  "),
-            NoteBlock(blockType: NoteBlockType.commonMisunderstandings.rawValue, content: "cm")
+            NoteBlock(blockType: "customInsight", content: "custom", position: 0),
+            NoteBlock(blockType: NoteBlockType.whatItIs.rawValue, content: "wii", position: 1),
+            NoteBlock(blockType: NoteBlockType.whyItMatters.rawValue, content: "  ", position: 3),
+            NoteBlock(blockType: NoteBlockType.commonMisunderstandings.rawValue, content: "cm", position: 4)
         ]
         let ordered = ReadingContent.orderedBlocks(blocks).map(\.blockType)
         XCTAssertEqual(ordered, [
+            "customInsight",
             NoteBlockType.whatItIs.rawValue,
             NoteBlockType.example.rawValue,
             NoteBlockType.commonMisunderstandings.rawValue

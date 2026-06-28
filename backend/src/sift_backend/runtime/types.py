@@ -22,6 +22,7 @@ class RuntimeModelRequest:
     response_format: dict[str, Any] | None = None
     temperature: float | None = None
     structured_output_strategy: str | None = None
+    tools: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,14 @@ class RuntimeModelResponse:
     model: str
     input_tokens: int | None = None
     output_tokens: int | None = None
+    tool_calls: tuple["RuntimeToolCall", ...] = ()
+
+
+@dataclass(frozen=True)
+class RuntimeToolCall:
+    id: str
+    name: str
+    arguments: dict[str, Any]
 
 
 @dataclass(frozen=True)

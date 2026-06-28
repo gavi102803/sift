@@ -19,6 +19,7 @@ from sift_backend.runtime.types import (
     RuntimeModelRequest,
     RuntimeModelResponse,
     RuntimeModelStreamEvent,
+    RuntimeToolCall,
     SiftRuntimeError,
 )
 
@@ -83,7 +84,9 @@ class ChatCompletionsDriver:
             base_url=self.base_url,
         ) | {"stream": True}
         chunks: list[str] = []
+        tool_call_accumulator = _StreamingToolCallAccumulator()
         async for data in self._stream_request("/chat/completions", payload):
+            tool_call_accumulator.feed(data)
             delta = _stream_delta(data)
             if delta:
                 chunks.append(delta)
@@ -93,6 +96,7 @@ class ChatCompletionsDriver:
                 content="".join(chunks),
                 provider=self.provider_name,
                 model=request.model,
+                tool_calls=tool_call_accumulator.tool_calls(),
             )
         )
 
@@ -208,11 +212,12 @@ def _parse_chat_completion(
         raise SiftRuntimeError("provider_error", "Runtime provider returned invalid choices.")
     message = first.get("message")
     content = message.get("content") if isinstance(message, dict) else None
-    if not isinstance(content, str) or not content:
+    tool_calls = _message_tool_calls(message) if isinstance(message, dict) else ()
+    if (not isinstance(content, str) or not content) and not tool_calls:
         raise SiftRuntimeError("provider_error", "Runtime provider returned no content.")
     usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
     return RuntimeModelResponse(
-        content=content,
+        content=content if isinstance(content, str) else "",
         provider=provider,
         model=data.get("model") if isinstance(data.get("model"), str) else fallback_model,
         input_tokens=(
@@ -225,6 +230,7 @@ def _parse_chat_completion(
             if isinstance(usage.get("completion_tokens"), int)
             else None
         ),
+        tool_calls=tool_calls,
     )
 
 
@@ -240,6 +246,92 @@ def _stream_delta(data: dict[str, Any]) -> str:
         return ""
     content = delta.get("content")
     return content if isinstance(content, str) else ""
+
+
+def _message_tool_calls(message: dict[str, Any]) -> tuple[RuntimeToolCall, ...]:
+    raw_calls = message.get("tool_calls")
+    if not isinstance(raw_calls, list):
+        return ()
+    calls: list[RuntimeToolCall] = []
+    for index, raw_call in enumerate(raw_calls):
+        if not isinstance(raw_call, dict):
+            continue
+        function = raw_call.get("function")
+        if not isinstance(function, dict):
+            continue
+        name = function.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        arguments = _parse_tool_arguments(function.get("arguments"))
+        calls.append(
+            RuntimeToolCall(
+                id=raw_call.get("id") if isinstance(raw_call.get("id"), str) else f"call_{index}",
+                name=name,
+                arguments=arguments,
+            )
+        )
+    return tuple(calls)
+
+
+def _parse_tool_arguments(raw_arguments: Any) -> dict[str, Any]:
+    if isinstance(raw_arguments, dict):
+        return raw_arguments
+    if not isinstance(raw_arguments, str) or not raw_arguments.strip():
+        return {}
+    try:
+        parsed = json.loads(raw_arguments)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+class _StreamingToolCallAccumulator:
+    def __init__(self) -> None:
+        self._calls: dict[int, dict[str, Any]] = {}
+
+    def feed(self, data: dict[str, Any]) -> None:
+        choices = data.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return
+        first = choices[0]
+        if not isinstance(first, dict):
+            return
+        delta = first.get("delta")
+        if not isinstance(delta, dict):
+            return
+        raw_calls = delta.get("tool_calls")
+        if not isinstance(raw_calls, list):
+            return
+        for raw_call in raw_calls:
+            if not isinstance(raw_call, dict):
+                continue
+            index = raw_call.get("index")
+            if not isinstance(index, int):
+                index = len(self._calls)
+            current = self._calls.setdefault(index, {"function": {}})
+            if isinstance(raw_call.get("id"), str):
+                current["id"] = raw_call["id"]
+            function = raw_call.get("function")
+            if isinstance(function, dict):
+                current_function = current.setdefault("function", {})
+                if isinstance(function.get("name"), str):
+                    current_function["name"] = (
+                        current_function.get("name", "") + function["name"]
+                    )
+                if isinstance(function.get("arguments"), str):
+                    current_function["arguments"] = (
+                        current_function.get("arguments", "") + function["arguments"]
+                    )
+
+    def tool_calls(self) -> tuple[RuntimeToolCall, ...]:
+        return _message_tool_calls(
+            {
+                "tool_calls": [
+                    self._calls[index]
+                    for index in sorted(self._calls)
+                ]
+            }
+        )
 
 
 def _error_detail(response: httpx.Response) -> str:

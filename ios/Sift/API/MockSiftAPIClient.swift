@@ -232,6 +232,34 @@ struct MockSiftAPIClient: SiftAPIClient {
         )
     }
 
+    func updateConceptNote(
+        id: UUID,
+        request: UpdateConceptNoteRequest
+    ) async throws -> ConceptDTO {
+        try await Task.sleep(nanoseconds: delayNanoseconds)
+        return ConceptDTO(
+            id: id,
+            canonicalTitle: request.displayTitle,
+            displayTitle: request.displayTitle,
+            oneLineExplanation: request.oneLineExplanation,
+            maturity: ConceptMaturity.growing.rawValue,
+            captureStatus: CaptureStatus.ready.rawValue,
+            noteRevision: 2,
+            blocks: request.blocks.enumerated().map { index, block in
+                NoteBlockDTO(
+                    id: block.id ?? UUID(),
+                    blockType: block.blockType,
+                    content: block.content,
+                    source: NoteBlockSource.user.rawValue,
+                    isUserLocked: true,
+                    position: index
+                )
+            },
+            tags: request.tags,
+            topics: request.topics
+        )
+    }
+
     func updateConceptOrganization(
         id: UUID,
         request: UpdateConceptOrganizationRequest

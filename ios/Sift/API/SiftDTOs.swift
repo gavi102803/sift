@@ -186,6 +186,7 @@ struct NoteBlockDTO: Codable, Identifiable {
     var content: String
     var source: String
     var isUserLocked: Bool
+    var position: Int? = nil
 }
 
 struct UpdateConceptSummaryRequest: Codable {
@@ -198,6 +199,20 @@ struct UpdateNoteBlockRequest: Codable {
 }
 
 struct UpdateConceptOrganizationRequest: Codable {
+    var tags: [String]
+    var topics: [String]
+}
+
+struct UpdateConceptNoteBlockRequest: Codable, Identifiable {
+    var id: UUID?
+    var blockType: String
+    var content: String
+}
+
+struct UpdateConceptNoteRequest: Codable {
+    var displayTitle: String
+    var oneLineExplanation: String
+    var blocks: [UpdateConceptNoteBlockRequest]
     var tags: [String]
     var topics: [String]
 }
@@ -216,11 +231,13 @@ struct ConceptHistoryTurnDTO: Codable, Identifiable {
     var role: String
     var content: String
     var answerSource: AnswerSourceDTO?
+    var status: String? = "completed"
 
     enum CodingKeys: String, CodingKey {
         case role
         case content
         case answerSource
+        case status
     }
 }
 
@@ -236,6 +253,12 @@ struct ConceptTurnStreamEvent: Codable {
     var type: String
     var delta: String?
     var response: ConceptTurnResponse?
+}
+
+struct ConceptInitialStreamEvent: Codable {
+    var type: String
+    var delta: String?
+    var concept: ConceptDTO?
 }
 
 struct UpdateProposalDTO: Codable, Identifiable {

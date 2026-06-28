@@ -25,6 +25,10 @@ protocol SiftAPIClient {
         blockId: UUID,
         request: UpdateNoteBlockRequest
     ) async throws -> ConceptDTO
+    func updateConceptNote(
+        id: UUID,
+        request: UpdateConceptNoteRequest
+    ) async throws -> ConceptDTO
     func updateConceptOrganization(
         id: UUID,
         request: UpdateConceptOrganizationRequest
@@ -37,6 +41,10 @@ protocol SiftAPIClient {
         _ request: CreateConceptRequest,
         idempotencyKey: UUID?
     ) async throws -> ConceptDTO
+    func streamCreateConcept(
+        _ request: CreateConceptRequest,
+        idempotencyKey: UUID?
+    ) -> AsyncThrowingStream<ConceptInitialStreamEvent, Error>
     func submitTurn(conceptId: UUID, request: ConceptTurnRequest) async throws -> ConceptTurnResponse
     func submitTurn(
         conceptId: UUID,
@@ -79,6 +87,29 @@ extension SiftAPIClient {
         idempotencyKey: UUID?
     ) -> AsyncThrowingStream<ConceptTurnStreamEvent, Error> {
         streamTurn(conceptId: conceptId, request: request)
+    }
+
+    func streamCreateConcept(
+        _ request: CreateConceptRequest,
+        idempotencyKey: UUID?
+    ) -> AsyncThrowingStream<ConceptInitialStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    let concept = try await createConcept(request, idempotencyKey: idempotencyKey)
+                    continuation.yield(ConceptInitialStreamEvent(type: "started", delta: nil, concept: nil))
+                    let answer = concept.initialAnswer ?? concept.oneLineExplanation
+                    for chunk in answer.siftChunks(maxLength: 16) {
+                        try await Task.sleep(nanoseconds: 45_000_000)
+                        continuation.yield(ConceptInitialStreamEvent(type: "delta", delta: chunk, concept: nil))
+                    }
+                    continuation.yield(ConceptInitialStreamEvent(type: "completed", delta: nil, concept: concept))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
     }
 
     func mergeProposal(id: UUID, idempotencyKey: UUID?) async throws -> ConceptDTO {
@@ -193,6 +224,13 @@ struct HTTPSiftAPIClient: SiftAPIClient {
         )
     }
 
+    func updateConceptNote(
+        id: UUID,
+        request: UpdateConceptNoteRequest
+    ) async throws -> ConceptDTO {
+        try await put(path: "/v1/concepts/\(id.uuidString)/note", body: request)
+    }
+
     func updateConceptOrganization(
         id: UUID,
         request: UpdateConceptOrganizationRequest
@@ -221,6 +259,27 @@ struct HTTPSiftAPIClient: SiftAPIClient {
         idempotencyKey: UUID?
     ) async throws -> ConceptDTO {
         try await post(path: "/v1/concepts", body: request, idempotencyKey: idempotencyKey)
+    }
+
+    func streamCreateConcept(
+        _ request: CreateConceptRequest,
+        idempotencyKey: UUID?
+    ) -> AsyncThrowingStream<ConceptInitialStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    try await streamPost(
+                        path: "/v1/concepts/stream",
+                        body: request,
+                        idempotencyKey: idempotencyKey,
+                        continuation: continuation
+                    )
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
     }
 
     func submitTurn(conceptId: UUID, request: ConceptTurnRequest) async throws -> ConceptTurnResponse {
@@ -448,6 +507,20 @@ enum SiftAPIError: LocalizedError {
                 "The server returned status \(status)."
             }
         }
+    }
+}
+
+private extension String {
+    func siftChunks(maxLength: Int) -> [String] {
+        guard maxLength > 0, !isEmpty else { return [] }
+        var result: [String] = []
+        var index = startIndex
+        while index < endIndex {
+            let next = self.index(index, offsetBy: maxLength, limitedBy: endIndex) ?? endIndex
+            result.append(String(self[index..<next]))
+            index = next
+        }
+        return result
     }
 }
 

@@ -39,6 +39,9 @@ def build_chat_completions_payload(
         "model": request.model,
         "messages": messages,
     }
+    if request.tools:
+        payload["tools"] = list(request.tools)
+        payload["tool_choice"] = "auto"
     if request.temperature is not None and policy.temperature != TemperaturePolicy.OMIT:
         payload["temperature"] = request.temperature
     if request.response_format:

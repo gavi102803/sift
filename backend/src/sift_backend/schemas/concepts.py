@@ -29,6 +29,7 @@ class NoteBlockDTO(SiftBaseModel):
     is_user_locked: bool = Field(default=False, alias="isUserLocked")
     revision: int = Field(default=1, ge=1)
     supported_claim_ids: list[UUID] = Field(default_factory=list, alias="supportedClaimIds")
+    position: int | None = None
 
 
 class ConceptRelationDTO(SiftBaseModel):
@@ -78,6 +79,20 @@ class UpdateNoteBlockRequest(SiftBaseModel):
 
 
 class UpdateConceptOrganizationRequest(SiftBaseModel):
+    tags: list[str] = Field(default_factory=list)
+    topics: list[str] = Field(default_factory=list)
+
+
+class UpdateConceptNoteBlockRequest(SiftBaseModel):
+    id: UUID | None = None
+    block_type: NoteBlockType = Field(alias="blockType")
+    content: str = Field(min_length=1)
+
+
+class UpdateConceptNoteRequest(SiftBaseModel):
+    display_title: str = Field(min_length=1, alias="displayTitle")
+    one_line_explanation: str = Field(default="", alias="oneLineExplanation")
+    blocks: list[UpdateConceptNoteBlockRequest] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     topics: list[str] = Field(default_factory=list)
 

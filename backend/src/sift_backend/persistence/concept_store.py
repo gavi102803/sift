@@ -543,6 +543,7 @@ def _record_to_concept(record: ConceptRecord) -> ConceptDTO:
                     UUID(claim_id)
                     for claim_id in _json_list(block.supported_claim_ids_json)
                 ],
+                position=block.position,
             )
             for block in record.blocks
         ],

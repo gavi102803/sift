@@ -117,6 +117,7 @@ final class NoteBlock {
     var source: String
     var isUserLocked: Bool
     var lastEditedBy: String
+    var position: Int?
     var updatedAt: Date
 
     var note: ConceptNote?
@@ -128,6 +129,7 @@ final class NoteBlock {
         source: String = NoteBlockSource.ai.rawValue,
         isUserLocked: Bool = false,
         lastEditedBy: String = "ai",
+        position: Int? = nil,
         updatedAt: Date = .now,
         note: ConceptNote? = nil
     ) {
@@ -137,15 +139,23 @@ final class NoteBlock {
         self.source = source
         self.isUserLocked = isUserLocked
         self.lastEditedBy = lastEditedBy
+        self.position = position
         self.updatedAt = updatedAt
         self.note = note
     }
 }
 
 enum NoteBlockType: String, Codable, CaseIterable {
+    case oneLineDefinition
     case whatItIs
     case whyItMatters
     case example
+    case distinction
+    case misconception
+    case userContext
+    case openQuestion
+    case relatedConcepts
+    case caveat
     case commonMisunderstandings
     case relatedConceptsDisplay
     case userTakeaways

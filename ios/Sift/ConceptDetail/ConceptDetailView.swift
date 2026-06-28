@@ -16,7 +16,6 @@ struct ConceptDetailView: View {
     @Query private var relations: [ConceptRelation]
     @State private var followUpText = ""
     @State private var lastAnswerSource: AnswerSourceDTO?
-    @State private var savedFollowUpTurnIds: Set<UUID> = []
     @State private var turns: [ConceptHistoryTurnDTO] = []
     @State private var conceptTagNames: [String] = []
     @State private var conceptTopicNames: [String] = []
@@ -27,13 +26,12 @@ struct ConceptDetailView: View {
     @State private var resolvingRelationId: UUID?
     @State private var addingRelationTargetId: UUID?
     @State private var isEditingSummary = false
-    @State private var editingBlockId: UUID?
-    @State private var editingBlockTitle = ""
     @State private var draftTitle = ""
     @State private var draftExplanation = ""
     @State private var draftTags = ""
     @State private var draftTopics = ""
-    @State private var draftBlockContent = ""
+    @State private var draftNoteBlocks: [EditableNoteBlock] = []
+    @State private var draftEditorErrorMessage: String?
     @State private var detailMode: ConceptDetailMode = .overview
     @State private var isReadingOffline = false
     @State private var isRetryingGeneration = false
@@ -69,7 +67,15 @@ struct ConceptDetailView: View {
 
     private var lastTurnSignature: String {
         guard let last = turns.last else { return "empty" }
-        return "\(last.id.uuidString)-\(last.content.count)"
+        return "\(last.id.uuidString)-\(last.content.count)-\(last.status ?? "")"
+    }
+
+    private var localConversationSignature: String {
+        guard let messages = concept?.conversation?.messages else { return "empty" }
+        return messages
+            .sorted { $0.createdAt < $1.createdAt }
+            .map { "\($0.id.uuidString):\($0.content.count):\($0.updateMode)" }
+            .joined(separator: "|")
     }
 
     private var activeProposal: ConceptUpdateProposal? {
@@ -109,9 +115,17 @@ struct ConceptDetailView: View {
                                     concept: concept,
                                     turns: turns,
                                     isSubmitting: isSubmittingFollowUp,
-                                    savedTurnIds: savedFollowUpTurnIds,
                                     isRetryingGeneration: isRetryingGeneration,
-                                    onRetryGeneration: { Task { await retryGeneration(concept) } }
+                                    onRetryGeneration: { Task { await retryGeneration(concept) } },
+                                    onAddAssistantToNote: { turn in
+                                        beginNoteEdit(appending: turn.content)
+                                    },
+                                    onRetryAssistant: { turn in
+                                        retryAssistantTurn(turn)
+                                    },
+                                    onEditUserTurn: { turn in
+                                        editAndResend(turn)
+                                    }
                                 )
                             }
                             Color.clear
@@ -165,7 +179,7 @@ struct ConceptDetailView: View {
             if concept != nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        beginSummaryEdit()
+                        beginNoteEdit()
                     } label: {
                         Image(systemName: "square.and.pencil")
                     }
@@ -175,28 +189,15 @@ struct ConceptDetailView: View {
         }
         .sheet(isPresented: $isEditingSummary) {
             NavigationStack {
-                ConceptSummaryEditor(
+                ConceptFullNoteEditor(
                     title: $draftTitle,
                     explanation: $draftExplanation,
                     tags: $draftTags,
                     topics: $draftTopics,
+                    blocks: $draftNoteBlocks,
+                    errorMessage: draftEditorErrorMessage,
                     onCancel: { isEditingSummary = false },
-                    onSave: { Task { await saveSummaryEdit() } }
-                )
-            }
-        }
-        .sheet(
-            isPresented: Binding(
-                get: { editingBlockId != nil },
-                set: { if !$0 { editingBlockId = nil } }
-            )
-        ) {
-            NavigationStack {
-                NoteBlockEditor(
-                    title: editingBlockTitle,
-                    content: $draftBlockContent,
-                    onCancel: { editingBlockId = nil },
-                    onSave: { Task { await saveBlockEdit() } }
+                    onSave: { Task { await saveNoteEdit() } }
                 )
             }
         }
@@ -205,6 +206,9 @@ struct ConceptDetailView: View {
             refreshOrganization(for: conceptId)
             await refreshTurns(conceptId)
             restoreFailedFollowUpDraft()
+        }
+        .onChange(of: localConversationSignature) { _, _ in
+            syncLocalInitialTurnsIfNeeded()
         }
     }
 
@@ -225,7 +229,7 @@ struct ConceptDetailView: View {
                 Task { await removeRelation(relation) }
             },
             onEditBlock: { block in
-                beginBlockEdit(block)
+                beginNoteEdit()
             }
         )
     }
@@ -357,8 +361,8 @@ struct ConceptDetailView: View {
 
     // MARK: - Follow-up submission
 
-    private func submitFollowUp(for concept: Concept) async {
-        let question = followUpText.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func submitFollowUp(for concept: Concept, question overrideQuestion: String? = nil) async {
+        let question = (overrideQuestion ?? followUpText).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty else { return }
 
         isSubmittingFollowUp = true
@@ -369,9 +373,8 @@ struct ConceptDetailView: View {
         }
         let userTurnId = UUID()
         let assistantTurnId = UUID()
-        savedFollowUpTurnIds.remove(assistantTurnId)
-        turns.append(ConceptHistoryTurnDTO(id: userTurnId, role: "user", content: question))
-        turns.append(ConceptHistoryTurnDTO(id: assistantTurnId, role: "assistant", content: ""))
+        turns.append(ConceptHistoryTurnDTO(id: userTurnId, role: "user", content: question, status: "completed"))
+        turns.append(ConceptHistoryTurnDTO(id: assistantTurnId, role: "assistant", content: "", status: "streaming"))
         // Reserve a per-action idempotency key. A retry of the same question
         // reuses the key while in-flight, so a network-interrupted send doesn't
         // double-write; a terminal failure releases it (see catch).
@@ -407,18 +410,13 @@ struct ConceptDetailView: View {
             let streamed = turns.first(where: { $0.id == assistantTurnId })?.content ?? ""
             replaceAssistantAnswer(
                 ConversationTimeline.resolvedAssistantContent(streamed: streamed, finalAnswer: response.answer),
-                turnId: assistantTurnId
+                turnId: assistantTurnId,
+                answerSource: response.answerSource
             )
-            if response.updateMode == UpdateMode.autoMerge.rawValue {
-                savedFollowUpTurnIds.insert(assistantTurnId)
-            } else {
-                savedFollowUpTurnIds.remove(assistantTurnId)
-            }
             companion?.noteSuccess()
             isReadingOffline = false
         } catch is CancellationError {
             turns.removeAll { $0.id == assistantTurnId || $0.id == userTurnId }
-            savedFollowUpTurnIds.remove(assistantTurnId)
         } catch {
             // Remove the optimistic bubbles (no blank assistant left behind),
             // persist the draft, restore the composer text, and show a quiet,
@@ -426,7 +424,6 @@ struct ConceptDetailView: View {
             turns.removeAll { turn in
                 turn.id == assistantTurnId || turn.id == userTurnId
             }
-            savedFollowUpTurnIds.remove(assistantTurnId)
             store.recordFailedFollowUpDraft(concept: concept, question: question)
             // Terminal (server-rejected) failures release the key so a retry uses
             // a fresh one. Network/unknown failures keep it in-flight so a retry
@@ -483,9 +480,37 @@ struct ConceptDetailView: View {
         turns[index].content += delta
     }
 
-    private func replaceAssistantAnswer(_ answer: String, turnId: UUID) {
+    private func replaceAssistantAnswer(
+        _ answer: String,
+        turnId: UUID,
+        answerSource: AnswerSourceDTO? = nil
+    ) {
         guard let index = turns.firstIndex(where: { $0.id == turnId }) else { return }
         turns[index].content = answer
+        turns[index].status = "completed"
+        if let answerSource {
+            turns[index].answerSource = answerSource
+        }
+    }
+
+    private func retryAssistantTurn(_ turn: ConceptHistoryTurnDTO) {
+        guard !isSubmittingFollowUp,
+              let concept,
+              let index = turns.firstIndex(where: { $0.id == turn.id }),
+              let question = turns[..<index].last(where: { $0.role == ConversationRole.user.rawValue })?.content
+        else {
+            return
+        }
+        Task {
+            await submitFollowUp(for: concept, question: question)
+        }
+    }
+
+    private func editAndResend(_ turn: ConceptHistoryTurnDTO) {
+        followUpText = turn.content
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
+            detailMode = .followUp
+        }
     }
 
     private func restoreFailedFollowUpDraft() {
@@ -541,7 +566,6 @@ struct ConceptDetailView: View {
             let remoteTurns = try await appServices.apiClient.listTurns(conceptId: conceptId)
             // Backend history is authoritative; the local exchange is superseded.
             turns = ConversationTimeline.displayTurns(localInitial: localInitial, remote: remoteTurns)
-            savedFollowUpTurnIds.removeAll()
             companion?.noteSuccess()
             isReadingOffline = false
         } catch is CancellationError {
@@ -554,6 +578,17 @@ struct ConceptDetailView: View {
             }
             companion?.note(error)
             isReadingOffline = (CompanionErrorKind(error) == .unreachable)
+        }
+    }
+
+    private func syncLocalInitialTurnsIfNeeded() {
+        guard let concept else { return }
+        let localInitial = ConversationTimeline.initialExchange(
+            from: concept.conversation?.messages ?? []
+        )
+        guard !localInitial.isEmpty else { return }
+        if ConceptStatusRules.isLocalOnly(concept.captureStatus) || turns.isEmpty {
+            turns = localInitial
         }
     }
 
@@ -607,62 +642,67 @@ struct ConceptDetailView: View {
 
     // MARK: - Editing
 
-    private func beginSummaryEdit() {
+    private func beginNoteEdit(appending appendedContent: String? = nil) {
         guard let concept else { return }
         draftTitle = concept.displayTitle
         draftExplanation = concept.oneLineExplanation
         draftTags = conceptTagNames.joined(separator: ", ")
         draftTopics = conceptTopicNames.joined(separator: ", ")
+        draftNoteBlocks = editableBlocks(for: concept)
+        draftEditorErrorMessage = nil
+        if let appendedContent = appendedContent?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !appendedContent.isEmpty {
+            draftNoteBlocks.append(
+                EditableNoteBlock(
+                    blockType: NoteBlockType.userTakeaways.rawValue,
+                    content: appendedContent,
+                    position: draftNoteBlocks.count
+                )
+            )
+        }
         isEditingSummary = true
     }
 
-    private func saveSummaryEdit() async {
+    private func saveNoteEdit() async {
         guard let concept else { return }
         do {
             let store = ConceptLocalStore(modelContext: modelContext)
-            let updated = try await appServices.apiClient.updateConceptSummary(
+            let requestBlocks = draftNoteBlocks
+                .filter { !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                .map(\.request)
+            let updated = try await appServices.apiClient.updateConceptNote(
                 id: concept.id,
-                request: UpdateConceptSummaryRequest(
+                request: UpdateConceptNoteRequest(
                     displayTitle: draftTitle,
-                    oneLineExplanation: draftExplanation
-                )
-            )
-            _ = try store.upsertConcept(from: updated)
-            let organized = try await appServices.apiClient.updateConceptOrganization(
-                id: concept.id,
-                request: UpdateConceptOrganizationRequest(
+                    oneLineExplanation: draftExplanation,
+                    blocks: requestBlocks,
                     tags: splitList(draftTags),
                     topics: splitList(draftTopics)
                 )
             )
-            _ = try store.upsertConcept(from: organized)
+            _ = try store.upsertConcept(from: updated)
             refreshOrganization(for: concept.id)
             isEditingSummary = false
         } catch {
-            present(error)
+            draftEditorErrorMessage = "Sift couldn’t save that note. Your edits are still here; try saving again."
+            companion?.note(error)
         }
     }
 
-    private func beginBlockEdit(_ block: NoteBlock) {
-        editingBlockId = block.id
-        editingBlockTitle = noteBlockTitle(block.blockType)
-        draftBlockContent = block.content
-    }
-
-    private func saveBlockEdit() async {
-        guard let blockId = editingBlockId,
-              let block = concept?.note?.blocks.first(where: { $0.id == blockId }) else { return }
-        do {
-            let updated = try await appServices.apiClient.updateNoteBlock(
-                conceptId: conceptId,
-                blockId: block.id,
-                request: UpdateNoteBlockRequest(content: draftBlockContent)
-            )
-            _ = try ConceptLocalStore(modelContext: modelContext).upsertConcept(from: updated)
-            editingBlockId = nil
-        } catch {
-            present(error)
-        }
+    private func editableBlocks(for concept: Concept) -> [EditableNoteBlock] {
+        (concept.note?.blocks ?? [])
+            .enumerated()
+            .sorted { lhs, rhs in
+                let lhsPosition = lhs.element.position ?? lhs.offset
+                let rhsPosition = rhs.element.position ?? rhs.offset
+                if lhsPosition == rhsPosition {
+                    return lhs.offset < rhs.offset
+                }
+                return lhsPosition < rhsPosition
+            }
+            .map { offset, block in
+                EditableNoteBlock(block: block, fallbackPosition: offset)
+            }
     }
 
     private func splitList(_ text: String) -> [String] {

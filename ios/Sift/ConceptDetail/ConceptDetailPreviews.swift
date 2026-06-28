@@ -29,6 +29,7 @@ private struct PreviewSiftAPIClient: SiftAPIClient {
     func listConcepts() async throws -> [ConceptDTO] { try await base.listConcepts() }
     func updateConceptSummary(id: UUID, request: UpdateConceptSummaryRequest) async throws -> ConceptDTO { concept }
     func updateNoteBlock(conceptId: UUID, blockId: UUID, request: UpdateNoteBlockRequest) async throws -> ConceptDTO { concept }
+    func updateConceptNote(id: UUID, request: UpdateConceptNoteRequest) async throws -> ConceptDTO { concept }
     func updateConceptOrganization(id: UUID, request: UpdateConceptOrganizationRequest) async throws -> ConceptDTO { concept }
     func addRelation(conceptId: UUID, request: CreateConceptRelationRequest) async throws -> ConceptDTO { concept }
     func removeRelation(conceptId: UUID, relationId: UUID) async throws -> ConceptDTO { concept }

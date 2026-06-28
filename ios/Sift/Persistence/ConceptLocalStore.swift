@@ -58,9 +58,58 @@ struct ConceptLocalStore {
                 content: trimmedAnswer,
                 createdAt: .now,
                 updateMode: initialCaptureUpdateMode,
+                operationStatus: "completed",
                 conversation: conversation
             )
         )
+    }
+
+    func appendInitialGenerationAnswerDelta(concept: Concept, question: String, delta: String) {
+        recordInitialCaptureQuestion(concept: concept, question: question)
+        guard !delta.isEmpty else { return }
+        let conversation = ensureConversation(for: concept)
+        if let message = conversation.messages
+            .filter({
+                $0.role == ConversationRole.assistant.rawValue
+                    && $0.updateMode == initialCaptureUpdateMode
+            })
+            .sorted(by: { $0.createdAt < $1.createdAt })
+            .last {
+            message.content += delta
+            message.operationStatus = "streaming"
+            conversation.updatedAt = .now
+            return
+        }
+        modelContext.insert(
+            ConversationMessage(
+                role: ConversationRole.assistant.rawValue,
+                content: delta,
+                createdAt: .now,
+                updateMode: initialCaptureUpdateMode,
+                operationStatus: "streaming",
+                conversation: conversation
+            )
+        )
+    }
+
+    func replaceInitialGenerationAnswer(concept: Concept, question: String, answer: String) {
+        recordInitialCaptureQuestion(concept: concept, question: question)
+        let trimmedAnswer = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedAnswer.isEmpty else { return }
+        let conversation = ensureConversation(for: concept)
+        if let message = conversation.messages
+            .filter({
+                $0.role == ConversationRole.assistant.rawValue
+                    && $0.updateMode == initialCaptureUpdateMode
+            })
+            .sorted(by: { $0.createdAt < $1.createdAt })
+            .last {
+            message.content = trimmedAnswer
+            message.operationStatus = "completed"
+            conversation.updatedAt = .now
+            return
+        }
+        recordInitialGenerationAnswer(concept: concept, question: question, answer: trimmedAnswer)
     }
 
     func recordInitialGenerationFailure(concept: Concept, error: Error) {
@@ -97,7 +146,8 @@ struct ConceptLocalStore {
                     id: message.id,
                     role: message.role,
                     content: message.content,
-                    answerSource: nil
+                    answerSource: nil,
+                    status: "completed"
                 )
             }
     }
@@ -246,6 +296,7 @@ struct ConceptLocalStore {
                 source: blockDTO.source,
                 isUserLocked: blockDTO.isUserLocked,
                 lastEditedBy: blockDTO.source,
+                position: blockDTO.position,
                 note: note
             )
         }

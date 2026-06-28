@@ -7,9 +7,11 @@ struct ConceptFollowUpView: View {
     var concept: Concept
     var turns: [ConceptHistoryTurnDTO]
     var isSubmitting: Bool
-    var savedTurnIds: Set<UUID> = []
     var isRetryingGeneration: Bool = false
     var onRetryGeneration: () -> Void = {}
+    var onAddAssistantToNote: (ConceptHistoryTurnDTO) -> Void = { _ in }
+    var onRetryAssistant: (ConceptHistoryTurnDTO) -> Void = { _ in }
+    var onEditUserTurn: (ConceptHistoryTurnDTO) -> Void = { _ in }
 
     private var status: CaptureStatus? {
         CaptureStatus(rawValue: concept.captureStatus)
@@ -22,19 +24,29 @@ struct ConceptFollowUpView: View {
         }
     }
 
+    private var hasStreamingAssistantTurn: Bool {
+        turns.contains { turn in
+            turn.role == "assistant"
+                && turn.status == "streaming"
+                && !turn.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             ForEach(turns) { turn in
                 ConceptTurnRow(
                     turn: turn,
                     isStreaming: isStreaming(turn),
-                    showSavedChip: showsSavedChip(turn)
+                    onAddToNote: onAddAssistantToNote,
+                    onRetry: onRetryAssistant,
+                    onEditUserTurn: onEditUserTurn
                 )
             }
 
             // Status-driven trailing element. Generation is in progress or has
             // failed: show an explicit loading row / retry card, never a turn.
-            if isGenerating {
+            if isGenerating && !hasStreamingAssistantTurn {
                 GeneratingAnswerRow()
             } else if status == .generationFailed {
                 GenerationFailureCard(isRetrying: isRetryingGeneration, onRetry: onRetryGeneration)
@@ -56,14 +68,9 @@ struct ConceptFollowUpView: View {
     }
 
     private func isStreaming(_ turn: ConceptHistoryTurnDTO) -> Bool {
-        isSubmitting && turn.role == "assistant" && turn.id == turns.last?.id
+        turn.role == "assistant" && turn.status == "streaming"
     }
 
-    private func showsSavedChip(_ turn: ConceptHistoryTurnDTO) -> Bool {
-        turn.role == "assistant"
-            && savedTurnIds.contains(turn.id)
-            && !turn.content.isEmpty
-    }
 }
 
 /// Explicit "Sift is writing the first card" state — clearly a loading state.

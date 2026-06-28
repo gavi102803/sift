@@ -137,6 +137,48 @@ def test_update_note_block_returns_404_for_missing_block() -> None:
     assert response.status_code == 404
 
 
+def test_update_concept_note_replaces_ordered_blocks_and_preserves_unchanged_source() -> None:
+    client = make_client()
+    concept = client.post("/v1/concepts", json={"raw_capture": "RAG", "locale": "en"}).json()
+    first_block, second_block = concept["blocks"]
+
+    response = client.put(
+        f"/v1/concepts/{concept['id']}/note",
+        json={
+            "displayTitle": "Retrieval-Augmented Generation",
+            "oneLineExplanation": "Grounds answers in retrieved context.",
+            "blocks": [
+                {
+                    "id": second_block["id"],
+                    "blockType": second_block["blockType"],
+                    "content": second_block["content"],
+                },
+                {
+                    "blockType": "userTakeaways",
+                    "content": "Use RAG when answers need retrieved context.",
+                },
+            ],
+            "tags": ["AI", "ai", "Retrieval"],
+            "topics": ["Knowledge"],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["displayTitle"] == "Retrieval-Augmented Generation"
+    assert body["oneLineExplanation"] == "Grounds answers in retrieved context."
+    assert body["noteRevision"] == 2
+    assert [block["position"] for block in body["blocks"]] == [0, 1]
+    assert [block["id"] for block in body["blocks"]] == [second_block["id"], body["blocks"][1]["id"]]
+    assert body["blocks"][0]["source"] == second_block["source"]
+    assert body["blocks"][0]["isUserLocked"] == second_block["isUserLocked"]
+    assert body["blocks"][1]["source"] == "user"
+    assert body["blocks"][1]["isUserLocked"] is True
+    assert first_block["id"] not in [block["id"] for block in body["blocks"]]
+    assert body["tags"] == ["AI", "Retrieval"]
+    assert body["topics"] == ["Knowledge"]
+
+
 def test_update_concept_organization_persists_tags_and_topics() -> None:
     client = make_client()
     concept = client.post("/v1/concepts", json={"raw_capture": "RAG", "locale": "en"}).json()
@@ -213,9 +255,10 @@ def test_submit_turn_returns_answer_and_updated_concept() -> None:
     body = response.json()
     assert body["answer"] == "Draft answer for: How is it different from a token?"
     assert body["answerSource"]["sourceType"] == "modelKnowledge"
-    assert body["updateMode"] == "autoMerge"
-    assert body["concept"]["noteRevision"] == 2
-    assert "Follow-up captured" in body["concept"]["blocks"][0]["content"]
+    assert body["updateMode"] == "none"
+    assert body["proposal"] is None
+    assert body["concept"]["noteRevision"] == 1
+    assert "Follow-up captured" not in body["concept"]["blocks"][0]["content"]
 
 
 def test_submit_turn_stream_returns_deltas_and_completed_response() -> None:
@@ -237,7 +280,33 @@ def test_submit_turn_stream_returns_deltas_and_completed_response() -> None:
     completed = events[-1]
     assert completed["type"] == "completed"
     assert completed["response"]["answer"] == "Draft answer for: How is it different from a token?"
-    assert completed["response"]["concept"]["noteRevision"] == 2
+    assert completed["response"]["concept"]["noteRevision"] == 1
+
+
+def test_create_concept_stream_returns_deltas_completed_and_reuses_key() -> None:
+    client = make_client()
+    headers = {"Idempotency-Key": "capture-stream-rag-1"}
+    payload = {"raw_capture": "RAG", "locale": "en"}
+
+    def run_stream() -> list[dict]:
+        with client.stream(
+            "POST",
+            "/v1/concepts/stream",
+            json=payload,
+            headers=headers,
+        ) as response:
+            assert response.status_code == 200
+            return [json.loads(line) for line in response.iter_lines() if line]
+
+    first = run_stream()
+    second = run_stream()
+
+    assert first[0] == {"type": "started"}
+    assert "".join(event["delta"] for event in first if event["type"] == "delta")
+    assert first[-1]["type"] == "completed"
+    assert second[-1]["type"] == "completed"
+    assert second[-1]["concept"]["id"] == first[-1]["concept"]["id"]
+    assert len(client.get("/v1/concepts").json()) == 1
 
 
 def test_list_concept_turns_returns_persisted_question_and_answer() -> None:
@@ -379,7 +448,7 @@ def test_turn_idempotency_key_does_not_duplicate_turn_or_patch() -> None:
     assert second.status_code == 200
     assert second.json()["concept"]["noteRevision"] == first.json()["concept"]["noteRevision"]
     persisted = client.get(f"/v1/concepts/{concept['id']}").json()
-    assert persisted["noteRevision"] == 2
+    assert persisted["noteRevision"] == 1
     turns = client.get(f"/v1/concepts/{concept['id']}/turns").json()
     assert [turn["role"] for turn in turns] == ["user", "assistant", "user", "assistant"]
 
@@ -463,23 +532,19 @@ def test_turn_and_stream_share_logical_idempotency_scope() -> None:
     assert [turn["role"] for turn in turns] == ["user", "assistant", "user", "assistant"]
 
 
-def test_merge_proposal_idempotency_key_does_not_apply_patch_twice() -> None:
+def test_define_turn_does_not_create_update_proposal() -> None:
     client = make_client()
     concept = client.post("/v1/concepts", json={"raw_capture": "RAG", "locale": "en"}).json()
-    turn = client.post(
+    response = client.post(
         f"/v1/concepts/{concept['id']}/turns",
         json={"question": "define it more precisely"},
-    ).json()
-    proposal_id = turn["proposal"]["id"]
-    headers = {"Idempotency-Key": "merge-1"}
+    )
 
-    first = client.post(f"/v1/update-proposals/{proposal_id}/merge", headers=headers)
-    second = client.post(f"/v1/update-proposals/{proposal_id}/merge", headers=headers)
-
-    assert first.status_code == 200
-    assert second.status_code == 200
-    assert second.json()["noteRevision"] == first.json()["noteRevision"]
-    assert client.get(f"/v1/concepts/{concept['id']}").json()["noteRevision"] == 2
+    assert response.status_code == 200
+    body = response.json()
+    assert body["updateMode"] == "none"
+    assert body["proposal"] is None
+    assert client.get(f"/v1/concepts/{concept['id']}").json()["noteRevision"] == 1
 
 
 def test_submit_turn_returns_404_for_missing_concept() -> None:
@@ -493,7 +558,7 @@ def test_submit_turn_returns_404_for_missing_concept() -> None:
     assert response.status_code == 404
 
 
-def test_submit_turn_can_create_update_proposal() -> None:
+def test_submit_turn_ignores_model_patch_candidates_for_manual_note_saving() -> None:
     client = make_client()
     concept = client.post("/v1/concepts", json={"raw_capture": "RAG", "locale": "en"}).json()
 
@@ -504,36 +569,49 @@ def test_submit_turn_can_create_update_proposal() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["updateMode"] == "needsConfirmation"
-    assert body["proposal"]["status"] == "proposed"
-    assert body["proposal"]["baseNoteRevision"] == 1
+    assert body["updateMode"] == "none"
+    assert body["proposal"] is None
     assert body["concept"]["noteRevision"] == 1
 
 
-def test_merge_update_proposal_applies_patch() -> None:
+def test_update_note_endpoint_adds_answer_as_user_takeaway() -> None:
     client = make_client()
     concept = client.post("/v1/concepts", json={"raw_capture": "RAG", "locale": "en"}).json()
-    turn = client.post(
+    answer = client.post(
         f"/v1/concepts/{concept['id']}/turns",
         json={"question": "Define this more precisely"},
-    ).json()
+    ).json()["answer"]
 
-    response = client.post(f"/v1/update-proposals/{turn['proposal']['id']}/merge")
+    response = client.put(
+        f"/v1/concepts/{concept['id']}/note",
+        json={
+            "displayTitle": concept["displayTitle"],
+            "oneLineExplanation": concept["oneLineExplanation"],
+            "blocks": [
+                {
+                    "id": block["id"],
+                    "blockType": block["blockType"],
+                    "content": block["content"],
+                }
+                for block in concept["blocks"]
+            ]
+            + [{"blockType": "userTakeaways", "content": answer}],
+            "tags": concept["tags"],
+            "topics": concept["topics"],
+        },
+    )
 
     assert response.status_code == 200
     body = response.json()
     assert body["noteRevision"] == 2
-    assert body["blocks"][0]["content"] == "RAG is a concept being refined by Sift."
+    assert body["blocks"][-1]["blockType"] == "userTakeaways"
+    assert body["blocks"][-1]["content"] == answer
+    assert body["blocks"][-1]["source"] == "user"
 
 
-def test_dismiss_update_proposal_returns_no_content() -> None:
+def test_dismiss_update_proposal_returns_404_for_missing_proposal() -> None:
     client = make_client()
-    concept = client.post("/v1/concepts", json={"raw_capture": "RAG", "locale": "en"}).json()
-    turn = client.post(
-        f"/v1/concepts/{concept['id']}/turns",
-        json={"question": "Define this more precisely"},
-    ).json()
 
-    response = client.post(f"/v1/update-proposals/{turn['proposal']['id']}/dismiss")
+    response = client.post("/v1/update-proposals/00000000-0000-0000-0000-000000000001/dismiss")
 
-    assert response.status_code == 204
+    assert response.status_code == 404

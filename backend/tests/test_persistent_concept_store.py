@@ -13,10 +13,8 @@ from sift_backend.schemas.common import (
     EvidenceStatus,
     LearningStateField,
     LearningStateOrigin,
-    ProposalStatus,
     SourceType,
     TimeSensitivity,
-    UpdateMode,
 )
 from sift_backend.schemas.concepts import (
     ClaimDTO,
@@ -25,6 +23,7 @@ from sift_backend.schemas.concepts import (
     CreateConceptRequest,
     LearningStateUpdateDTO,
     SourceDTO,
+    UpdateConceptNoteRequest,
     UpdateConceptOrganizationRequest,
 )
 
@@ -173,7 +172,7 @@ def test_persistent_store_round_trips_concept_relations(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_persistent_store_round_trips_turns_and_proposals(tmp_path) -> None:
+async def test_persistent_store_round_trips_turns_without_auto_note_updates(tmp_path) -> None:
     database_path = tmp_path / "sift.db"
     session_factory = _session_factory(f"sqlite:///{database_path}")
     service = ConceptService(store=PersistentConceptStore(session_factory))
@@ -184,13 +183,13 @@ async def test_persistent_store_round_trips_turns_and_proposals(tmp_path) -> Non
         ConceptTurnRequest(question="Define this more precisely"),
     )
 
-    assert response.update_mode == UpdateMode.needs_confirmation
-    assert response.proposal is not None
+    assert response.update_mode == "none"
+    assert response.proposal is None
+    assert response.concept.note_revision == 1
 
     second_service = ConceptService(store=PersistentConceptStore(session_factory))
     turns = second_service.list_turns(concept.id)
-    proposal = second_service.store.get_proposal(response.proposal.id)
-    concept_id = second_service.store.get_proposal_concept_id(response.proposal.id)
+    persisted = second_service.get_concept(concept.id)
 
     assert [turn.content for turn in turns] == [
         "RAG",
@@ -200,34 +199,49 @@ async def test_persistent_store_round_trips_turns_and_proposals(tmp_path) -> Non
     ]
     assert turns[1].answer_source.source_type == "modelKnowledge"
     assert turns[3].answer_source.source_type == "modelKnowledge"
-    assert proposal.status == ProposalStatus.proposed
-    assert concept_id == concept.id
-    assert proposal.patch_operations[0].target_block_id == concept.blocks[0].id
+    assert persisted.note_revision == 1
+    assert persisted.blocks[0].content == concept.blocks[0].content
 
 
 @pytest.mark.asyncio
-async def test_persistent_store_records_confirmed_merge_audit(tmp_path) -> None:
+async def test_persistent_store_records_full_note_manual_edit_audit(tmp_path) -> None:
     database_path = tmp_path / "sift.db"
     session_factory = _session_factory(f"sqlite:///{database_path}")
     service = ConceptService(store=PersistentConceptStore(session_factory))
     concept = service.create_concept(CreateConceptRequest(rawCapture="RAG"))
-    response = await service.submit_turn(
+    service.update_concept_note(
         concept.id,
-        ConceptTurnRequest(question="Define this more precisely"),
+        UpdateConceptNoteRequest(
+            displayTitle=concept.display_title,
+            oneLineExplanation=concept.one_line_explanation,
+            blocks=[
+                {
+                    "id": block.id,
+                    "blockType": block.block_type,
+                    "content": block.content,
+                }
+                for block in concept.blocks
+            ]
+            + [
+                {
+                    "blockType": "userTakeaways",
+                    "content": "Keep useful answers only after review.",
+                }
+            ],
+            tags=concept.tags,
+            topics=concept.topics,
+        ),
     )
-
-    assert response.proposal is not None
-    service.merge_proposal(response.proposal.id)
 
     with session_factory() as session:
         revisions = session.query(NoteRevisionRecord).order_by(NoteRevisionRecord.revision).all()
         events = session.query(UpdateEventRecord).order_by(UpdateEventRecord.created_at).all()
 
     assert [revision.revision for revision in revisions] == [1, 2]
-    assert revisions[-1].merge_mode == "confirmedMerge"
-    assert events[-1].event_type == "confirmedMerge"
+    assert revisions[-1].merge_mode == "manualEdit"
+    assert events[-1].event_type == "manualEdit"
     assert events[-1].actor == "user"
-    assert events[-1].proposal_id == str(response.proposal.id)
+    assert events[-1].proposal_id is None
 
 
 def _session_factory(database_url: str) -> sessionmaker:

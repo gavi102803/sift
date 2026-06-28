@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
 from sift_backend.concepts.service import (
+    ConceptInitialStreamResult,
     ConceptService,
     ConceptTurnStreamDelta,
     ConceptTurnStreamResult,
@@ -26,6 +27,7 @@ from sift_backend.schemas.concepts import (
     ConceptTurnResponse,
     CreateConceptRelationRequest,
     CreateConceptRequest,
+    UpdateConceptNoteRequest,
     UpdateConceptOrganizationRequest,
     UpdateConceptSummaryRequest,
     UpdateNoteBlockRequest,
@@ -40,6 +42,14 @@ class ConceptTurnStreamEvent(BaseModel):
     type: str
     delta: str | None = None
     response: ConceptTurnResponse | None = None
+
+
+class ConceptInitialStreamEvent(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    type: str
+    delta: str | None = None
+    concept: ConceptDTO | None = None
 
 
 def build_concept_service(
@@ -98,6 +108,29 @@ async def create_concept(request: Request, payload: CreateConceptRequest) -> Con
     )
 
 
+@router.post("/concepts/stream")
+async def stream_create_concept(
+    request: Request,
+    payload: CreateConceptRequest,
+) -> StreamingResponse:
+    async def events():
+        service = get_concept_service(request)
+        idempotency_key = _idempotency_key(request)
+        yield _stream_line(ConceptInitialStreamEvent(type="started"))
+        async for event in service.create_concept_stream(
+            payload,
+            idempotency_key=idempotency_key,
+        ):
+            if isinstance(event, ConceptTurnStreamDelta):
+                yield _stream_line(ConceptInitialStreamEvent(type="delta", delta=event.content))
+            if isinstance(event, ConceptInitialStreamResult):
+                yield _stream_line(
+                    ConceptInitialStreamEvent(type="completed", concept=event.concept)
+                )
+
+    return StreamingResponse(events(), media_type="application/x-ndjson")
+
+
 @router.get("/concepts/{concept_id}", response_model=ConceptDTO, response_model_by_alias=True)
 async def get_concept(request: Request, concept_id: UUID) -> ConceptDTO:
     return get_concept_service(request).get_concept(concept_id)
@@ -124,6 +157,19 @@ async def update_note_block(
     payload: UpdateNoteBlockRequest,
 ) -> ConceptDTO:
     return get_concept_service(request).update_note_block(concept_id, block_id, payload)
+
+
+@router.put(
+    "/concepts/{concept_id}/note",
+    response_model=ConceptDTO,
+    response_model_by_alias=True,
+)
+async def update_concept_note(
+    request: Request,
+    concept_id: UUID,
+    payload: UpdateConceptNoteRequest,
+) -> ConceptDTO:
+    return get_concept_service(request).update_concept_note(concept_id, payload)
 
 
 @router.patch(
@@ -234,12 +280,23 @@ async def dismiss_update_proposal(request: Request, proposal_id: UUID) -> None:
     get_concept_service(request).dismiss_proposal(proposal_id)
 
 
-def _stream_line(event: ConceptTurnStreamEvent) -> str:
-    if event.response is not None:
+def _stream_line(event: ConceptTurnStreamEvent | ConceptInitialStreamEvent) -> str:
+    response = getattr(event, "response", None)
+    if response is not None:
         return json.dumps(
             {
                 "type": event.type,
-                "response": event.response.model_dump(mode="json", by_alias=True),
+                "response": response.model_dump(mode="json", by_alias=True),
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ) + "\n"
+    concept = getattr(event, "concept", None)
+    if concept is not None:
+        return json.dumps(
+            {
+                "type": event.type,
+                "concept": concept.model_dump(mode="json", by_alias=True),
             },
             ensure_ascii=False,
             separators=(",", ":"),

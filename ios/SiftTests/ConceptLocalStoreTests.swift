@@ -641,6 +641,13 @@ private struct TestAPIClient: SiftAPIClient {
         throw TestError.unimplemented
     }
 
+    func updateConceptNote(
+        id: UUID,
+        request: UpdateConceptNoteRequest
+    ) async throws -> ConceptDTO {
+        throw TestError.unimplemented
+    }
+
     func updateConceptOrganization(
         id: UUID,
         request: UpdateConceptOrganizationRequest

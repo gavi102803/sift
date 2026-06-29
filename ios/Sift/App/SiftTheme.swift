@@ -410,6 +410,8 @@ struct ProviderBrandMark: View {
         case "zai": return "brand-zai"
         case "azure-foundry", "azure": return "brand-azure"
         case "kilocode": return "brand-kilocode"
+        case "xiaomi": return "brand-xiaomi"
+        case "opencode-zen", "opencode": return "brand-opencode"
         default: return nil
         }
     }

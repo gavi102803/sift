@@ -362,7 +362,10 @@ def _mock_content(request: RuntimeModelRequest) -> str:
                 "canonicalTitle": title or "Untitled Concept",
                 "displayTitle": title or "Untitled Concept",
                 "oneLineExplanation": f"{title or 'This concept'} is ready to be refined.",
-                "answer": f"{title or 'This concept'} is ready to be refined. Ask a follow-up when you want to deepen it.",
+                "answer": (
+                    f"{title or 'This concept'} is ready to be refined. "
+                    "Ask a follow-up when you want to deepen it."
+                ),
                 "blocks": [
                     {
                         "blockType": "whatItIs",

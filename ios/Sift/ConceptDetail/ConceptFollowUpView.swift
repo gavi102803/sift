@@ -28,7 +28,6 @@ struct ConceptFollowUpView: View {
         turns.contains { turn in
             turn.role == "assistant"
                 && turn.status == "streaming"
-                && !turn.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 

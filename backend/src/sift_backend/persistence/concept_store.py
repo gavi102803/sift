@@ -77,6 +77,7 @@ class PersistentConceptStore:
             record.canonical_title = concept.canonical_title
             record.display_title = concept.display_title
             record.one_line_explanation = concept.one_line_explanation
+            record.initial_answer = concept.initial_answer
             record.maturity = concept.maturity.value
             record.capture_status = concept.capture_status.value
             record.note_revision = concept.note_revision
@@ -528,6 +529,7 @@ def _record_to_concept(record: ConceptRecord) -> ConceptDTO:
         canonicalTitle=record.canonical_title,
         displayTitle=record.display_title,
         oneLineExplanation=record.one_line_explanation,
+        initialAnswer=record.initial_answer,
         maturity=ConceptMaturity(record.maturity),
         captureStatus=CaptureStatus(record.capture_status),
         noteRevision=record.note_revision,

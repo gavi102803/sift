@@ -319,16 +319,6 @@ struct AssistantMessage: View {
     }
 }
 
-enum SourceTokenFormatter {
-    static func hideInternalSourceIds(_ text: String) -> String {
-        text.replacingOccurrences(
-            of: #"src_\d{3}"#,
-            with: "来源",
-            options: .regularExpression
-        )
-    }
-}
-
 struct MessageAction: Identifiable {
     let id = UUID()
     var icon: String
@@ -464,11 +454,6 @@ private struct SourceCitationCard: View {
                     .font(SiftFont.sans(11, .regular))
                     .foregroundStyle(SiftColor.textMuted)
                     .lineLimit(1)
-                if let sourceId = citation.sourceId, !sourceId.isEmpty {
-                    Text(sourceId)
-                        .font(SiftFont.sans(10, .medium))
-                        .foregroundStyle(SiftColor.textMuted)
-                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

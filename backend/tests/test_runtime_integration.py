@@ -10,6 +10,8 @@ from sift_backend.runtime.providers import OpenAICompatibleRuntimeProvider
 from sift_backend.runtime.research_stack import SiftReadabilityExtractProvider
 from sift_backend.runtime.tools import RuntimeCitation, RuntimeExtractedDocument, TavilyWebProvider
 from sift_backend.runtime.types import (
+    RuntimeModelCompleted,
+    RuntimeModelDelta,
     RuntimeModelRequest,
     RuntimeModelResponse,
     RuntimeToolCall,
@@ -17,6 +19,7 @@ from sift_backend.runtime.types import (
 )
 from sift_backend.schemas.common import AnswerSourceType
 from sift_backend.schemas.concepts import ConceptTurnRequest, CreateConceptRequest
+from sift_backend.schemas.model_outputs import ConceptInitialResult
 
 
 @pytest.mark.asyncio
@@ -145,8 +148,10 @@ async def test_runtime_service_uses_provider_profile_tool_dispatch_and_web_retri
         ConceptTurnRequest(question="Verify source for how A2A differs from MCP"),
     )
 
-    assert len(captured_model_requests) == 4
+    assert len(captured_model_requests) == 6
     assert [request["model"] for request in captured_model_requests] == [
+        "deepseek-chat",
+        "deepseek-chat",
         "deepseek-chat",
         "deepseek-chat",
         "deepseek-chat",
@@ -184,8 +189,41 @@ async def test_runtime_search_only_results_are_not_promoted_to_verified_sources(
 
 
 @pytest.mark.asyncio
+async def test_stream_initial_result_keeps_streamed_answer_as_authoritative() -> None:
+    streamed_answer = (
+        "**What it is**\n\n"
+        "A2A is a protocol shape for agents to discover each other and exchange tasks.\n\n"
+        "**Why it matters**\n\n"
+        "It gives multi-agent systems a shared interaction boundary."
+    )
+    runtime = LightweightHermesRuntime(
+        model_provider=StreamingInitialProvider(
+            streamed_payload=streamed_answer,
+            completed_payload=_initial_concept_payload(answer="A2A coordinates agents."),
+        ),
+        model="test-model",
+        web_search_tool=SearchOnlyProvider(),
+        web_search_enabled=False,
+    )
+
+    deltas: list[str] = []
+    completed: ConceptInitialResult | None = None
+    async for event in runtime.stream_initial_concept("A2A protocol", "en"):
+        if hasattr(event, "content"):
+            deltas.append(event.content)
+        else:
+            completed = event.result
+
+    assert "".join(deltas) == streamed_answer
+    assert completed is not None
+    assert completed.answer == streamed_answer
+
+
+@pytest.mark.asyncio
 async def test_runtime_tool_call_with_no_source_text_stays_search_discovered() -> None:
-    model_provider = ToolCallingModelProvider(_initial_concept_payload(citation_source_id="src_001"))
+    model_provider = ToolCallingModelProvider(
+        _initial_concept_payload(citation_source_id="src_001")
+    )
     runtime = LightweightHermesRuntime(
         model_provider=model_provider,
         model="test-model",
@@ -325,7 +363,7 @@ async def test_runtime_wraps_prompt_injection_as_untrusted_evidence_payload() ->
     evidence_messages = [
             message.content
             for message in model_provider.requests[-1].messages
-        if message.role == "user" and "sift_retrieval_evidence" in message.content
+        if message.role == "system" and "sift_retrieval_evidence" in message.content
     ]
     assert len(system_messages) == 1
     assert len(evidence_messages) == 1
@@ -337,16 +375,32 @@ async def test_runtime_wraps_prompt_injection_as_untrusted_evidence_payload() ->
     assert "<retrieved_evidence_json>" in evidence_message
     assert "Ignore previous instructions" in evidence_message
     assert '"kind": "sift_retrieval_evidence"' in evidence_message
-    assert '"sourceId": "src_001"' in evidence_message
+    retrieved_sources = json.loads(
+        evidence_message.split("<retrieved_evidence_json>\n", 1)[1].split(
+            "\n</retrieved_evidence_json>",
+            1,
+        )[0]
+    )
+    assert "sourceId" not in retrieved_sources["retrievedSources"][0]
+    assert retrieved_sources["retrievedSources"][0]["ref"] == "[1]"
+    assert retrieved_sources["citationMap"][0]["sourceId"] == "src_001"
     assert '"status": "sourceRead"' in evidence_message
-    assert model_provider.requests[-1].messages[-1].role == "user"
-    assert "Verify source for A2A protocol" in model_provider.requests[-1].messages[-1].content
+    assert model_provider.requests[-1].messages[-1].role == "system"
+    assert (
+        "answer as Sift runtime after tool execution"
+        in model_provider.requests[-1].messages[-1].content
+    )
+    assert any(
+        message.role == "user" and "Verify source for A2A protocol" in message.content
+        for message in model_provider.requests[-1].messages
+    )
 
 
 def _initial_concept_payload(
     citation_source_id: str | None = None,
     citation_title: str = "A2A Protocol",
     citation_url: str = "https://example.com/a2a",
+    answer: str = "A2A coordinates communication between agents.",
 ) -> str:
     citations = []
     if citation_source_id is not None:
@@ -362,7 +416,7 @@ def _initial_concept_payload(
             "canonicalTitle": "A2A Protocol",
             "displayTitle": "A2A Protocol",
             "oneLineExplanation": "A2A coordinates communication between agents.",
-            "answer": "A2A coordinates communication between agents.",
+            "answer": answer,
             "blocks": [
                 {
                     "blockType": "whatItIs",
@@ -487,6 +541,24 @@ class ToolCallingModelProvider(CapturingModelProvider):
             content=self.payload,
             provider=self.provider_name,
             model=request.model,
+        )
+
+
+class StreamingInitialProvider(PayloadModelProvider):
+    def __init__(self, streamed_payload: str, completed_payload: str) -> None:
+        super().__init__(completed_payload)
+        self.streamed_payload = streamed_payload
+
+    async def stream(self, request: RuntimeModelRequest):
+        midpoint = len(self.streamed_payload) // 2
+        yield RuntimeModelDelta(self.streamed_payload[:midpoint])
+        yield RuntimeModelDelta(self.streamed_payload[midpoint:])
+        yield RuntimeModelCompleted(
+            RuntimeModelResponse(
+                content=self.payload,
+                provider=self.provider_name,
+                model=request.model,
+            )
         )
 
 

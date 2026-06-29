@@ -31,6 +31,7 @@ from sift_backend.schemas.common import (
     LearningStateOrigin,
     NoteBlockSource,
     NoteBlockType,
+    ProposalStatus,
     UpdateMode,
 )
 from sift_backend.schemas.concepts import (
@@ -39,6 +40,7 @@ from sift_backend.schemas.concepts import (
     CreateConceptRequest,
     NoteBlockDTO,
     UpdateConceptSummaryRequest,
+    UpdateProposalDTO,
 )
 from sift_backend.schemas.model_outputs import ConceptTurnResult, ModelMeta, ModelUpdateProposal
 from sift_backend.schemas.patches import AddRelationPatchOperation, AppendPatchOperation
@@ -410,6 +412,11 @@ async def test_initial_structured_output_failure_does_not_write_concept() -> Non
     provider = RecordingRuntimeProvider(
         responses=[
             RuntimeModelResponse(
+                content="Natural answer before structured failure.",
+                provider="test",
+                model="test-model",
+            ),
+            RuntimeModelResponse(
                 content="not json",
                 provider="test",
                 model="test-model",
@@ -439,6 +446,11 @@ async def test_initial_structured_output_failure_does_not_write_concept() -> Non
 async def test_turn_structured_output_failure_does_not_mutate_knowledge() -> None:
     provider = RecordingRuntimeProvider(
         responses=[
+            RuntimeModelResponse(
+                content="Natural answer before structured failure.",
+                provider="test",
+                model="test-model",
+            ),
             RuntimeModelResponse(
                 content="not json",
                 provider="test",
@@ -476,7 +488,7 @@ async def test_turn_structured_output_failure_does_not_mutate_knowledge() -> Non
 
 
 @pytest.mark.asyncio
-async def test_submit_turn_applies_candidate_updates_to_knowledge_layers() -> None:
+async def test_submit_turn_does_not_auto_apply_candidate_updates() -> None:
     service = ConceptService(model_service=CandidateUpdateModelService())
     concept = service.create_concept(CreateConceptRequest(rawCapture="MCP"))
 
@@ -488,31 +500,36 @@ async def test_submit_turn_applies_candidate_updates_to_knowledge_layers() -> No
 
     assert response.proposal is None
     assert response.update_mode == UpdateMode.none
-    assert "How is MCP different from function calling?" in updated.blocks[-1].content
-    assert updated.claims[0].statement == (
-        "MCP is a protocol for connecting AI apps to tools and data."
-    )
-    assert updated.learning_state is not None
-    assert updated.learning_state.open_questions[0].origin == "assistantInference"
+    assert updated.note_revision == concept.note_revision
+    assert updated.blocks == concept.blocks
+    assert updated.claims == []
+    assert updated.learning_state is None
+    assert [turn.content for turn in service.store.list_turns(concept.id)][-2:] == [
+        "Compare it with function calling.",
+        "MCP is often compared with function calling.",
+    ]
 
 
 @pytest.mark.asyncio
-async def test_submit_turn_keeps_candidate_claim_when_auto_patch_also_saves() -> None:
+async def test_submit_turn_ignores_auto_patch_and_candidate_claims() -> None:
     service = ConceptService(model_service=CandidateAndAutoPatchModelService())
     concept = service.create_concept(CreateConceptRequest(rawCapture="RAG"))
 
-    await service.submit_turn(
+    response = await service.submit_turn(
         concept.id,
         ConceptTurnRequest(question="Clarify the definition."),
     )
     updated = service.get_concept(concept.id)
 
-    assert "retrieved context" in updated.blocks[0].content
-    assert updated.claims[0].statement == "RAG combines retrieval with generation."
+    assert response.proposal is None
+    assert response.update_mode == UpdateMode.none
+    assert updated.note_revision == concept.note_revision
+    assert updated.blocks == concept.blocks
+    assert updated.claims == []
 
 
 @pytest.mark.asyncio
-async def test_submit_turn_maps_candidate_claim_source_ids_to_persisted_sources() -> None:
+async def test_submit_turn_persists_answer_sources_but_not_candidate_claims() -> None:
     service = ConceptService(model_service=ClaimProvenanceModelService())
     concept = service.create_concept(CreateConceptRequest(rawCapture="A2A"))
 
@@ -526,12 +543,8 @@ async def test_submit_turn_maps_candidate_claim_source_ids_to_persisted_sources(
         "https://example.com/a2a",
         "https://example.com/other",
     ]
-    assert [claim.statement for claim in updated.claims] == [
-        "A2A is designed for agent-to-agent communication.",
-        "A2A is often discussed alongside MCP.",
-    ]
-    assert updated.claims[0].source_ids == [updated.sources[0].id]
-    assert updated.claims[1].source_ids == []
+    assert updated.claims == []
+    assert updated.blocks == concept.blocks
 
 
 @pytest.mark.asyncio
@@ -539,7 +552,21 @@ async def test_submit_turn_reuses_recent_turns_for_same_concept_card() -> None:
     provider = RecordingRuntimeProvider(
         responses=[
             RuntimeModelResponse(
+                content="First answer.",
+                provider="test",
+                model="test-model",
+                input_tokens=None,
+                output_tokens=None,
+            ),
+            RuntimeModelResponse(
                 content=valid_model_content("First answer."),
+                provider="test",
+                model="test-model",
+                input_tokens=None,
+                output_tokens=None,
+            ),
+            RuntimeModelResponse(
+                content="Second answer.",
                 provider="test",
                 model="test-model",
                 input_tokens=None,
@@ -568,7 +595,7 @@ async def test_submit_turn_reuses_recent_turns_for_same_concept_card() -> None:
     await service.submit_turn(concept.id, ConceptTurnRequest(question="What is RAG?"))
     await service.submit_turn(concept.id, ConceptTurnRequest(question="Give me an example."))
 
-    second_request_contents = [message.content for message in provider.requests[1].messages]
+    second_request_contents = [message.content for message in provider.requests[2].messages]
     assert "What is RAG?" in second_request_contents
     assert "First answer." in second_request_contents
     assert second_request_contents[-1] == "Give me an example."
@@ -583,13 +610,25 @@ async def test_merge_relation_proposal_persists_concept_relation() -> None:
     target = service.create_concept(CreateConceptRequest(rawCapture="Embedding"))
     model_service.target_concept_id = target.id
 
-    response = await service.submit_turn(
-        source.id,
-        ConceptTurnRequest(question="Is this related to embeddings?"),
+    proposal = service.store.save_proposal(
+        UpdateProposalDTO(
+            id=uuid4(),
+            baseNoteRevision=source.note_revision,
+            patchOperations=[
+                AddRelationPatchOperation(
+                    operation="addRelation",
+                    targetConceptId=target.id,
+                    relationType="related",
+                )
+            ],
+            rationale="Connects related concepts.",
+            confidence=0.8,
+            status=ProposalStatus.proposed,
+        ),
+        concept_id=source.id,
     )
 
-    assert response.proposal is not None
-    merged = service.merge_proposal(response.proposal.id)
+    merged = service.merge_proposal(proposal.id)
 
     assert merged.note_revision == 2
     assert len(merged.relations) == 1
@@ -608,16 +647,28 @@ async def test_merge_relation_proposal_rejects_missing_target_concept() -> None:
     service = ConceptService(model_service=RelationProposalModelService(missing_target_id))
     source = service.create_concept(CreateConceptRequest(rawCapture="RAG"))
 
-    response = await service.submit_turn(
-        source.id,
-        ConceptTurnRequest(question="Is this related to another concept?"),
+    proposal = service.store.save_proposal(
+        UpdateProposalDTO(
+            id=uuid4(),
+            baseNoteRevision=source.note_revision,
+            patchOperations=[
+                AddRelationPatchOperation(
+                    operation="addRelation",
+                    targetConceptId=missing_target_id,
+                    relationType="related",
+                )
+            ],
+            rationale="Connects related concepts.",
+            confidence=0.8,
+            status=ProposalStatus.proposed,
+        ),
+        concept_id=source.id,
     )
 
-    assert response.proposal is not None
     with pytest.raises(HTTPException) as error:
-        service.merge_proposal(response.proposal.id)
+        service.merge_proposal(proposal.id)
 
     assert error.value.status_code == 409
     assert error.value.detail["code"] == "missingConcept"
-    assert service.store.get_proposal(response.proposal.id).status == "stale"
+    assert service.store.get_proposal(proposal.id).status == "stale"
     assert service.get_concept(source.id).relations == []

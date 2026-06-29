@@ -169,7 +169,10 @@ def test_update_concept_note_replaces_ordered_blocks_and_preserves_unchanged_sou
     assert body["oneLineExplanation"] == "Grounds answers in retrieved context."
     assert body["noteRevision"] == 2
     assert [block["position"] for block in body["blocks"]] == [0, 1]
-    assert [block["id"] for block in body["blocks"]] == [second_block["id"], body["blocks"][1]["id"]]
+    assert [block["id"] for block in body["blocks"]] == [
+        second_block["id"],
+        body["blocks"][1]["id"],
+    ]
     assert body["blocks"][0]["source"] == second_block["source"]
     assert body["blocks"][0]["isUserLocked"] == second_block["isUserLocked"]
     assert body["blocks"][1]["source"] == "user"

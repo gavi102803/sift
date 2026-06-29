@@ -23,12 +23,31 @@ The iOS Simulator should use:
 http://127.0.0.1:8000
 ```
 
+For iPhone + Tailscale personal dogfood, bind the backend to all local
+interfaces on the Mac:
+
+```bash
+scripts/run_local_companion.sh --tailnet
+```
+
+Then configure the Debug/Personal iOS build with your Tailscale HTTPS name:
+
+```text
+https://<mac-machine>.<tailnet>.ts.net
+```
+
 Do not treat a failed backend connection as mock mode. If the app says it cannot connect, start or restart the local companion and run the doctor below.
 
 ## Run Doctor
 
 ```bash
 scripts/local_mvp_doctor.py
+```
+
+For Tailnet dogfood:
+
+```bash
+scripts/local_mvp_doctor.py --backend-url https://<mac-machine>.<tailnet>.ts.net
 ```
 
 The doctor checks:
@@ -39,6 +58,7 @@ The doctor checks:
 - configured provider, model, base URL, and web provider.
 
 It does not print API keys, Authorization headers, or full credential values.
+It also redacts credentials accidentally embedded in diagnostic URLs.
 
 ## Provider Expectations
 
@@ -56,4 +76,17 @@ The doctor writes and deletes a tiny `_sift_doctor_write_check` row to verify lo
 
 ## Real iPhone Note
 
-The Simulator can use `127.0.0.1:8000` because it shares the Mac development loopback behavior. A physical iPhone will need a Mac LAN address or a private network path such as Tailscale in a future step. Do not expose the local backend publicly for this MVP.
+The Simulator can use `127.0.0.1:8000` because it shares the Mac development
+loopback behavior. A physical iPhone should use the Phase 0 Personal Tailnet
+Dogfood path:
+
+```text
+iPhone + Mac
+→ Tailscale private network
+→ https://<mac-machine>.<tailnet>.ts.net
+→ Sift backend running on the Mac
+```
+
+Do not expose the local backend publicly for this MVP. See
+`docs/contracts/personal-tailnet-dogfood.md` for the Debug/Personal build
+contract and acceptance checks.

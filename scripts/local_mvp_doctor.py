@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import http.client
 import sqlite3
 import sys
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,19 +50,25 @@ def main() -> int:
 
 
 def backend_check(base_url: str, *, skip: bool) -> Check:
+    display_url = safe_display_url(base_url)
     if skip:
         return Check("backend", True, "skipped network check")
     health_url = base_url.rstrip("/") + "/health"
     try:
         with urllib.request.urlopen(health_url, timeout=2) as response:
             if response.status == 200:
-                return Check("backend", True, f"reachable at {base_url}")
-            return Check("backend", False, f"unexpected HTTP {response.status} at {health_url}")
-    except urllib.error.URLError as error:
+                return Check("backend", True, f"reachable at {display_url}{tailnet_hint(base_url)}")
+            return Check(
+                "backend",
+                False,
+                f"unexpected HTTP {response.status} at {safe_display_url(health_url)}",
+            )
+    except (urllib.error.URLError, ValueError, http.client.InvalidURL):
         return Check(
             "backend",
             False,
-            f"could not connect to {base_url}; start scripts/run_local_companion.sh",
+            f"could not connect to {display_url}; start scripts/run_local_companion.sh"
+            f"{tailnet_start_hint(base_url)}",
         )
 
 
@@ -98,6 +106,56 @@ def provider_check(settings) -> Check:
     if provider == "mock":
         return Check("provider", False, detail + "; real provider is not configured")
     return Check("provider", True, detail)
+
+
+def safe_display_url(raw_url: str) -> str:
+    """Return a diagnostic-safe URL string without credentials or secret query values."""
+    try:
+        parsed = urlsplit(raw_url)
+    except ValueError:
+        return "(invalid URL)"
+    if not parsed.scheme or not parsed.netloc:
+        return raw_url
+
+    host = parsed.hostname or ""
+    netloc = host
+    if parsed.port is not None:
+        netloc = f"{netloc}:{parsed.port}"
+
+    safe_query = urlencode(
+        [
+            (key, _redacted_query_value(key, value))
+            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        ]
+    )
+    return urlunsplit((parsed.scheme, netloc, parsed.path, safe_query, parsed.fragment))
+
+
+def tailnet_hint(raw_url: str) -> str:
+    try:
+        host = urlsplit(raw_url).hostname or ""
+    except ValueError:
+        return ""
+    if host.endswith(".ts.net"):
+        return " (Tailnet HTTPS)"
+    return ""
+
+
+def tailnet_start_hint(raw_url: str) -> str:
+    try:
+        host = urlsplit(raw_url).hostname or ""
+    except ValueError:
+        return ""
+    if host.endswith(".ts.net"):
+        return " --tailnet and verify Tailscale MagicDNS/HTTPS"
+    return ""
+
+
+def _redacted_query_value(key: str, value: str) -> str:
+    lowered = key.lower()
+    if any(marker in lowered for marker in ("key", "token", "secret", "password", "auth")):
+        return "***"
+    return value
 
 
 def redact_database_url(database_url: str) -> str:

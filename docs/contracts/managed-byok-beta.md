@@ -1,8 +1,8 @@
 # Managed BYOK Closed Beta — Client ↔ Backend Contract
 
-**Status: DRAFT — for codex ratification. Not implemented yet.** This document
-defines the seam so the iOS client and the Runtime backend can be built in
-parallel against a frozen contract. Nothing here is code; it is the agreement.
+**Status: RATIFIED for Phase 1 implementation planning. Not implemented yet.**
+This document defines the client/backend contract for the hosted beta path.
+It is separate from Phase 0 Personal Tailnet Dogfood.
 
 ## Product form (locked)
 
@@ -15,7 +15,8 @@ Sift: one managed, public, HTTPS Runtime backend that we operate.
 
 ## 1. Backend endpoint
 
-- A single fixed managed beta endpoint, e.g. `https://beta.<domain>` (final value TBD).
+- A single fixed managed beta endpoint, e.g. `https://beta.sift.example`
+  until the real domain is assigned.
 - **Release / TestFlight builds compile the endpoint in** (Info.plist `SIFTBackendBaseURL`
   or build setting). It is **not user-editable** and there is **no Backend-URL field** in
   the shipped UI.
@@ -43,7 +44,12 @@ X-Sift-Installation: <installationId>
 3. Client stores `betaAccessToken` in the **iOS Keychain**.
 
 ### Token lifecycle
-- Token has `expiresAt`. Refresh strategy: **TBD** (refresh endpoint vs. re-activate) — codex to decide.
+- `betaAccessToken` is an opaque bearer token with a 30-day TTL.
+- Client refreshes when fewer than 7 days remain:
+  `POST /v1/beta/session/refresh` with `Authorization` and
+  `X-Sift-Installation` → `{ betaAccessToken, ownerId, expiresAt }`.
+- Refresh succeeds only for a valid, unexpired, unrevoked token.
+- Expired tokens are not refreshed; the client returns to activation.
 - Token is **revocable server-side** (per-token and per-owner kill switch).
 - Expired or revoked token → `401` with a specific error code (§7). Client clears the
   token from Keychain and returns to the activation screen.
@@ -61,7 +67,7 @@ X-Sift-Installation: <installationId>
 ```
 provider API key
   → stored ONLY in iOS Keychain
-  → sent per runtime request in a header over TLS (e.g. X-Provider-Key)
+  → sent per runtime request in `X-Sift-Provider-Key` over TLS
   → backend holds it in memory ONLY to call the provider
   → discarded when the request completes
 ```
@@ -73,16 +79,26 @@ Hard requirements (codex must guarantee):
 - Non-secret fields (`providerId`, `model`) **are** persisted; the key is **not**.
 - This is a **relay, not a credential vault** — we are explicitly not building long-term
   managed-secret storage for the beta.
+- Provider keys are accepted only on runtime/provider-test endpoints that need
+  them; other endpoints reject or ignore the header.
+- Backend request logs must record only provider id, model, owner id, request id,
+  and redacted credential preview (`***last4`) when a preview is unavoidable.
 
 ## 5. Providers / models supported in beta
 
-- A curated subset (recommend starting with: `anthropic`, `openai`, `gemini`,
-  `deepseek`, `openrouter`). Final list TBD.
-- The provider catalog endpoint returns the supported set; the client picker shows only these.
+- The beta uses the current Sift provider preset registry and capability policy.
+- Do **not** artificially reduce the provider set in this contract. If a provider
+  is present in the Sift runtime catalog and supports BYOK relay + connection
+  test, it can be exposed.
+- Providers without a working relay/test path are hidden by the provider catalog
+  response, not by hard-coded iOS lists.
+- The provider catalog endpoint returns provider id, display name, default base
+  URL, auth mode, supported models or model-list behavior, and feature flags.
 
 ## 6. Provider connection test
 
-- `POST /v1/providers/test { providerId, model }` with the key in the relay header.
+- `POST /v1/providers/test { providerId, baseURL?, model }` with the key in
+  `X-Sift-Provider-Key`.
 - Semantics: performs a **minimal** provider call to validate that key + model are
   reachable and authorized. Returns `200 { ok: true }` or an error code (§7).
 - Must **not** persist the key. Used by the onboarding "Test connection" step.
@@ -99,6 +115,21 @@ Hard requirements (codex must guarantee):
 | `backend_unavailable` | 503 | "Can't reach Sift", retry |
 | `owner_scope_not_found` | 404 | treat as missing, not an error toast |
 
+All errors return:
+
+```json
+{
+  "error": {
+    "code": "provider_unreachable",
+    "message": "Safe user-facing summary",
+    "requestId": "..."
+  }
+}
+```
+
+`message` must never include provider API keys, Authorization headers, raw
+provider response bodies containing secrets, or backend stack traces.
+
 ## 8. Client onboarding (no infrastructure exposed)
 
 ```
@@ -111,11 +142,24 @@ Activate beta access
 ```
 No Backend URL, VPS guidance, Docker, shared provider key, or runtime plumbing appears anywhere.
 
-## Open questions for codex (ratify before Phase 1)
+## 9. Invite Semantics
 
-1. Token refresh vs. re-activate; `expiresAt` duration.
-2. Final header names (`Authorization`, `X-Sift-Installation`, `X-Provider-Key`).
-3. State of `ownerId` scoping in the existing migrations (the owner + idempotency tables
-   already exist on trunk per `test_migrations`); confirm all read/write paths filter by it.
-4. Provider-key redaction strategy across logging / tracing / error handling.
-5. Activation: invite codes pre-seeded vs. generated; one-time vs. reusable.
+- Invite codes are pre-seeded or generated by an admin script for the closed beta.
+- Each invite code can create exactly one `ownerId`.
+- Re-entering the same code on the same installation may return the same owner
+  session if the code has not been administratively revoked.
+- Reusing the same code from a different installation returns `invite_consumed`
+  unless the invite has been explicitly reset.
+
+## 10. Implementation Gates
+
+Phase 1 cannot ship until:
+
+- every concept/turn/source/run/idempotency read and write is filtered by
+  server-derived `ownerId`;
+- cross-owner concept and turn ids return `404`;
+- provider key redaction is covered by tests for logs, exceptions, and API
+  responses;
+- provider test confirms the key is not persisted;
+- Release/TestFlight hides Backend URL controls;
+- activation and refresh endpoints return the exact error codes in this contract.

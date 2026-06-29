@@ -6,20 +6,34 @@ import SwiftUI
 /// catalog may register many upstream profiles that share an OpenAI-compatible
 /// adapter without Sift conformance; we don't expose those here.
 enum ProviderAllowlist {
-    /// Shown in the standard "Active Model" picker.
+    /// Curated fallback set, used only when the backend catalog predates the
+    /// `exposureTier` field. Normally visibility is driven by the backend tier
+    /// (the Hermes migration's vetted "plannedStable" classification).
     static let standard: Set<String> = [
         "openai", "anthropic", "gemini", "deepseek", "openrouter", "kimi", "nous"
     ]
-    /// Shown only under Advanced Connections.
-    static let advanced: Set<String> = ["custom"]
 
-    static func isStandardVisible(_ provider: RuntimeProviderOptionDTO) -> Bool {
-        provider.id != "mock"
-            && provider.status != "comingSoon"
-            && standard.contains(provider.id)
+    private static func isHidden(_ provider: RuntimeProviderOptionDTO) -> Bool {
+        provider.id == "mock" || provider.status == "comingSoon"
     }
 
-    /// Visible providers for the Active Model picker, always including the
+    /// Vetted ("plannedStable") providers shown in the Active Model picker.
+    /// `custom` is excluded — it lives under Advanced Connections.
+    static func isStandardVisible(_ provider: RuntimeProviderOptionDTO) -> Bool {
+        guard !isHidden(provider), provider.id != "custom" else { return false }
+        if let tier = provider.exposureTier { return tier == "plannedStable" }
+        return standard.contains(provider.id)
+    }
+
+    /// Power-user ("advanced") providers — surfaced as a secondary group in the
+    /// picker. `custom` keeps its dedicated endpoint form under Advanced Connections.
+    static func isAdvancedVisible(_ provider: RuntimeProviderOptionDTO) -> Bool {
+        guard !isHidden(provider), provider.id != "custom" else { return false }
+        if let tier = provider.exposureTier { return tier == "advanced" }
+        return false
+    }
+
+    /// Vetted providers for the Active Model picker, always including the
     /// currently-selected one so active config is never hidden.
     static func standardVisible(
         _ providers: [RuntimeProviderOptionDTO],
@@ -27,6 +41,17 @@ enum ProviderAllowlist {
     ) -> [RuntimeProviderOptionDTO] {
         providers
             .filter { isStandardVisible($0) || ($0.id == selected && $0.id != "mock") }
+            .sorted { $0.name < $1.name }
+    }
+
+    /// Advanced-tier providers for the picker's secondary group (excludes the
+    /// one already shown as the selected provider).
+    static func advancedVisible(
+        _ providers: [RuntimeProviderOptionDTO],
+        selected: String
+    ) -> [RuntimeProviderOptionDTO] {
+        providers
+            .filter { isAdvancedVisible($0) && $0.id != selected }
             .sorted { $0.name < $1.name }
     }
 }
@@ -45,25 +70,39 @@ struct ProviderPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     var title: String
     var providers: [RuntimeProviderOptionDTO]
+    var advancedProviders: [RuntimeProviderOptionDTO] = []
     var selectedID: String
     var onSelect: (RuntimeProviderOptionDTO) -> Void
 
     var body: some View {
         SiftSheetScaffold(title: title, onClose: { dismiss() }) {
-            ForEach(providers) { provider in
-                Button {
-                    onSelect(provider)
-                    dismiss()
-                } label: {
-                    ProviderPickerRow(
-                        brandId: provider.id,
-                        name: provider.name,
-                        description: provider.description,
-                        isSelected: provider.id == selectedID
-                    )
-                }
-                .buttonStyle(.plain)
+            if advancedProviders.isEmpty {
+                providerList(providers)
+            } else {
+                SiftEyebrow(text: "Recommended")
+                providerList(providers)
+                SiftEyebrow(text: "Advanced")
+                    .padding(.top, 10)
+                providerList(advancedProviders)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func providerList(_ items: [RuntimeProviderOptionDTO]) -> some View {
+        ForEach(items) { provider in
+            Button {
+                onSelect(provider)
+                dismiss()
+            } label: {
+                ProviderPickerRow(
+                    brandId: provider.id,
+                    name: provider.name,
+                    description: provider.description,
+                    isSelected: provider.id == selectedID
+                )
+            }
+            .buttonStyle(.plain)
         }
     }
 }

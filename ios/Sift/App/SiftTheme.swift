@@ -391,12 +391,25 @@ struct ProviderBrandMark: View {
 
     private var assetName: String? {
         switch providerId.lowercased() {
-        case "deepseek": return "brand-deepseek"
+        case "openai": return "brand-openai"
         case "anthropic", "anthropic_messages": return "brand-anthropic"
-        case "alibaba", "dashscope", "alibabacloud": return "brand-alibabacloud"
+        case "gemini": return "brand-gemini"
+        case "deepseek": return "brand-deepseek"
+        case "openrouter": return "brand-openrouter"
+        case "kimi", "kimi-coding": return "brand-kimi"
+        case "nous": return "brand-nous"
+        case "alibaba", "alibaba-coding-plan", "dashscope", "alibabacloud": return "brand-alibabacloud"
         case "arcee": return "brand-arcee"
         case "gmi", "gmicloud": return "brand-gmicloud"
-        case "openrouter": return "brand-openrouter"
+        case "huggingface": return "brand-huggingface"
+        case "nvidia": return "brand-nvidia"
+        case "ollama-cloud", "ollama": return "brand-ollama"
+        case "minimax": return "brand-minimax"
+        case "stepfun": return "brand-stepfun"
+        case "novita": return "brand-novita"
+        case "zai": return "brand-zai"
+        case "azure-foundry", "azure": return "brand-azure"
+        case "kilocode": return "brand-kilocode"
         default: return nil
         }
     }

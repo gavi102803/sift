@@ -129,6 +129,7 @@ struct ModelProviderSettingsView: View {
             ProviderPickerSheet(
                 title: "Select Provider",
                 providers: ProviderAllowlist.standardVisible(providers, selected: providerType),
+                advancedProviders: ProviderAllowlist.advancedVisible(providers, selected: providerType),
                 selectedID: providerType
             ) { provider in
                 apply(provider)

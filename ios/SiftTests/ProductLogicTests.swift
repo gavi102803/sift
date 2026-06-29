@@ -75,18 +75,41 @@ final class ProductLogicTests: XCTestCase {
         XCTAssertTrue(visible.contains("deepseek"))
     }
 
-    private func provider(id: String, status: String = "available") -> RuntimeProviderOptionDTO {
+    /// Visibility follows the backend `exposureTier`: plannedStable → standard,
+    /// advanced → advanced group, custom → neither (Advanced Connections only).
+    func testProviderVisibilityFollowsExposureTier() {
+        XCTAssertTrue(ProviderAllowlist.isStandardVisible(provider(id: "kimi-coding", tier: "plannedStable")))
+        XCTAssertFalse(ProviderAllowlist.isStandardVisible(provider(id: "nvidia", tier: "advanced")))
+        XCTAssertFalse(ProviderAllowlist.isStandardVisible(provider(id: "custom", tier: "plannedStable")))
+
+        XCTAssertTrue(ProviderAllowlist.isAdvancedVisible(provider(id: "nvidia", tier: "advanced")))
+        XCTAssertFalse(ProviderAllowlist.isAdvancedVisible(provider(id: "kimi", tier: "plannedStable")))
+        XCTAssertFalse(ProviderAllowlist.isAdvancedVisible(provider(id: "custom", tier: "plannedStable")))
+    }
+
+    func testAdvancedVisibleExcludesSelectedAndSortsByName() {
+        let providers = [
+            provider(id: "nvidia", tier: "advanced"),
+            provider(id: "huggingface", tier: "advanced"),
+            provider(id: "kimi", tier: "plannedStable")
+        ]
+        let advanced = ProviderAllowlist.advancedVisible(providers, selected: "nvidia").map(\.id)
+        XCTAssertEqual(advanced, ["huggingface"]) // nvidia is selected-out; kimi is standard, not advanced
+    }
+
+    private func provider(id: String, status: String = "available", tier: String? = nil) -> RuntimeProviderOptionDTO {
         RuntimeProviderOptionDTO(
             id: id,
             name: id.capitalized,
             description: "",
             adapter: "openai_compatible",
+            exposureTier: tier,
             defaultBaseURL: "https://example.com/v1",
             defaultModel: "model",
             requiresApiKey: true,
             supportsModelListing: true,
             status: status,
-            isAdvanced: id == "custom"
+            isAdvanced: id == "custom" || tier == "advanced"
         )
     }
 

@@ -158,7 +158,10 @@ struct ModelProviderSettingsView: View {
     }
 
     private var apiKeyPlaceholder: String {
-        if let preview = selectedProvider?.apiKeyPreview ?? settings?.apiKeyPreview {
+        // Only reflect the *selected* provider's saved key. A provider with no
+        // configured key shows an empty "API Key" placeholder — never the
+        // previously-active provider's masked key.
+        if let preview = selectedProvider?.apiKeyPreview {
             return "•••••••••••• \(preview)"
         }
         return "API Key"
@@ -355,7 +358,10 @@ struct WebSearchSettingsView: View {
     }
 
     private var apiKeyPlaceholder: String {
-        if let preview = selectedProvider?.apiKeyPreview ?? settings?.apiKeyPreview {
+        // Only reflect the *selected* provider's saved key. A provider with no
+        // configured key shows an empty "API Key" placeholder — never the
+        // previously-active provider's masked key.
+        if let preview = selectedProvider?.apiKeyPreview {
             return "•••••••••••• \(preview)"
         }
         return "API Key"

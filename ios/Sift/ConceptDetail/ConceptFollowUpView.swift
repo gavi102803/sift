@@ -73,7 +73,9 @@ struct ConceptFollowUpView: View {
 
 }
 
-/// Explicit "Sift is writing the first card" state — clearly a loading state.
+/// Pre-stream loading state. Renders identically to an empty streaming
+/// assistant turn — the "Sift" header plus the blue caret — so the first-card
+/// wait looks the same as a follow-up answer arriving, not a distinct card.
 private struct GeneratingAnswerRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -84,14 +86,8 @@ private struct GeneratingAnswerRow: View {
                     .font(SiftFont.sans(13, .semibold))
                     .foregroundStyle(SiftColor.textPrimary)
             }
-            HStack(alignment: .bottom, spacing: 0) {
-                Text("Writing the first card…")
-                    .font(SiftFont.body)
-                    .foregroundStyle(SiftColor.textMuted)
-                StreamingCaret()
-                    .padding(.leading, 2)
-                    .padding(.bottom, 3)
-            }
+            StreamingCaret()
+                .padding(.bottom, 3)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)

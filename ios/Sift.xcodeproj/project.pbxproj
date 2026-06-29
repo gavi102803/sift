@@ -41,11 +41,13 @@
 		100000000000000000000127 /* ProfilePreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000027 /* ProfilePreviews.swift */; };
 		100000000000000000000128 /* CompanionStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000028 /* CompanionStatus.swift */; };
 		100000000000000000000129 /* LibraryCategoryOwnership.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000029 /* LibraryCategoryOwnership.swift */; };
+		10000000000000000000012A /* MarkdownText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000002A /* MarkdownText.swift */; };
 		200000000000000000000101 /* ConceptLocalStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000001 /* ConceptLocalStoreTests.swift */; };
 		200000000000000000000102 /* ProductLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000002 /* ProductLogicTests.swift */; };
 		200000000000000000000103 /* LibraryCategoryOwnershipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000003 /* LibraryCategoryOwnershipTests.swift */; };
 		200000000000000000000104 /* LibraryCategoryIntegrityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000004 /* LibraryCategoryIntegrityTests.swift */; };
 		300000000000000000000101 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 300000000000000000000001 /* Assets.xcassets */; };
+		1000000000000000000001A1 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 1000000000000000000000B1 /* MarkdownUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -93,6 +95,7 @@
 		100000000000000000000027 /* ProfilePreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Profile/ProfilePreviews.swift; sourceTree = "<group>"; };
 		100000000000000000000028 /* CompanionStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/CompanionStatus.swift; sourceTree = "<group>"; };
 		100000000000000000000029 /* LibraryCategoryOwnership.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence/LibraryCategoryOwnership.swift; sourceTree = "<group>"; };
+		10000000000000000000002A /* MarkdownText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConceptDetail/MarkdownText.swift; sourceTree = "<group>"; };
 		200000000000000000000002 /* ProductLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductLogicTests.swift; sourceTree = "<group>"; };
 		200000000000000000000003 /* LibraryCategoryOwnershipTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryCategoryOwnershipTests.swift; sourceTree = "<group>"; };
 		200000000000000000000004 /* LibraryCategoryIntegrityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryCategoryIntegrityTests.swift; sourceTree = "<group>"; };
@@ -107,6 +110,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1000000000000000000001A1 /* MarkdownUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -152,6 +156,7 @@
 				100000000000000000000014 /* ConceptSearchIndex.swift */,
 				100000000000000000000009 /* ConceptLocalStore.swift */,
 				100000000000000000000029 /* LibraryCategoryOwnership.swift */,
+				10000000000000000000002A /* MarkdownText.swift */,
 				100000000000000000000015 /* ConceptStatusRules.swift */,
 				10000000000000000000000A /* AuditModels.swift */,
 				10000000000000000000000B /* ConceptModels.swift */,
@@ -207,6 +212,9 @@
 			dependencies = (
 			);
 			name = Sift;
+			packageProductDependencies = (
+				1000000000000000000000B1 /* MarkdownUI */,
+			);
 			productName = Sift;
 			productReference = 100000000000000000000201 /* Sift.app */;
 			productType = "com.apple.product-type.application";
@@ -260,12 +268,34 @@
 			productRefGroup = 100000000000000000000403 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
+			packageReferences = (
+				1000000000000000000000A1 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
+			);
 			targets = (
 				100000000000000000000501 /* Sift */,
 				200000000000000000000501 /* SiftTests */,
 			);
 		};
 /* End PBXProject section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		1000000000000000000000A1 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1000000000000000000000B1 /* MarkdownUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1000000000000000000000A1 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
+			productName = MarkdownUI;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin PBXResourcesBuildPhase section */
 		100000000000000000000302 /* Resources */ = {
@@ -313,6 +343,7 @@
 				100000000000000000000114 /* ConceptSearchIndex.swift in Sources */,
 				100000000000000000000109 /* ConceptLocalStore.swift in Sources */,
 				100000000000000000000129 /* LibraryCategoryOwnership.swift in Sources */,
+				10000000000000000000012A /* MarkdownText.swift in Sources */,
 				100000000000000000000115 /* ConceptStatusRules.swift in Sources */,
 				10000000000000000000010A /* AuditModels.swift in Sources */,
 				10000000000000000000010B /* ConceptModels.swift in Sources */,

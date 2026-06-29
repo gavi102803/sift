@@ -651,10 +651,16 @@ struct DeveloperToolsView: View {
     @State private var errorMessage: String?
     @State private var isTestingModel = false
     @State private var isTestingWeb = false
+    @State private var backendURLDraft = ""
+    @State private var backendURLError: String?
+    @State private var isTestingConnection = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
+                if BackendEndpointResolver.allowsPersonalOverride {
+                    backendURLSection
+                }
                 companionSection
                 diagnosticsSection
                 environmentSection
@@ -670,8 +676,68 @@ struct DeveloperToolsView: View {
         .navigationTitle("Developer")
         .navigationBarTitleDisplayMode(.inline)
         .task {
+            loadBackendURLDraft()
             await companion?.refresh(using: appServices)
             await refresh()
+        }
+    }
+
+    // MARK: Personal backend (Tailnet dogfood)
+
+    /// Debug/Personal-only editor for the backend URL. Lets the device point at a
+    /// Mac running the backend over Tailscale. Hidden on Release/Managed builds.
+    private var backendURLSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SiftEyebrow(text: "Personal backend")
+            SiftGroupedCard {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("BACKEND URL")
+                        .font(SiftFont.fieldLabel)
+                        .tracking(0.5)
+                        .foregroundStyle(SiftColor.textFaintest)
+                    TextField(
+                        "",
+                        text: $backendURLDraft,
+                        prompt: Text("https://your-mac.tailnet.ts.net").foregroundColor(SiftColor.textFaint)
+                    )
+                    .textFieldStyle(.plain)
+                    .font(SiftFont.mono(13))
+                    .foregroundStyle(SiftColor.textSecondary)
+                    .tint(SiftColor.accent)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 13)
+                SiftGroupDivider()
+                infoRow("Status", value: (companion?.status ?? .unknown).developerLabel)
+            }
+
+            if let backendURLError {
+                Text(backendURLError)
+                    .font(SiftFont.cardDesc)
+                    .foregroundStyle(SiftColor.danger)
+                    .padding(.horizontal, 4)
+            }
+
+            HStack(spacing: 10) {
+                SiftButton(title: "Save", systemImage: "checkmark", kind: .primary, height: 44) {
+                    saveBackendURL()
+                }
+                SiftButton(title: "Test", systemImage: "bolt.horizontal", kind: .secondary, height: 44, isLoading: isTestingConnection) {
+                    Task { await testConnection() }
+                }
+                SiftButton(title: "Reset", systemImage: "arrow.uturn.backward", kind: .secondary, height: 44) {
+                    resetBackendURL()
+                }
+            }
+
+            Text("Point Sift at your Mac running the backend, reachable over Tailscale. Personal builds only.")
+                .font(SiftFont.cardDesc)
+                .foregroundStyle(SiftColor.textMuted)
+                .padding(.horizontal, 4)
         }
     }
 
@@ -791,6 +857,40 @@ struct DeveloperToolsView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    // MARK: Personal backend actions
+
+    private func loadBackendURLDraft() {
+        backendURLDraft = PersonalBackendURLStore.savedURL()?.absoluteString
+            ?? BackendEndpointResolver.current().absoluteString
+    }
+
+    private func saveBackendURL() {
+        switch BackendURLValidation.validate(backendURLDraft) {
+        case .valid(let url):
+            PersonalBackendURLStore.save(url)
+            backendURLDraft = url.absoluteString
+            backendURLError = nil
+            // Re-check reachability + reload status against the new endpoint.
+            Task { await testConnection() }
+        case .invalid(let message):
+            backendURLError = message
+        }
+    }
+
+    private func resetBackendURL() {
+        PersonalBackendURLStore.reset()
+        backendURLDraft = BackendEndpointResolver.defaultURL.absoluteString
+        backendURLError = nil
+        Task { await testConnection() }
+    }
+
+    private func testConnection() async {
+        isTestingConnection = true
+        await companion?.refresh(using: appServices)   // same resolver every request uses
+        await refresh()
+        isTestingConnection = false
     }
 
     private func runModelDiagnostic() async {

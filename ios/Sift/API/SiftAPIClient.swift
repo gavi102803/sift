@@ -118,40 +118,33 @@ extension SiftAPIClient {
 }
 
 enum SiftAPIClientFactory {
+    /// The live client resolves its base URL per request via
+    /// `BackendEndpointResolver`, so a saved Personal URL applies immediately.
+    /// Mock is intentionally **not** a silent fallback here — it is only used for
+    /// previews/tests via `AppServices.preview`, so a real backend being down is
+    /// reported as "unavailable", never disguised as mock data.
     static func makeDefault() -> any SiftAPIClient {
-        if let baseURL = configuredBackendBaseURL() {
-            return HTTPSiftAPIClient(baseURL: baseURL)
-        }
-        #if DEBUG
-        if let localhostURL = URL(string: "http://127.0.0.1:8000") {
-            return HTTPSiftAPIClient(baseURL: localhostURL)
-        }
-        #endif
-        return MockSiftAPIClient()
-    }
-
-    private static func configuredBackendBaseURL() -> URL? {
-        if let value = ProcessInfo.processInfo.environment["SIFT_BACKEND_BASE_URL"],
-           let url = URL(string: value),
-           !value.isEmpty {
-            return url
-        }
-
-        if let value = Bundle.main.object(forInfoDictionaryKey: "SIFTBackendBaseURL") as? String,
-           let url = URL(string: value),
-           !value.isEmpty {
-            return url
-        }
-
-        return nil
+        HTTPSiftAPIClient()
     }
 }
 
 struct HTTPSiftAPIClient: SiftAPIClient {
-    var baseURL: URL
+    /// When non-nil the base URL is fixed (tests / explicit callers). When nil it
+    /// is resolved per request from `BackendEndpointResolver`, so a freshly-saved
+    /// Personal backend URL takes effect immediately without an app restart.
+    private let fixedBaseURL: URL?
     var urlSession: URLSession = .shared
     var jsonDecoder: JSONDecoder = JSONDecoder()
     var jsonEncoder: JSONEncoder = JSONEncoder()
+
+    init(baseURL: URL? = nil, urlSession: URLSession = .shared) {
+        self.fixedBaseURL = baseURL
+        self.urlSession = urlSession
+    }
+
+    var baseURL: URL {
+        fixedBaseURL ?? BackendEndpointResolver.current()
+    }
 
     var backendDescription: String {
         baseURL.absoluteString

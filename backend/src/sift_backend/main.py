@@ -1,13 +1,24 @@
 from dataclasses import replace
+from datetime import timedelta
 
 from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy.orm import Session, sessionmaker
 
 from sift_backend.api.concepts import build_concept_service
 from sift_backend.api.concepts import router as concepts_router
+from sift_backend.auth.principal import DevelopmentPrincipalProvider
 from sift_backend.concepts.service import ConceptService
 from sift_backend.config import Settings, load_settings, write_provider_settings
+from sift_backend.identity_access.api import router as beta_router
+from sift_backend.identity_access.persistence import SqlAlchemyBetaAuthRepository
+from sift_backend.identity_access.service import BetaAuthError, BetaAuthService
+from sift_backend.persistence.database import create_session_factory
 from sift_backend.runtime.capability_probe import probe_model_capabilities
+from sift_backend.runtime.managed_api import ManagedProviderError
+from sift_backend.runtime.managed_api import router as managed_runtime_router
+from sift_backend.runtime.managed_connections import ManagedProviderConnectionRepository
 from sift_backend.runtime.providers import (
     build_model_provider_registry,
     build_runtime_model_provider,
@@ -41,6 +52,7 @@ class HealthResponse(BaseModel):
 def create_app(
     settings: Settings | None = None,
     concept_service: ConceptService | None = None,
+    session_factory: sessionmaker[Session] | None = None,
 ) -> FastAPI:
     resolved_settings = settings or load_settings()
     app = FastAPI(
@@ -50,6 +62,75 @@ def create_app(
     )
     app.state.settings = resolved_settings
     app.state.concept_service = concept_service or build_concept_service(resolved_settings)
+    database_sessions = session_factory or create_session_factory(
+        resolved_settings.database_url,
+        initialize_schema=resolved_settings.env != "production",
+    )
+    beta_repository = SqlAlchemyBetaAuthRepository(database_sessions)
+    beta_auth_service = BetaAuthService(
+        beta_repository,
+        token_ttl=timedelta(days=resolved_settings.beta_token_ttl_days),
+    )
+    beta_auth_service.seed_invites(resolved_settings.beta_invite_codes)
+    app.state.beta_auth_service = beta_auth_service
+    app.state.managed_provider_connections = ManagedProviderConnectionRepository(
+        database_sessions
+    )
+
+    @app.exception_handler(BetaAuthError)
+    async def beta_auth_error_handler(request: Request, error: BetaAuthError) -> JSONResponse:
+        return _auth_error_response(
+            error,
+            getattr(request.state, "request_id", _new_request_id()),
+        )
+
+    @app.exception_handler(ManagedProviderError)
+    async def managed_provider_error_handler(
+        request: Request,
+        error: ManagedProviderError,
+    ) -> JSONResponse:
+        return _public_error_response(
+            error.code,
+            error.message,
+            error.status_code,
+            getattr(request.state, "request_id", _new_request_id()),
+        )
+
+    @app.exception_handler(HTTPException)
+    async def http_error_handler(request: Request, error: HTTPException) -> JSONResponse:
+        if resolved_settings.auth_mode != "managed":
+            return JSONResponse(
+                status_code=error.status_code,
+                content={"detail": error.detail},
+                headers=error.headers,
+            )
+        code, message = _managed_http_error(error)
+        return _public_error_response(
+            code,
+            message,
+            error.status_code,
+            getattr(request.state, "request_id", _new_request_id()),
+        )
+
+    @app.middleware("http")
+    async def authenticate_request(request: Request, call_next):
+        request_id = request.headers.get("X-Request-ID") or _new_request_id()
+        request.state.request_id = request_id
+        if resolved_settings.auth_mode == "development":
+            request.state.principal = DevelopmentPrincipalProvider(
+                resolved_settings.user_id
+            ).current_principal()
+        elif request.url.path not in {"/health", "/v1/beta/activate"}:
+            try:
+                request.state.principal = beta_auth_service.authenticate(
+                    _bearer_token(request),
+                    request.headers.get("X-Sift-Installation", ""),
+                )
+            except BetaAuthError as error:
+                return _auth_error_response(error, request_id)
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
 
     @app.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
@@ -58,18 +139,21 @@ def create_app(
     @app.get("/v1/app-status", response_model=AppStatusResponse, response_model_by_alias=True)
     async def app_status() -> AppStatusResponse:
         settings = _settings(app)
+        managed = settings.auth_mode == "managed"
         return AppStatusResponse(
             env=settings.env,
-            modelProvider=_runtime_provider(settings),
-            explainModel=resolve_runtime_model(settings.runtime_provider, settings.runtime_model),
+            modelProvider="managed-byok" if managed else _runtime_provider(settings),
+            explainModel="per-owner" if managed else resolve_runtime_model(
+                settings.runtime_provider, settings.runtime_model
+            ),
             webSearchEnabled=_effective_web_search_enabled(settings),
-            databaseURL=_redacted_database_url(settings.database_url),
-            providerBaseURL=resolve_runtime_base_url(
+            databaseURL="managed" if managed else _redacted_database_url(settings.database_url),
+            providerBaseURL=None if managed else resolve_runtime_base_url(
                 settings.runtime_provider,
                 settings.runtime_base_url,
             ),
-            apiKeyConfigured=settings.runtime_api_key != "",
-            apiKeyPreview=_api_key_preview(settings.runtime_api_key),
+            apiKeyConfigured=False if managed else settings.runtime_api_key != "",
+            apiKeyPreview=None if managed else _api_key_preview(settings.runtime_api_key),
         )
 
     @app.get(
@@ -78,7 +162,9 @@ def create_app(
         response_model_by_alias=True,
     )
     async def get_model_provider_settings() -> ModelProviderSettingsResponse:
-        return _provider_settings_response(_settings(app))
+        settings = _settings(app)
+        _require_personal_settings(settings)
+        return _provider_settings_response(settings)
 
     @app.get(
         "/v1/runtime/model-providers",
@@ -87,6 +173,7 @@ def create_app(
     )
     async def list_runtime_model_providers() -> RuntimeProviderCatalogResponse:
         settings = _settings(app)
+        managed = settings.auth_mode == "managed"
         return RuntimeProviderCatalogResponse(
             providers=[
                 RuntimeProviderOptionDTO(
@@ -104,17 +191,17 @@ def create_app(
                     supportsModelListing=profile.supports_model_listing,
                     status=profile.status,
                     isAdvanced=profile.is_advanced,
-                    configuredBaseURL=settings.runtime_provider_settings.get(
+                    configuredBaseURL=None if managed else settings.runtime_provider_settings.get(
                         profile.name, {}
                     ).get("base_url"),
-                    configuredModel=settings.runtime_provider_settings.get(
+                    configuredModel=None if managed else settings.runtime_provider_settings.get(
                         profile.name, {}
                     ).get("model"),
-                    apiKeyConfigured=(
+                    apiKeyConfigured=False if managed else (
                         settings.runtime_provider_settings.get(profile.name, {}).get("api_key", "")
                         != ""
                     ),
-                    apiKeyPreview=_api_key_preview(
+                    apiKeyPreview=None if managed else _api_key_preview(
                         settings.runtime_provider_settings.get(profile.name, {}).get("api_key", "")
                     ),
                 )
@@ -130,6 +217,7 @@ def create_app(
     )
     async def list_runtime_web_providers() -> WebProviderCatalogResponse:
         settings = _settings(app)
+        managed = settings.auth_mode == "managed"
         return WebProviderCatalogResponse(
             providers=[
                 WebProviderOptionDTO(
@@ -141,14 +229,14 @@ def create_app(
                     supportsExtract=profile.supports_extract,
                     status=profile.status,
                     isDefault=profile.is_default,
-                    apiKeyConfigured=(
+                    apiKeyConfigured=False if managed else (
                         settings.web_provider_settings.get(profile.name, {}).get(
                             "api_key",
                             "",
                         )
                         != ""
                     ),
-                    apiKeyPreview=_api_key_preview(
+                    apiKeyPreview=None if managed else _api_key_preview(
                         settings.web_provider_settings.get(profile.name, {}).get("api_key", "")
                     ),
                 )
@@ -166,6 +254,7 @@ def create_app(
         payload: UpdateModelProviderSettingsRequest,
     ) -> ModelProviderSettingsResponse:
         current = _settings(request.app)
+        _require_personal_settings(current)
         try:
             provider_type = _normalize_runtime_provider(payload.provider_type)
         except SiftRuntimeError as error:
@@ -221,7 +310,9 @@ def create_app(
         response_model_by_alias=True,
     )
     async def get_web_provider_settings() -> WebProviderSettingsResponse:
-        return _web_provider_settings_response(_settings(app))
+        settings = _settings(app)
+        _require_personal_settings(settings)
+        return _web_provider_settings_response(settings)
 
     @app.put(
         "/v1/web-provider-settings",
@@ -233,6 +324,7 @@ def create_app(
         payload: UpdateWebProviderSettingsRequest,
     ) -> WebProviderSettingsResponse:
         current = _settings(request.app)
+        _require_personal_settings(current)
         provider_type = payload.provider_type.strip().lower()
         known_provider_names = {profile.name for profile in web_provider_profiles()}
         if provider_type not in known_provider_names:
@@ -278,6 +370,7 @@ def create_app(
     )
     async def list_provider_models(request: Request) -> ProviderModelListResponse:
         settings = _settings(request.app)
+        _require_personal_settings(settings)
         if not settings.runtime_api_key or settings.runtime_provider == "mock":
             return ProviderModelListResponse(models=[])
         provider = build_runtime_model_provider(
@@ -315,7 +408,9 @@ def create_app(
         response_model_exclude_none=True,
     )
     async def model_diagnostic() -> ModelDiagnosticResponse:
-        return await _run_model_diagnostic(_settings(app))
+        settings = _settings(app)
+        _require_personal_settings(settings)
+        return await _run_model_diagnostic(settings)
 
     @app.post(
         "/v1/web-search-diagnostic",
@@ -324,8 +419,12 @@ def create_app(
         response_model_exclude_none=True,
     )
     async def web_search_diagnostic() -> ModelDiagnosticResponse:
-        return await _run_web_search_diagnostic(_settings(app))
+        settings = _settings(app)
+        _require_personal_settings(settings)
+        return await _run_web_search_diagnostic(settings)
 
+    app.include_router(beta_router)
+    app.include_router(managed_runtime_router)
     app.include_router(concepts_router)
 
     return app
@@ -342,6 +441,65 @@ def _runtime_provider(settings: Settings) -> str:
 
 def _settings(app: FastAPI) -> Settings:
     return app.state.settings
+
+
+def _require_personal_settings(settings: Settings) -> None:
+    if settings.auth_mode == "managed":
+        raise ManagedProviderError(
+            "managed_unsupported",
+            "This endpoint is not available in the managed beta.",
+            status.HTTP_404_NOT_FOUND,
+        )
+
+
+def _bearer_token(request: Request) -> str:
+    authorization = request.headers.get("Authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    return token if scheme.lower() == "bearer" else ""
+
+
+def _auth_error_response(error: BetaAuthError, request_id: str) -> JSONResponse:
+    return _public_error_response(error.code, error.message, error.status_code, request_id)
+
+
+def _public_error_response(
+    code: str,
+    message: str,
+    status_code: int,
+    request_id: str,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": {
+                "code": code,
+                "message": message,
+                "requestId": request_id,
+            }
+        },
+        headers={"X-Request-ID": request_id},
+    )
+
+
+def _managed_http_error(error: HTTPException) -> tuple[str, str]:
+    detail_code = error.detail.get("code") if isinstance(error.detail, dict) else None
+    if error.status_code == status.HTTP_404_NOT_FOUND:
+        return "owner_scope_not_found", "Resource not found."
+    if error.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
+        if detail_code in {"provider_error", "provider_timeout"}:
+            return "provider_unreachable", "The AI provider could not be reached."
+        return "backend_unavailable", "Sift is temporarily unavailable."
+    if error.status_code == status.HTTP_409_CONFLICT:
+        return detail_code or "request_conflict", "The request conflicts with current state."
+    if error.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY:
+        return detail_code or "invalid_request", "The request is invalid."
+    return detail_code or "request_rejected", "The request was rejected."
+
+
+def _new_request_id() -> str:
+    from uuid import uuid4
+
+    return str(uuid4())
 
 
 def _effective_web_search_enabled(settings: Settings) -> bool:

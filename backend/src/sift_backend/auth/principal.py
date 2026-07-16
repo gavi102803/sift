@@ -6,6 +6,7 @@ class CurrentPrincipal:
     user_id: str
     auth_method: str
     is_development_fallback: bool = False
+    installation_id: str | None = None
 
 
 class DevelopmentPrincipalProvider:

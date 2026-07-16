@@ -1,6 +1,7 @@
 # Managed BYOK Closed Beta — Client ↔ Backend Contract
 
-**Status: RATIFIED for Phase 1 implementation planning. Not implemented yet.**
+**Status: IMPLEMENTED for internal beta validation. Production hosting and real-device release
+evidence remain release gates.**
 This document defines the client/backend contract for the hosted beta path.
 It is separate from Phase 0 Personal Tailnet Dogfood.
 

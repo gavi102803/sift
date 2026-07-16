@@ -4,7 +4,9 @@ from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 from sift_backend.config import load_settings
+from sift_backend.identity_access import persistence as _identity_persistence  # noqa: F401
 from sift_backend.persistence.models import Base
+from sift_backend.runtime import managed_connections as _managed_connections  # noqa: F401
 
 config = context.config
 
@@ -47,4 +49,3 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     run_migrations_online()
-

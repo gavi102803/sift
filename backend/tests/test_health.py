@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from sift_backend.concepts.service import ConceptService
 from sift_backend.config import Settings
 from sift_backend.main import _filter_runtime_models, create_app
+from sift_backend.persistence.database import create_session_factory
 
 
 def test_health_returns_ok() -> None:
@@ -51,6 +52,7 @@ def test_app_status_reports_configured_runtime() -> None:
                 database_url="postgresql://user:password@localhost:5432/sift",
             ),
             concept_service=ConceptService(),
+            session_factory=create_session_factory("sqlite:///:memory:"),
         )
     )
 

@@ -4,17 +4,25 @@ from typing import Any
 from sqlalchemy import Engine, create_engine, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
+# Register identity tables on the shared metadata before create_all is used in local/test mode.
+from sift_backend.identity_access import persistence as _identity_persistence  # noqa: F401, E402
 from sift_backend.persistence.models import Base
+from sift_backend.runtime import managed_connections as _managed_connections  # noqa: F401, E402
 
 
-def create_session_factory(database_url: str) -> sessionmaker[Session]:
+def create_session_factory(
+    database_url: str,
+    *,
+    initialize_schema: bool = True,
+) -> sessionmaker[Session]:
     connect_args: dict[str, Any] = {}
     if database_url.startswith("sqlite"):
         connect_args["check_same_thread"] = False
         _ensure_sqlite_parent_dir(database_url)
 
     engine = create_engine(database_url, connect_args=connect_args)
-    initialize_database(engine)
+    if initialize_schema:
+        initialize_database(engine)
     return sessionmaker(bind=engine, expire_on_commit=False)
 
 

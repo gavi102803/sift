@@ -1,6 +1,31 @@
 import json
 
-from sift_backend.config import Settings, load_settings, write_provider_settings
+from sift_backend.config import (
+    Settings,
+    load_settings,
+    managed_deployment_errors,
+    write_provider_settings,
+)
+
+
+def test_managed_deployment_validation_accepts_production_postgres() -> None:
+    settings = Settings(
+        env="production",
+        auth_mode="managed",
+        database_url="postgresql+psycopg://sift:secret@db/sift",
+        beta_invite_codes=("invite-1",),
+    )
+
+    assert managed_deployment_errors(settings) == []
+
+
+def test_managed_deployment_validation_rejects_personal_defaults() -> None:
+    errors = managed_deployment_errors(Settings())
+
+    assert "SIFT_ENV must be production" in errors
+    assert "SIFT_AUTH_MODE must be managed" in errors
+    assert "SIFT_DATABASE_URL must use PostgreSQL with the psycopg driver" in errors
+    assert "SIFT_BETA_INVITE_CODES must contain at least one invite" in errors
 
 
 def test_load_settings_reads_only_infrastructure_from_env_file(tmp_path, monkeypatch) -> None:

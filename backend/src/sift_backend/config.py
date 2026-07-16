@@ -14,6 +14,7 @@ from sift_backend.credential_store import (
 @dataclass(frozen=True)
 class Settings:
     env: str = "development"
+    auth_mode: str = "development"
     user_id: str = "local-dev"
     log_level: str = "INFO"
     database_url: str = "sqlite:///./.data/sift.db"
@@ -26,6 +27,23 @@ class Settings:
     web_search_api_key: str = ""
     runtime_provider_settings: dict[str, dict[str, str]] = field(default_factory=dict)
     web_provider_settings: dict[str, dict[str, str]] = field(default_factory=dict)
+    beta_invite_codes: tuple[str, ...] = ()
+    beta_token_ttl_days: int = 30
+
+
+def managed_deployment_errors(settings: Settings) -> list[str]:
+    errors: list[str] = []
+    if settings.env != "production":
+        errors.append("SIFT_ENV must be production")
+    if settings.auth_mode != "managed":
+        errors.append("SIFT_AUTH_MODE must be managed")
+    if not settings.database_url.startswith("postgresql+psycopg://"):
+        errors.append("SIFT_DATABASE_URL must use PostgreSQL with the psycopg driver")
+    if not settings.beta_invite_codes:
+        errors.append("SIFT_BETA_INVITE_CODES must contain at least one invite")
+    if not 1 <= settings.beta_token_ttl_days <= 90:
+        errors.append("SIFT_BETA_TOKEN_TTL_DAYS must be between 1 and 90")
+    return errors
 
 
 def load_settings(env_file: str | Path | None = None) -> Settings:
@@ -77,6 +95,7 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
     web_selected = web_provider_settings.get(web_search_provider, {})
     return Settings(
         env=_env_value("SIFT_ENV", Settings.env, env),
+        auth_mode=_env_value("SIFT_AUTH_MODE", Settings.auth_mode, env).strip().lower(),
         user_id=_env_value("SIFT_USER_ID", Settings.user_id, env),
         log_level=_env_value("SIFT_LOG_LEVEL", Settings.log_level, env),
         database_url=_env_value("SIFT_DATABASE_URL", Settings.database_url, env),
@@ -96,6 +115,14 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
         web_search_api_key=web_selected.get("api_key", web_search_api_key),
         runtime_provider_settings=runtime_provider_settings,
         web_provider_settings=web_provider_settings,
+        beta_invite_codes=tuple(
+            code.strip()
+            for code in _env_value("SIFT_BETA_INVITE_CODES", "", env).split(",")
+            if code.strip()
+        ),
+        beta_token_ttl_days=int(
+            _env_value("SIFT_BETA_TOKEN_TTL_DAYS", str(Settings.beta_token_ttl_days), env)
+        ),
     )
 
 

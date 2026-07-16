@@ -4,6 +4,60 @@ import XCTest
 
 final class ProductLogicTests: XCTestCase {
 
+    func testCitationMarkupReplacesRetrievalPositionsWithSourceTitles() {
+        let citations = [
+            CitationDTO(
+                sourceId: "src_003",
+                title: "Agent Client Protocol",
+                url: "https://example.com/acp"
+            ),
+            CitationDTO(
+                sourceId: "src_005",
+                title: "ACP Documentation",
+                url: "https://example.com/docs"
+            )
+        ]
+
+        let blocks = CitationMarkup.blocks(
+            in: "ACP standardizes agent communication [3][5].",
+            citations: citations
+        )
+
+        XCTAssertEqual(blocks.count, 1)
+        XCTAssertEqual(blocks[0].text, "ACP standardizes agent communication.")
+        XCTAssertEqual(blocks[0].citations.map(\.title), ["Agent Client Protocol", "ACP Documentation"])
+    }
+
+    func testCitationMarkupRemovesUnknownNumericReferences() {
+        let citation = CitationDTO(
+            sourceId: "src_003",
+            title: "Agent Client Protocol",
+            url: "https://example.com/acp"
+        )
+
+        let blocks = CitationMarkup.blocks(in: "Known [3], stale [9].", citations: [citation])
+
+        XCTAssertEqual(blocks[0].text, "Known, stale.")
+        XCTAssertEqual(blocks[0].citations.map(\.title), ["Agent Client Protocol"])
+    }
+
+    func testCitationMarkupRemovesBareMarkersWithoutCitationMetadata() {
+        let blocks = CitationMarkup.blocks(
+            in: "ACP is an agent protocol [3].",
+            citations: []
+        )
+
+        XCTAssertEqual(blocks[0].text, "ACP is an agent protocol.")
+        XCTAssertTrue(blocks[0].citations.isEmpty)
+    }
+
+    func testPersistedCardCopyRemovesMarkersWithoutRenderingSources() {
+        XCTAssertEqual(
+            CitationMarkup.removingMarkers(from: "ACP is standardized [3][5]."),
+            "ACP is standardized."
+        )
+    }
+
     // MARK: Proposal copy safety
 
     func testCleanRationaleIsShownVerbatim() {
@@ -168,6 +222,15 @@ final class ProductLogicTests: XCTestCase {
         ]
         let display = ConversationTimeline.displayTurns(localInitial: local, remote: remote)
         XCTAssertTrue(display.contains { $0.role == "user" && $0.content == "What is a semantic cache?" })
+    }
+
+    func testInitialQueryReplacementRequiresARevisionAdvance() {
+        XCTAssertFalse(
+            InitialQueryReplacement.isApplied(previousRevision: 4, responseRevision: 4)
+        )
+        XCTAssertTrue(
+            InitialQueryReplacement.isApplied(previousRevision: 4, responseRevision: 5)
+        )
     }
 
     /// Defensive: if remote lacks the original question, the whole local pair is

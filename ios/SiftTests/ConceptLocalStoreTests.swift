@@ -357,6 +357,121 @@ final class ConceptLocalStoreTests: XCTestCase {
         XCTAssertFalse(ConceptSearchIndex.matches(query: "spaced repetition", concept: concept, tags: [], topics: []))
     }
 
+    func testSameRevisionEmptyRefreshDoesNotEraseCompletedCardBlocks() throws {
+        let context = try makeModelContext()
+        let store = ConceptLocalStore(modelContext: context)
+        let conceptId = UUID()
+        let blockId = UUID()
+
+        _ = try store.upsertConcept(from: ConceptDTO(
+            id: conceptId,
+            canonicalTitle: "Agent runtime",
+            displayTitle: "Agent runtime",
+            oneLineExplanation: "Runs an agent.",
+            maturity: ConceptMaturity.initial.rawValue,
+            captureStatus: CaptureStatus.ready.rawValue,
+            noteRevision: 3,
+            blocks: [
+                NoteBlockDTO(
+                    id: blockId,
+                    blockType: NoteBlockType.whatItIs.rawValue,
+                    content: "Durable knowledge content.",
+                    source: NoteBlockSource.ai.rawValue,
+                    isUserLocked: false
+                )
+            ]
+        ))
+
+        let refreshed = try store.upsertConcept(from: ConceptDTO(
+            id: conceptId,
+            canonicalTitle: "Agent runtime",
+            displayTitle: "Agent runtime",
+            oneLineExplanation: "Runs an agent.",
+            maturity: ConceptMaturity.initial.rawValue,
+            captureStatus: CaptureStatus.ready.rawValue,
+            noteRevision: 3,
+            blocks: []
+        ))
+
+        XCTAssertEqual(refreshed.note?.blocks.map(\.id), [blockId])
+        XCTAssertEqual(refreshed.note?.blocks.first?.content, "Durable knowledge content.")
+    }
+
+    func testRepeatedBlockUpsertReconcilesExistingObjectInsteadOfDeletingIt() throws {
+        let context = try makeModelContext()
+        let store = ConceptLocalStore(modelContext: context)
+        let conceptId = UUID()
+        let blockId = UUID()
+        let original = try store.upsertConcept(from: conceptDTO(
+            id: conceptId,
+            revision: 1,
+            blockId: blockId,
+            content: "Original content"
+        ))
+        let originalBlock = try XCTUnwrap(original.note?.blocks.first)
+
+        let refreshed = try store.upsertConcept(from: conceptDTO(
+            id: conceptId,
+            revision: 2,
+            blockId: blockId,
+            content: "Refreshed content"
+        ))
+        try context.save()
+
+        XCTAssertTrue(originalBlock === refreshed.note?.blocks.first)
+        XCTAssertEqual(refreshed.note?.blocks.first?.content, "Refreshed content")
+        XCTAssertEqual(try context.fetch(FetchDescriptor<NoteBlock>()).count, 1)
+    }
+
+    func testReplacingInitialExchangeRemovesOldLocalPair() throws {
+        let context = try makeModelContext()
+        let store = ConceptLocalStore(modelContext: context)
+        let concept = store.createDraft(rawCapture: "Old question")
+        store.recordInitialGenerationAnswer(
+            concept: concept,
+            question: "Old question",
+            answer: "Old answer"
+        )
+
+        store.replaceInitialExchange(
+            concept: concept,
+            question: "New question",
+            answer: "New answer"
+        )
+        try context.save()
+
+        XCTAssertEqual(
+            store.localConversationTurns(for: concept).map(\.content),
+            ["New question", "New answer"]
+        )
+    }
+
+    private func conceptDTO(
+        id: UUID,
+        revision: Int,
+        blockId: UUID,
+        content: String
+    ) -> ConceptDTO {
+        ConceptDTO(
+            id: id,
+            canonicalTitle: "Agent runtime",
+            displayTitle: "Agent runtime",
+            oneLineExplanation: "Runs an agent.",
+            maturity: ConceptMaturity.initial.rawValue,
+            captureStatus: CaptureStatus.ready.rawValue,
+            noteRevision: revision,
+            blocks: [
+                NoteBlockDTO(
+                    id: blockId,
+                    blockType: NoteBlockType.whatItIs.rawValue,
+                    content: content,
+                    source: NoteBlockSource.ai.rawValue,
+                    isUserLocked: false
+                )
+            ]
+        )
+    }
+
     private func makeModelContext() throws -> ModelContext {
         let schema = Schema([
             Concept.self,
@@ -504,6 +619,171 @@ final class SiftAPIClientIdempotencyTests: XCTestCase {
     private func encoded<T: Encodable>(_ value: T) -> Data {
         try! JSONEncoder().encode(value)
     }
+}
+
+final class ManagedBetaClientTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        URLProtocolRequestRecorder.reset()
+    }
+
+    func testActivationIsPublicAndPersistsIssuedSession() async throws {
+        let store = InMemoryManagedCredentialStore(installationId: "install-1")
+        URLProtocolRequestRecorder.handler = { _ in
+            HTTPURLProtocolResponse(
+                statusCode: 200,
+                contentType: "application/json",
+                body: self.encoded(
+                    BetaSessionDTO(
+                        betaAccessToken: "beta-token",
+                        ownerId: "owner-1",
+                        expiresAt: Date(timeIntervalSince1970: 2_000_000_000)
+                    )
+                )
+            )
+        }
+
+        try await makeManagedClient(store: store).activateBeta(inviteCode: "invite-1")
+
+        let request = try XCTUnwrap(URLProtocolRequestRecorder.requests().first)
+        XCTAssertEqual(request.url?.path, "/v1/beta/activate")
+        XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+        XCTAssertTrue(
+            String(data: try XCTUnwrap(requestBody(request)), encoding: .utf8)?
+                .contains("install-1") == true
+        )
+        XCTAssertEqual(store.betaSession?.betaAccessToken, "beta-token")
+    }
+
+    func testProviderKeyIsAddedOnlyToRuntimeRequestHeader() async throws {
+        let store = activeStore(providerKey: "provider-secret")
+        URLProtocolRequestRecorder.handler = { request in
+            if request.url?.path == "/v1/provider-connection" {
+                return HTTPURLProtocolResponse(
+                    statusCode: 200,
+                    contentType: "application/json",
+                    body: self.encoded(
+                        ManagedProviderConnectionDTO(
+                            providerId: "openai-compatible",
+                            baseURL: "https://provider.example/v1",
+                            model: "model-1"
+                        )
+                    )
+                )
+            }
+            return HTTPURLProtocolResponse(
+                statusCode: 200,
+                contentType: "application/json",
+                body: self.encoded(ManagedProviderTestDTO(ok: true))
+            )
+        }
+
+        _ = try await makeManagedClient(store: store).runModelDiagnostic()
+
+        let requests = URLProtocolRequestRecorder.requests()
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests[0].value(forHTTPHeaderField: "Authorization"), "Bearer beta-token")
+        XCTAssertEqual(requests[0].value(forHTTPHeaderField: "X-Sift-Installation"), "install-1")
+        XCTAssertNil(requests[0].value(forHTTPHeaderField: "X-Sift-Provider-Key"))
+        XCTAssertEqual(requests[1].value(forHTTPHeaderField: "X-Sift-Provider-Key"), "provider-secret")
+        XCTAssertFalse(
+            String(data: requestBody(requests[1]) ?? Data(), encoding: .utf8)?
+                .contains("provider-secret") == true
+        )
+    }
+
+    func testNearExpirySessionRefreshesBeforeAuthorizedRequest() async throws {
+        let store = InMemoryManagedCredentialStore(
+            installationId: "install-1",
+            betaSession: ManagedBetaSession(
+                betaAccessToken: "old-token",
+                ownerId: "owner-1",
+                expiresAt: Date().addingTimeInterval(24 * 60 * 60)
+            )
+        )
+        URLProtocolRequestRecorder.handler = { request in
+            if request.url?.path == "/v1/beta/session/refresh" {
+                return HTTPURLProtocolResponse(
+                    statusCode: 200,
+                    contentType: "application/json",
+                    body: self.encoded(
+                        BetaSessionDTO(
+                            betaAccessToken: "new-token",
+                            ownerId: "owner-1",
+                            expiresAt: Date().addingTimeInterval(30 * 24 * 60 * 60)
+                        )
+                    )
+                )
+            }
+            return HTTPURLProtocolResponse(
+                statusCode: 200,
+                contentType: "application/json",
+                body: self.encoded(
+                    AppStatusDTO(
+                        env: "production",
+                        modelProvider: "managed",
+                        explainModel: "model-1",
+                        webSearchEnabled: true,
+                        databaseURL: "postgresql"
+                    )
+                )
+            )
+        }
+
+        _ = try await makeManagedClient(store: store).getAppStatus()
+
+        let requests = URLProtocolRequestRecorder.requests()
+        XCTAssertEqual(requests.map { $0.url?.path }, ["/v1/beta/session/refresh", "/v1/app-status"])
+        XCTAssertEqual(requests[0].value(forHTTPHeaderField: "Authorization"), "Bearer old-token")
+        XCTAssertEqual(requests[1].value(forHTTPHeaderField: "Authorization"), "Bearer new-token")
+        XCTAssertEqual(store.betaSession?.betaAccessToken, "new-token")
+    }
+
+    private func activeStore(providerKey: String? = nil) -> InMemoryManagedCredentialStore {
+        InMemoryManagedCredentialStore(
+            installationId: "install-1",
+            betaSession: ManagedBetaSession(
+                betaAccessToken: "beta-token",
+                ownerId: "owner-1",
+                expiresAt: Date().addingTimeInterval(30 * 24 * 60 * 60)
+            ),
+            providerKey: providerKey
+        )
+    }
+
+    private func makeManagedClient(store: InMemoryManagedCredentialStore) -> HTTPSiftAPIClient {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [URLProtocolRequestRecorder.self]
+        return HTTPSiftAPIClient(
+            baseURL: URL(string: "https://beta.sift.example")!,
+            urlSession: URLSession(configuration: configuration),
+            credentialStore: store,
+            managedMode: true
+        )
+    }
+
+    private func encoded<T: Encodable>(_ value: T) -> Data {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return try! encoder.encode(value)
+    }
+}
+
+private func requestBody(_ request: URLRequest) -> Data? {
+    if let body = request.httpBody { return body }
+    guard let stream = request.httpBodyStream else { return nil }
+    stream.open()
+    defer { stream.close() }
+    var data = Data()
+    let bufferSize = 1024
+    let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+    defer { buffer.deallocate() }
+    while stream.hasBytesAvailable {
+        let count = stream.read(buffer, maxLength: bufferSize)
+        guard count > 0 else { break }
+        data.append(buffer, count: count)
+    }
+    return data
 }
 
 private struct HTTPURLProtocolResponse {

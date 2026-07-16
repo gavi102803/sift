@@ -182,6 +182,12 @@ enum ConversationTimeline {
     }
 }
 
+enum InitialQueryReplacement {
+    static func isApplied(previousRevision: Int, responseRevision: Int) -> Bool {
+        responseRevision > previousRevision
+    }
+}
+
 // MARK: - Markdown body
 
 enum MarkdownNormalizer {
@@ -225,7 +231,11 @@ struct ConceptUserBubble: View {
     var body: some View {
         HStack {
             Spacer(minLength: 44)
-            MarkdownText(text)
+            Text(text)
+                .font(SiftFont.body)
+                .lineSpacing(3)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
                 .lineLimit(lineLimit)
                 .foregroundStyle(SiftColor.textPrimary)
                 .padding(.horizontal, 14)
@@ -238,6 +248,41 @@ struct ConceptUserBubble: View {
                         style: .continuous
                     )
                 )
+        }
+    }
+}
+
+struct EditingQueryFocusLayer: View {
+    var text: String
+    var onCancel: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .opacity(0.72)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onCancel)
+
+            ConceptUserBubble(text: text)
+                .scaleEffect(1.06, anchor: .trailing)
+                .shadow(color: .black.opacity(0.14), radius: 20, y: 8)
+                .overlay(alignment: .topTrailing) {
+                    Button(action: onCancel) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(SiftColor.textSecondary)
+                            .frame(width: 24, height: 24)
+                            .background(.thinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Cancel query editing")
+                    .accessibilityIdentifier("concept.queryEditor.cancel")
+                    .offset(x: 5, y: -10)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 64)
         }
     }
 }
@@ -295,7 +340,13 @@ struct AssistantMessage: View {
                     .foregroundStyle(SiftColor.textPrimary)
             }
 
-            MarkdownText(text, streamingCaret: isStreaming)
+            if isStreaming {
+                MarkdownText(text, streamingCaret: true)
+            } else if let citations = source?.citations, !citations.isEmpty {
+                CitedMarkdownText(text, citations: citations)
+            } else {
+                MarkdownText(text)
+            }
 
             if let source, source.citations?.isEmpty == false {
                 SiftSourceLink(source: source)
@@ -585,14 +636,12 @@ struct ConceptFullNoteEditor: View {
                     .lineLimit(1...3)
             }
         }
+        .environment(\.editMode, .constant(.active))
         .navigationTitle("Edit Note")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Cancel", action: onCancel)
-            }
-            ToolbarItem(placement: .secondaryAction) {
-                EditButton()
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save", action: onSave)
@@ -678,8 +727,14 @@ struct NoteBlockEditor: View {
 
 enum SiftStreamingError: LocalizedError {
     case incomplete
+    case initialReplacementNotApplied
 
     var errorDescription: String? {
-        "The streamed response ended before Sift received the final answer."
+        switch self {
+        case .incomplete:
+            "The streamed response ended before Sift received the final answer."
+        case .initialReplacementNotApplied:
+            "The first question was not replaced. Restart or update the backend, then try again."
+        }
     }
 }

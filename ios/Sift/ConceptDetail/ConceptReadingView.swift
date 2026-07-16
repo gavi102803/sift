@@ -71,7 +71,7 @@ struct ConceptReadingView: View {
                 .font(SiftFont.eyebrow)
                 .tracking(0.7)
                 .foregroundStyle(SiftColor.textFaint)
-            MarkdownText(block.content)
+            MarkdownText(CitationMarkup.removingMarkers(from: block.content))
                 .foregroundStyle(SiftColor.textBody)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }

@@ -14,44 +14,42 @@ struct RecordView: View {
     @StateObject private var speechCapture = SpeechCaptureService()
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                brandHeader
-                captureHero
-                if let errorMessage {
-                    InlineErrorView(message: errorMessage) {
-                        Task {
-                            await refreshConcepts()
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    captureHero(
+                        minHeight: max(
+                            460,
+                            geometry.size.height - SiftLayout.tabBarClearance - 48
+                        )
+                    )
+                    if let errorMessage {
+                        InlineErrorView(message: errorMessage) {
+                            Task {
+                                await refreshConcepts()
+                            }
                         }
                     }
                 }
+                .padding(.horizontal, 24)
+                .padding(.bottom, SiftLayout.tabBarClearance + 84)
             }
-            .padding(.horizontal, 24)
-            .padding(.bottom, SiftLayout.tabBarClearance + 84)
+            .scrollContentBackground(.hidden)
+            .refreshable {
+                await refreshConcepts()
+            }
+            .safeAreaInset(edge: .bottom) {
+                captureComposer
+            }
         }
-        .scrollContentBackground(.hidden)
         .siftScreenBackground()
         .navigationBarHidden(true)
-        .refreshable {
-            await refreshConcepts()
-        }
         .task {
             await refreshConcepts()
         }
-        .safeAreaInset(edge: .bottom) {
-            captureComposer
-        }
     }
 
-    private var brandHeader: some View {
-        HStack {
-            SiftLogo(symbolSize: 24)
-            Spacer()
-        }
-        .padding(.top, 12)
-    }
-
-    private var captureHero: some View {
+    private func captureHero(minHeight: CGFloat) -> some View {
         VStack(spacing: 18) {
             Spacer(minLength: 0)
             SiftSymbol(size: 98)
@@ -71,7 +69,7 @@ struct RecordView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity)
-        .frame(minHeight: 460)
+        .frame(minHeight: minHeight)
     }
 
     private var captureComposer: some View {
@@ -91,6 +89,7 @@ struct RecordView: View {
             .foregroundStyle(SiftColor.textPrimary)
             .tint(SiftColor.accent)
             .lineLimit(1...3)
+            .accessibilityIdentifier("capture.input")
 
             Button {
                 Task {
@@ -131,6 +130,7 @@ struct RecordView: View {
             .buttonStyle(.plain)
             .disabled(isSubmitting || !canSubmit)
             .accessibilityLabel("Capture concept")
+            .accessibilityIdentifier("capture.submit")
         }
         .padding(.leading, 16)
         .padding(.trailing, 8)
@@ -153,6 +153,7 @@ struct RecordView: View {
     }
 
     private func captureConcept() async {
+        speechCapture.stop()
         let service = CaptureFlowService(
             localStore: ConceptLocalStore(modelContext: modelContext),
             apiClient: appServices.apiClient

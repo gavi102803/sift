@@ -7,6 +7,12 @@ struct MockSiftAPIClient: SiftAPIClient {
         "Preview mock"
     }
 
+    var requiresBetaActivation: Bool { false }
+    var hasBetaSession: Bool { true }
+
+    func activateBeta(inviteCode: String) async throws {}
+    func clearBetaSession() {}
+
     func getAppStatus() async throws -> AppStatusDTO {
         try await Task.sleep(nanoseconds: delayNanoseconds)
         return AppStatusDTO(

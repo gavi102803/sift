@@ -35,6 +35,12 @@ struct ConceptDetailView: View {
     @State private var detailMode: ConceptDetailMode = .overview
     @State private var isReadingOffline = false
     @State private var isRetryingGeneration = false
+    @State private var followUpTask: Task<Void, Never>?
+    @State private var editingTurnIndex: Int?
+    @State private var isPresentingQueryEditor = false
+    @State private var queryEditorPreviousDraft = ""
+    @StateObject private var speechCapture = SpeechCaptureService()
+    @FocusState private var isFollowUpFocused: Bool
 
     private var conceptId: UUID
     /// Called when a retry produces a concept with a new id, so the navigation
@@ -88,55 +94,68 @@ struct ConceptDetailView: View {
         Group {
             if let concept {
                 ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 20) {
-                            if isRefreshingConcept {
-                                ProgressView()
-                            }
-                            if isReadingOffline {
-                                CompanionNotice(text: CompanionCopy.readingOffline, tone: .info)
-                            }
-                            if let errorMessage {
-                                CompanionNotice(text: errorMessage, tone: .warning)
-                            }
-                            if detailMode == .overview {
-                                if let activeProposal {
-                                    SuggestedUpdateCard(
+                    ZStack {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 20) {
+                                if isRefreshingConcept {
+                                    ProgressView()
+                                }
+                                if isReadingOffline {
+                                    CompanionNotice(text: CompanionCopy.readingOffline, tone: .info)
+                                }
+                                if let errorMessage {
+                                    CompanionNotice(text: errorMessage, tone: .warning)
+                                }
+                                if detailMode == .overview {
+                                    if let activeProposal {
+                                        SuggestedUpdateCard(
+                                            concept: concept,
+                                            proposal: activeProposal,
+                                            isResolving: resolvingProposalId == activeProposal.id,
+                                            onConfirm: { Task { await mergeProposal(activeProposal) } },
+                                            onKeep: { Task { await dismissProposal(activeProposal) } }
+                                        )
+                                    }
+                                    readingView(for: concept)
+                                } else {
+                                    ConceptFollowUpView(
                                         concept: concept,
-                                        proposal: activeProposal,
-                                        isResolving: resolvingProposalId == activeProposal.id,
-                                        onConfirm: { Task { await mergeProposal(activeProposal) } },
-                                        onKeep: { Task { await dismissProposal(activeProposal) } }
+                                        turns: turns,
+                                        isSubmitting: isSubmittingFollowUp,
+                                        isRetryingGeneration: isRetryingGeneration,
+                                        onRetryGeneration: { Task { await retryGeneration(concept) } },
+                                        onAddAssistantToNote: { turn in
+                                            beginNoteEdit(appending: turn.content)
+                                        },
+                                        onRetryAssistant: { turn in
+                                            retryAssistantTurn(turn)
+                                        },
+                                        onEditUserTurn: { turn in
+                                            editAndResend(turn)
+                                        }
                                     )
                                 }
-                                readingView(for: concept)
-                            } else {
-                                ConceptFollowUpView(
-                                    concept: concept,
-                                    turns: turns,
-                                    isSubmitting: isSubmittingFollowUp,
-                                    isRetryingGeneration: isRetryingGeneration,
-                                    onRetryGeneration: { Task { await retryGeneration(concept) } },
-                                    onAddAssistantToNote: { turn in
-                                        beginNoteEdit(appending: turn.content)
-                                    },
-                                    onRetryAssistant: { turn in
-                                        retryAssistantTurn(turn)
-                                    },
-                                    onEditUserTurn: { turn in
-                                        editAndResend(turn)
-                                    }
-                                )
+                                Color.clear
+                                    .frame(height: 1)
+                                    .id("conversation-bottom")
                             }
-                            Color.clear
-                                .frame(height: 1)
-                                .id("conversation-bottom")
+                            .padding(.horizontal, 18)
+                            .padding(.top, 12)
+                            .padding(.bottom, SiftLayout.tabBarClearance + 76)
                         }
-                        .padding(.horizontal, 18)
-                        .padding(.top, 12)
-                        .padding(.bottom, SiftLayout.tabBarClearance + 76)
+                        .scrollContentBackground(.hidden)
+                        .scaleEffect(isPresentingQueryEditor ? 0.995 : 1)
+                        .saturation(isPresentingQueryEditor ? 0.82 : 1)
+                        .allowsHitTesting(!isPresentingQueryEditor)
+
+                        if let editingQuery {
+                            EditingQueryFocusLayer(
+                                text: editingQuery.content,
+                                onCancel: cancelQueryEditing
+                            )
+                            .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                        }
                     }
-                    .scrollContentBackground(.hidden)
                     .onChange(of: detailMode) { _, newValue in
                         guard newValue == .followUp else { return }
                         scrollToConversationBottom(proxy, aggressively: true)
@@ -300,10 +319,11 @@ struct ConceptDetailView: View {
     }
 
     private var followUpComposer: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .center, spacing: 10) {
             Image(systemName: "plus.circle")
-                .font(.system(size: 22, weight: .regular))
+                .font(.system(size: 24, weight: .regular))
                 .foregroundStyle(SiftColor.textMuted)
+                .frame(width: 36, height: 36)
 
             TextField(
                 "",
@@ -316,52 +336,79 @@ struct ConceptDetailView: View {
             .foregroundStyle(SiftColor.textPrimary)
             .tint(SiftColor.accent)
             .lineLimit(1...4)
+            .frame(minHeight: 36, alignment: .center)
+            .focused($isFollowUpFocused)
 
             Button {
-                if let concept {
+                Task {
+                    await toggleFollowUpSpeechCapture()
+                }
+            } label: {
+                Image(systemName: speechCapture.isRecording ? "mic.fill" : "mic")
+                    .font(.system(size: 17, weight: .regular))
+                    .frame(width: 28, height: 36)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(
+                speechCapture.isRecording ? SiftColor.accent : SiftColor.textMuted
+            )
+            .disabled(isSubmittingFollowUp)
+            .accessibilityLabel(
+                speechCapture.isRecording ? "Stop voice input" : "Start voice input"
+            )
+            .accessibilityIdentifier("concept.composer.voice")
+
+            Button {
+                if isSubmittingFollowUp {
+                    followUpTask?.cancel()
+                } else if let concept {
                     withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
                         detailMode = .followUp
                     }
-                    Task {
+                    followUpTask = Task {
                         await submitFollowUp(for: concept)
+                        followUpTask = nil
                     }
                 }
             } label: {
-                Group {
-                    if isSubmittingFollowUp {
-                        ProgressView().tint(.white)
-                    } else {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.white)
-                    }
-                }
-                .frame(width: 40, height: 40)
-                .background(
-                    SiftColor.accent.opacity(canSubmitFollowUp ? 1 : 0.4),
-                    in: RoundedRectangle(cornerRadius: SiftRadius.send, style: .continuous)
-                )
+                Image(systemName: isSubmittingFollowUp ? "stop.fill" : "arrow.up")
+                    .font(.system(size: isSubmittingFollowUp ? 11 : 16, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(
+                        composerActionColor,
+                        in: Circle()
+                    )
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .disabled(isSubmittingFollowUp || !canSubmitFollowUp)
-            .accessibilityLabel("Submit follow-up")
+            .disabled(!isSubmittingFollowUp && !canSubmitFollowUp)
+            .accessibilityLabel(isSubmittingFollowUp ? "Stop response" : "Submit follow-up")
+            .accessibilityIdentifier("concept.composer.action")
         }
-        .padding(.leading, 16)
-        .padding(.trailing, 8)
-        .padding(.vertical, 8)
-        .background(SiftColor.surfaceSoft, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.leading, 10)
+        .padding(.trailing, 6)
+        .padding(.vertical, 6)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 25, style: .continuous))
+        .background(SiftColor.surface.opacity(0.92), in: RoundedRectangle(cornerRadius: 25, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 25, style: .continuous)
                 .strokeBorder(SiftColor.hairline, lineWidth: 1)
         }
+        .shadow(color: .black.opacity(0.07), radius: 12, y: 4)
         .padding(.horizontal, 18)
         .padding(.bottom, SiftLayout.tabBarClearance)
+    }
+
+    private var composerActionColor: Color {
+        if isSubmittingFollowUp { return SiftColor.accent }
+        return SiftColor.accent.opacity(canSubmitFollowUp ? 1 : 0.28)
     }
 
     // MARK: - Follow-up submission
 
     private func submitFollowUp(for concept: Concept, question overrideQuestion: String? = nil) async {
+        speechCapture.stop()
         let question = (overrideQuestion ?? followUpText).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty else { return }
 
@@ -373,6 +420,20 @@ struct ConceptDetailView: View {
         }
         let userTurnId = UUID()
         let assistantTurnId = UUID()
+        let replacementIndex = editingTurnIndex.flatMap { turns.indices.contains($0) ? $0 : nil }
+        let shouldRestoreQueryEditorOnFailure = isPresentingQueryEditor
+        withAnimation(.spring(response: 0.36, dampingFraction: 0.88)) {
+            isPresentingQueryEditor = false
+        }
+        isFollowUpFocused = false
+        let replacementBaselineRevision = concept.noteRevision
+        let replacedTail: [ConceptHistoryTurnDTO]
+        if let replacementIndex {
+            replacedTail = Array(turns[replacementIndex...])
+            turns.removeSubrange(replacementIndex...)
+        } else {
+            replacedTail = []
+        }
         turns.append(ConceptHistoryTurnDTO(id: userTurnId, role: "user", content: question, status: "completed"))
         turns.append(ConceptHistoryTurnDTO(id: assistantTurnId, role: "assistant", content: "", status: "streaming"))
         // Reserve a per-action idempotency key. A retry of the same question
@@ -384,7 +445,10 @@ struct ConceptDetailView: View {
             var finalResponse: ConceptTurnResponse?
             for try await event in appServices.apiClient.streamTurn(
                 conceptId: concept.id,
-                request: ConceptTurnRequest(question: question),
+                request: ConceptTurnRequest(
+                    question: question,
+                    replacingTurnIndex: replacementIndex
+                ),
                 idempotencyKey: operationKey
             ) {
                 if let delta = event.delta, !delta.isEmpty {
@@ -394,10 +458,18 @@ struct ConceptDetailView: View {
                     finalResponse = response
                 }
             }
+            try Task.checkCancellation()
             guard let response = finalResponse else {
                 throw SiftStreamingError.incomplete
             }
-            _ = try store.upsertConcept(from: response.concept)
+            if replacementIndex == 0,
+               !InitialQueryReplacement.isApplied(
+                   previousRevision: replacementBaselineRevision,
+                   responseRevision: response.concept.noteRevision
+               ) {
+                throw SiftStreamingError.initialReplacementNotApplied
+            }
+            let updatedConcept = try store.upsertConcept(from: response.concept)
             refreshOrganization(for: response.concept.id)
             if let proposal = response.proposal {
                 _ = try store.upsertProposal(proposal, conceptId: response.concept.id)
@@ -413,16 +485,44 @@ struct ConceptDetailView: View {
                 turnId: assistantTurnId,
                 answerSource: response.answerSource
             )
+            if replacementIndex == 0 {
+                store.replaceInitialExchange(
+                    concept: updatedConcept,
+                    question: question,
+                    answer: response.answer
+                )
+            }
+            editingTurnIndex = nil
+            queryEditorPreviousDraft = ""
             companion?.noteSuccess()
             isReadingOffline = false
         } catch is CancellationError {
-            turns.removeAll { $0.id == assistantTurnId || $0.id == userTurnId }
+            if let replacementIndex {
+                turns.removeAll { $0.id == assistantTurnId || $0.id == userTurnId }
+                turns.insert(contentsOf: replacedTail, at: min(replacementIndex, turns.count))
+                followUpText = question
+                if shouldRestoreQueryEditorOnFailure {
+                    restoreQueryEditor(afterFailureAt: replacementIndex)
+                }
+            } else if let index = turns.firstIndex(where: { $0.id == assistantTurnId }) {
+                if turns[index].content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    turns.remove(at: index)
+                } else {
+                    turns[index].status = "completed"
+                }
+            }
         } catch {
             // Remove the optimistic bubbles (no blank assistant left behind),
             // persist the draft, restore the composer text, and show a quiet,
             // sanitized hint — never the raw error.
             turns.removeAll { turn in
                 turn.id == assistantTurnId || turn.id == userTurnId
+            }
+            if let replacementIndex {
+                turns.insert(contentsOf: replacedTail, at: min(replacementIndex, turns.count))
+                if shouldRestoreQueryEditorOnFailure {
+                    restoreQueryEditor(afterFailureAt: replacementIndex)
+                }
             }
             store.recordFailedFollowUpDraft(concept: concept, question: question)
             // Terminal (server-rejected) failures release the key so a retry uses
@@ -437,6 +537,21 @@ struct ConceptDetailView: View {
             present(error)
         }
         isSubmittingFollowUp = false
+    }
+
+    private func toggleFollowUpSpeechCapture() async {
+        if speechCapture.isRecording {
+            speechCapture.stop()
+            return
+        }
+
+        do {
+            try await speechCapture.start { transcript in
+                followUpText = transcript
+            }
+        } catch {
+            errorMessage = "Sift couldn’t start voice input."
+        }
     }
 
     /// Retry a failed initial generation via the existing CaptureFlowService
@@ -497,20 +612,60 @@ struct ConceptDetailView: View {
         guard !isSubmittingFollowUp,
               let concept,
               let index = turns.firstIndex(where: { $0.id == turn.id }),
-              let question = turns[..<index].last(where: { $0.role == ConversationRole.user.rawValue })?.content
+              let userIndex = turns[..<index].lastIndex(where: { $0.role == ConversationRole.user.rawValue })
         else {
             return
         }
-        Task {
+        let question = turns[userIndex].content
+        editingTurnIndex = userIndex
+        followUpTask = Task {
             await submitFollowUp(for: concept, question: question)
+            followUpTask = nil
         }
     }
 
     private func editAndResend(_ turn: ConceptHistoryTurnDTO) {
+        guard let index = turns.firstIndex(where: { $0.id == turn.id }) else { return }
+        queryEditorPreviousDraft = followUpText
         followUpText = turn.content
+        editingTurnIndex = index
         withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
             detailMode = .followUp
+            isPresentingQueryEditor = true
         }
+        Task { @MainActor in
+            await Task.yield()
+            isFollowUpFocused = true
+        }
+    }
+
+    private var editingQuery: ConceptHistoryTurnDTO? {
+        guard isPresentingQueryEditor,
+              let editingTurnIndex,
+              turns.indices.contains(editingTurnIndex),
+              turns[editingTurnIndex].role == ConversationRole.user.rawValue else {
+            return nil
+        }
+        return turns[editingTurnIndex]
+    }
+
+    private func cancelQueryEditing() {
+        withAnimation(.spring(response: 0.36, dampingFraction: 0.88)) {
+            isPresentingQueryEditor = false
+        }
+        editingTurnIndex = nil
+        followUpText = queryEditorPreviousDraft
+        queryEditorPreviousDraft = ""
+        isFollowUpFocused = false
+    }
+
+    private func restoreQueryEditor(afterFailureAt index: Int) {
+        guard turns.indices.contains(index) else { return }
+        editingTurnIndex = index
+        withAnimation(.spring(response: 0.36, dampingFraction: 0.88)) {
+            isPresentingQueryEditor = true
+        }
+        isFollowUpFocused = true
     }
 
     private func restoreFailedFollowUpDraft() {

@@ -112,6 +112,35 @@ struct ConceptLocalStore {
         recordInitialGenerationAnswer(concept: concept, question: question, answer: trimmedAnswer)
     }
 
+    func replaceInitialExchange(concept: Concept, question: String, answer: String) {
+        let conversation = ensureConversation(for: concept)
+        for message in conversation.messages where message.updateMode == initialCaptureUpdateMode {
+            modelContext.delete(message)
+        }
+        conversation.initialQuery = question
+        conversation.updatedAt = .now
+        modelContext.insert(
+            ConversationMessage(
+                role: ConversationRole.user.rawValue,
+                content: question,
+                createdAt: .now,
+                updateMode: initialCaptureUpdateMode,
+                operationStatus: "completed",
+                conversation: conversation
+            )
+        )
+        modelContext.insert(
+            ConversationMessage(
+                role: ConversationRole.assistant.rawValue,
+                content: answer,
+                createdAt: .now.addingTimeInterval(0.001),
+                updateMode: initialCaptureUpdateMode,
+                operationStatus: "completed",
+                conversation: conversation
+            )
+        )
+    }
+
     func recordInitialGenerationFailure(concept: Concept, error: Error) {
         let conversation = ensureConversation(for: concept)
         conversation.updatedAt = .now
@@ -283,24 +312,50 @@ struct ConceptLocalStore {
         }
 
         let note = concept.note ?? ConceptNote(concept: concept)
+        let existingNoteRevision = note.revision
         note.revision = dto.noteRevision
         note.updatedAt = .now
         note.updatedBy = "backend"
         concept.note = note
 
-        let replacementBlocks = dto.blocks.map { blockDTO in
-            NoteBlock(
-                id: blockDTO.id,
-                blockType: blockDTO.blockType,
-                content: blockDTO.content,
-                source: blockDTO.source,
-                isUserLocked: blockDTO.isUserLocked,
-                lastEditedBy: blockDTO.source,
-                position: blockDTO.position,
-                note: note
-            )
+        let shouldKeepExistingBlocks = existingConcept != nil
+            && dto.noteRevision == existingNoteRevision
+            && dto.blocks.isEmpty
+            && !note.blocks.isEmpty
+        if !shouldKeepExistingBlocks {
+            let existingBlocks = note.blocks
+            let existingById = Dictionary(uniqueKeysWithValues: existingBlocks.map { ($0.id, $0) })
+            let reconciled = dto.blocks.map { blockDTO in
+                if let block = existingById[blockDTO.id] {
+                    block.blockType = blockDTO.blockType
+                    block.content = blockDTO.content
+                    block.source = blockDTO.source
+                    block.isUserLocked = blockDTO.isUserLocked
+                    block.lastEditedBy = blockDTO.source
+                    block.position = blockDTO.position
+                    block.updatedAt = .now
+                    block.note = note
+                    return block
+                }
+                let block = NoteBlock(
+                    id: blockDTO.id,
+                    blockType: blockDTO.blockType,
+                    content: blockDTO.content,
+                    source: blockDTO.source,
+                    isUserLocked: blockDTO.isUserLocked,
+                    lastEditedBy: blockDTO.source,
+                    position: blockDTO.position,
+                    note: note
+                )
+                modelContext.insert(block)
+                return block
+            }
+            let remoteIds = Set(dto.blocks.map(\.id))
+            note.blocks = reconciled
+            for staleBlock in existingBlocks where !remoteIds.contains(staleBlock.id) {
+                modelContext.delete(staleBlock)
+            }
         }
-        note.blocks = replacementBlocks
 
         try replaceConceptTags(conceptId: concept.id, names: dto.tags)
         try replaceConceptTopics(conceptId: concept.id, names: dto.topics)

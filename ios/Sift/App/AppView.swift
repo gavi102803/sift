@@ -18,13 +18,30 @@ struct AppView: View {
     @State private var recordPath: [ConceptRoute] = []
     @State private var libraryPath: [UUID] = []
     @State private var companion = CompanionMonitor()
+    @State private var managedAccessReady = false
     @AppStorage(AppTheme.storageKey) private var themeRaw = AppTheme.system.rawValue
 
     private var theme: AppTheme { AppTheme(rawValue: themeRaw) ?? .system }
 
     var body: some View {
+        Group {
+            if appServices.apiClient.requiresBetaActivation && !managedAccessReady {
+                ManagedBetaOnboardingView(apiClient: appServices.apiClient) {
+                    managedAccessReady = true
+                    Task { await companion.refresh(using: appServices) }
+                }
+            } else {
+                appContent
+            }
+        }
+        .preferredColorScheme(theme.colorScheme)
+        .tint(SiftColor.accent)
+        .environment(companion)
+    }
+
+    private var appContent: some View {
         ZStack(alignment: .bottom) {
-            TabView(selection: $selectedTab) {
+            ZStack {
                 NavigationStack(path: $recordPath) {
                     RecordView(
                         onSearch: {
@@ -49,8 +66,7 @@ struct AppView: View {
                         )
                     }
                 }
-                .toolbar(.hidden, for: .tabBar)
-                .tag(AppTab.record)
+                .tabPagePresentation(isSelected: selectedTab == .record)
 
                 NavigationStack(path: $libraryPath) {
                     ConceptLibraryView(searchText: $librarySearchText)
@@ -63,21 +79,17 @@ struct AppView: View {
                             )
                         }
                 }
-                .toolbar(.hidden, for: .tabBar)
-                .tag(AppTab.library)
+                .tabPagePresentation(isSelected: selectedTab == .library)
 
                 NavigationStack {
                     ProfileView()
                 }
-                .toolbar(.hidden, for: .tabBar)
-                .tag(AppTab.profile)
+                .tabPagePresentation(isSelected: selectedTab == .profile)
             }
+            .animation(.smooth(duration: 0.34), value: selectedTab)
 
             FloatingTabBar(selection: $selectedTab)
         }
-        .preferredColorScheme(theme.colorScheme)
-        .tint(SiftColor.accent)
-        .environment(companion)
         .task {
             await companion.refresh(using: appServices)
         }
@@ -104,16 +116,40 @@ struct AppView: View {
 
 struct FloatingTabBar: View {
     @Binding var selection: AppTab
+    @Namespace private var selectionGlass
 
     var body: some View {
+        Group {
+            if #available(iOS 26.0, *) {
+                GlassEffectContainer(spacing: 10) {
+                    tabItems(usesNativeGlass: true)
+                        .glassEffect(.regular, in: .rect(cornerRadius: 30))
+                }
+            } else {
+                tabItems(usesNativeGlass: false)
+                    .background(.ultraThinMaterial, in: Capsule(style: .continuous))
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+                    )
+            }
+        }
+        .siftTabBarShadow()
+        .padding(.horizontal, 70)
+        .padding(.bottom, 18)
+    }
+
+    private func tabItems(usesNativeGlass: Bool) -> some View {
         HStack(spacing: 0) {
             ForEach(AppTab.allCases) { tab in
                 FloatingTabItem(
                     tab: tab,
-                    isActive: selection == tab
+                    isActive: selection == tab,
+                    selectionGlass: selectionGlass,
+                    usesNativeGlass: usesNativeGlass
                 ) {
                     if selection != tab {
-                        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                        withAnimation(.smooth(duration: 0.34)) {
                             selection = tab
                         }
                     }
@@ -122,22 +158,14 @@ struct FloatingTabBar: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: 60)
-        // Genuine iOS frosted glass — no opaque tint, content blurs through. Its
-        // left edge lines up with the composer's text cursor (≈ 70pt inset).
-        .background(.ultraThinMaterial, in: Capsule(style: .continuous))
-        .overlay(
-            Capsule(style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
-        )
-        .siftTabBarShadow()
-        .padding(.horizontal, 70)
-        .padding(.bottom, 18)
     }
 }
 
 private struct FloatingTabItem: View {
     let tab: AppTab
     let isActive: Bool
+    let selectionGlass: Namespace.ID
+    let usesNativeGlass: Bool
     let action: () -> Void
 
     var body: some View {
@@ -150,19 +178,30 @@ private struct FloatingTabItem: View {
             }
             .padding(.vertical, 6)
             .padding(.horizontal, 16)
-            .background(
-                Group {
-                    if isActive {
-                        Capsule(style: .continuous)
-                            .fill(SiftColor.surfaceSoftHi)
-                    }
-                }
-            )
+            .background { activeBackground }
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(tab.title)
         .accessibilityAddTraits(isActive ? [.isSelected] : [])
+    }
+
+    @ViewBuilder
+    private var activeBackground: some View {
+        if isActive {
+            if #available(iOS 26.0, *), usesNativeGlass {
+                Color.clear
+                    .glassEffect(
+                        .regular.tint(SiftColor.surfaceSoftHi.opacity(0.72)).interactive(),
+                        in: .rect(cornerRadius: 22)
+                    )
+                    .glassEffectID("selected-tab", in: selectionGlass)
+            } else {
+                Capsule(style: .continuous)
+                    .fill(SiftColor.surfaceSoftHi)
+                    .matchedGeometryEffect(id: "selected-tab", in: selectionGlass)
+            }
+        }
     }
 
     @ViewBuilder
@@ -183,6 +222,17 @@ private struct FloatingTabItem: View {
                 .frame(height: 30)
                 .foregroundStyle(isActive ? SiftColor.textPrimary : SiftColor.textFaint)
         }
+    }
+}
+
+private extension View {
+    func tabPagePresentation(isSelected: Bool) -> some View {
+        opacity(isSelected ? 1 : 0)
+            .scaleEffect(isSelected ? 1 : 0.985)
+            .blur(radius: isSelected ? 0 : 3)
+            .allowsHitTesting(isSelected)
+            .accessibilityHidden(!isSelected)
+            .zIndex(isSelected ? 1 : 0)
     }
 }
 

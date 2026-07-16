@@ -329,6 +329,24 @@ class InMemoryConceptStore:
             ]
         )
 
+    def replace_turn_pair_from_index(
+        self,
+        concept_id: UUID,
+        turn_index: int,
+        user_query: str,
+        answer: str,
+        answer_source: AnswerSourceDTO | None = None,
+    ) -> None:
+        concept_turns = self.turns.setdefault(concept_id, [])
+        _validate_replacement_turn(concept_turns, turn_index)
+        del concept_turns[turn_index:]
+        self.append_turn_pair(
+            concept_id,
+            user_query,
+            answer,
+            answer_source=answer_source,
+        )
+
     def list_turns(self, concept_id: UUID) -> list[RecentTurn]:
         self.get_concept(concept_id)
         return self.turns.get(concept_id, [])
@@ -1010,7 +1028,18 @@ class ConceptService:
             if existing is not None:
                 return existing
         concept = self.store.get_concept(concept_id, owner_id=self.owner_id)
-        recent_turns = self.store.get_recent_turns(concept.id)
+        if request.replacing_turn_index == 0:
+            response = await self._regenerate_initial_concept(concept, request)
+            if idempotency_key:
+                self.store.save_idempotency_record(
+                    self.owner_id,
+                    endpoint,
+                    idempotency_key,
+                    payload_hash,
+                    response.model_dump_json(by_alias=True),
+                )
+            return response
+        recent_turns = self._recent_turns_before_replacement(concept.id, request)
         try:
             result = await self.model_service.answer_turn(
                 concept,
@@ -1048,7 +1077,19 @@ class ConceptService:
                 yield ConceptTurnStreamResult(existing)
                 return
         concept = self.store.get_concept(concept_id, owner_id=self.owner_id)
-        recent_turns = self.store.get_recent_turns(concept.id)
+        if request.replacing_turn_index == 0:
+            async for event in self._regenerate_initial_concept_stream(concept, request):
+                if isinstance(event, ConceptTurnStreamResult) and idempotency_key:
+                    self.store.save_idempotency_record(
+                        self.owner_id,
+                        endpoint,
+                        idempotency_key,
+                        payload_hash,
+                        event.response.model_dump_json(by_alias=True),
+                    )
+                yield event
+            return
+        recent_turns = self._recent_turns_before_replacement(concept.id, request)
         final_result: ConceptTurnResult | None = None
         try:
             async for event in self.model_service.stream_turn_answer(
@@ -1095,16 +1136,16 @@ class ConceptService:
             if existing is not None:
                 return existing
         proposal = self.store.get_proposal(proposal_id)
+        concept = self.store.get_concept(
+            self.store.get_proposal_concept_id(proposal_id),
+            owner_id=self.owner_id,
+        )
         if proposal.status != ProposalStatus.proposed:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Update proposal is not mergeable.",
             )
 
-        concept = self.store.get_concept(
-            self.store.get_proposal_concept_id(proposal_id),
-            owner_id=self.owner_id,
-        )
         try:
             updated = self._apply_patch_operations(
                 concept,
@@ -1134,6 +1175,10 @@ class ConceptService:
 
     def dismiss_proposal(self, proposal_id: UUID) -> None:
         proposal = self.store.get_proposal(proposal_id)
+        self.store.get_concept(
+            self.store.get_proposal_concept_id(proposal_id),
+            owner_id=self.owner_id,
+        )
         self.store.save_proposal(proposal.model_copy(update={"status": ProposalStatus.dismissed}))
 
     def _finalize_turn_response(
@@ -1143,12 +1188,21 @@ class ConceptService:
         result: ConceptTurnResult,
     ) -> ConceptTurnResponse:
         self._persist_answer_sources(concept.id, result.answer_source)
-        self.store.append_turn_pair(
-            concept.id,
-            request.question,
-            result.answer,
-            answer_source=result.answer_source,
-        )
+        if request.replacing_turn_index is None:
+            self.store.append_turn_pair(
+                concept.id,
+                request.question,
+                result.answer,
+                answer_source=result.answer_source,
+            )
+        else:
+            self.store.replace_turn_pair_from_index(
+                concept.id,
+                request.replacing_turn_index,
+                request.question,
+                result.answer,
+                answer_source=result.answer_source,
+            )
 
         return ConceptTurnResponse(
             answer=result.answer,
@@ -1156,6 +1210,110 @@ class ConceptService:
             updateMode=UpdateMode.none,
             concept=concept,
             proposal=None,
+        )
+
+    def _recent_turns_before_replacement(
+        self,
+        concept_id: UUID,
+        request: ConceptTurnRequest,
+    ) -> list[RecentTurn]:
+        if request.replacing_turn_index is None:
+            return self.store.get_recent_turns(concept_id)
+        turns = self.store.list_turns(concept_id)
+        _validate_replacement_turn(turns, request.replacing_turn_index)
+        return turns[: request.replacing_turn_index][-10:]
+
+    async def _regenerate_initial_concept(
+        self,
+        concept: ConceptDTO,
+        request: ConceptTurnRequest,
+    ) -> ConceptTurnResponse:
+        try:
+            generated = await self.model_service.create_initial_concept(
+                title=request.question.strip(),
+                locale="en",
+            )
+        except SiftRuntimeError as error:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"code": error.code, "message": str(error)},
+            ) from error
+        regenerated = generated.model_copy(
+            update={"id": concept.id, "note_revision": concept.note_revision + 1}
+        )
+        saved = self._save_concept_with_audit(
+            regenerated,
+            event_type="retryGeneration",
+            actor="ai",
+        )
+        answer = (saved.initial_answer or saved.one_line_explanation).strip()
+        answer_source = saved.answer_source or _fallback_answer_source()
+        self.store.replace_turn_pair_from_index(
+            saved.id,
+            0,
+            request.question,
+            answer,
+            answer_source=answer_source,
+        )
+        return ConceptTurnResponse(
+            answer=answer,
+            answerSource=answer_source,
+            updateMode=UpdateMode.none,
+            concept=saved,
+            proposal=None,
+        )
+
+    async def _regenerate_initial_concept_stream(
+        self,
+        concept: ConceptDTO,
+        request: ConceptTurnRequest,
+    ) -> AsyncIterator[ConceptTurnStreamEvent]:
+        final_result = None
+        try:
+            async for event in self.model_service.stream_initial_concept(
+                title=request.question.strip(),
+                locale="en",
+            ):
+                if isinstance(event, ConceptRuntimeDelta):
+                    yield ConceptTurnStreamDelta(event.content)
+                if isinstance(event, ConceptInitialRuntimeResult):
+                    final_result = event.result
+        except SiftRuntimeError as error:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"code": error.code, "message": str(error)},
+            ) from error
+        if final_result is None:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"code": "stream_incomplete", "message": "Model stream ended early."},
+            )
+        regenerated = _concept_from_initial_result(
+            request.question.strip(),
+            final_result,
+        ).model_copy(update={"id": concept.id, "note_revision": concept.note_revision + 1})
+        saved = self._save_concept_with_audit(
+            regenerated,
+            event_type="retryGeneration",
+            actor="ai",
+        )
+        answer = (saved.initial_answer or saved.one_line_explanation).strip()
+        answer_source = saved.answer_source or _fallback_answer_source()
+        self.store.replace_turn_pair_from_index(
+            saved.id,
+            0,
+            request.question,
+            answer,
+            answer_source=answer_source,
+        )
+        yield ConceptTurnStreamResult(
+            ConceptTurnResponse(
+                answer=answer,
+                answerSource=answer_source,
+                updateMode=UpdateMode.none,
+                concept=saved,
+                proposal=None,
+            )
         )
 
     def _persist_answer_sources(
@@ -1414,6 +1572,22 @@ class ConceptService:
 def should_use_web_search(question: str) -> bool:
     _ = question
     return False
+
+
+def _validate_replacement_turn(turns: list[RecentTurn], turn_index: int) -> None:
+    if turn_index >= len(turns) or turns[turn_index].role != "user":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "invalid_turn_replacement", "message": "Turn is not replaceable."},
+        )
+
+
+def _fallback_answer_source() -> AnswerSourceDTO:
+    return AnswerSourceDTO(
+        sourceType=AnswerSourceType.model_knowledge,
+        confidence=0.5,
+        uncertaintyNote=None,
+    )
 
 
 def _fallback_initial_concept(title: str) -> ConceptDTO:

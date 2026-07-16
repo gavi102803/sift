@@ -510,8 +510,9 @@ def _initial_answer_messages(
                 "You are Sift's conversational explanation layer. Write the first answer "
                 "the user sees after capturing a concept. This answer is not the durable "
                 "note schema; it should teach the concept clearly.\n"
-                "Use the language of the captured text when it is clear; use locale only "
-                "as fallback.\n"
+                "Respond in the language of the captured text when it is identifiable; use "
+                "locale only as fallback. Preserve proper nouns, code, and source titles in "
+                "their original language when appropriate.\n"
                 "For non-trivial concepts, use 3 or 4 short Markdown sections. Put each "
                 "heading on its own line, then a blank line, then the body. Prefer concise "
                 "but useful explanation over a one-sentence summary.\n"
@@ -542,8 +543,10 @@ def _turn_answer_messages(
     system_prompt = (
         "You are Sift's conversational answer layer for one concept card. Answer the "
         "user naturally and directly. Do not decide whether to save anything to the "
-        "note; the product UI handles that manually. Use the user's current language "
-        "when it is clear. Return natural Markdown only, not JSON.\n"
+        "note; the product UI handles that manually. Respond in the language of the user's "
+        "current question when it is identifiable, regardless of the card's language. Preserve "
+        "proper nouns, code, and source titles in their original language when appropriate. "
+        "Return natural Markdown only, not JSON.\n"
         f"{retrieval_clause}"
     )
     context = {

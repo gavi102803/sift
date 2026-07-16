@@ -373,6 +373,42 @@ class PersistentConceptStore:
             )
             session.commit()
 
+    def replace_turn_pair_from_index(
+        self,
+        concept_id: UUID,
+        turn_index: int,
+        user_query: str,
+        answer: str,
+        answer_source: AnswerSourceDTO | None = None,
+    ) -> None:
+        with self.session_factory() as session:
+            if session.get(ConceptRecord, str(concept_id)) is None:
+                raise _not_found("Concept not found.")
+            records = session.scalars(
+                select(TurnRecord)
+                .where(TurnRecord.concept_id == str(concept_id))
+                .order_by(TurnRecord.id)
+            ).all()
+            _validate_replacement_record(records, turn_index)
+            for record in records[turn_index:]:
+                session.delete(record)
+            session.add_all(
+                [
+                    TurnRecord(concept_id=str(concept_id), role="user", content=user_query),
+                    TurnRecord(
+                        concept_id=str(concept_id),
+                        role="assistant",
+                        content=answer,
+                        answer_source_json=(
+                            answer_source.model_dump_json(by_alias=True)
+                            if answer_source is not None
+                            else None
+                        ),
+                    ),
+                ]
+            )
+            session.commit()
+
     def list_turns(self, concept_id: UUID) -> list[RecentTurn]:
         self.get_concept(concept_id)
         with self.session_factory() as session:
@@ -910,3 +946,11 @@ def _normalized_names(names: list[str]) -> list[str]:
 
 def _not_found(detail: str) -> HTTPException:
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+
+
+def _validate_replacement_record(records: list[TurnRecord], turn_index: int) -> None:
+    if turn_index >= len(records) or records[turn_index].role != "user":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "invalid_turn_replacement", "message": "Turn is not replaceable."},
+        )

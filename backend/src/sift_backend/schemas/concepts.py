@@ -104,6 +104,11 @@ class CreateConceptRelationRequest(SiftBaseModel):
 
 class ConceptTurnRequest(SiftBaseModel):
     question: str = Field(min_length=1)
+    replacing_turn_index: int | None = Field(
+        default=None,
+        ge=0,
+        alias="replacingTurnIndex",
+    )
 
 
 class ConceptHistoryTurnDTO(SiftBaseModel):

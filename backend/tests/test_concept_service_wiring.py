@@ -602,6 +602,56 @@ async def test_submit_turn_reuses_recent_turns_for_same_concept_card() -> None:
 
 
 @pytest.mark.asyncio
+async def test_editing_follow_up_replaces_turn_and_discards_later_branch() -> None:
+    service = ConceptService()
+    concept = service.create_concept(CreateConceptRequest(rawCapture="RAG"))
+    await service.submit_turn(
+        concept.id,
+        ConceptTurnRequest(question="First follow-up"),
+    )
+    await service.submit_turn(
+        concept.id,
+        ConceptTurnRequest(question="Later branch"),
+    )
+
+    await service.submit_turn(
+        concept.id,
+        ConceptTurnRequest(question="Edited follow-up", replacingTurnIndex=2),
+    )
+
+    assert [turn.content for turn in service.store.list_turns(concept.id)] == [
+        "RAG",
+        "RAG captured as a draft concept.",
+        "Edited follow-up",
+        "Draft answer for: Edited follow-up",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_editing_initial_query_regenerates_same_card_and_replaces_history() -> None:
+    service = ConceptService()
+    concept = service.create_concept(CreateConceptRequest(rawCapture="RAG"))
+
+    events = [
+        event
+        async for event in service.submit_turn_stream(
+            concept.id,
+            ConceptTurnRequest(question="Agent runtime", replacingTurnIndex=0),
+        )
+    ]
+
+    response = events[-1].response
+    assert response.concept.id == concept.id
+    assert response.concept.display_title == "Agent runtime"
+    assert response.concept.note_revision == concept.note_revision + 1
+    assert response.concept.blocks
+    assert [turn.content for turn in service.store.list_turns(concept.id)] == [
+        "Agent runtime",
+        "Agent runtime captured as a draft concept.",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_merge_relation_proposal_persists_concept_relation() -> None:
     target_id = uuid4()
     model_service = RelationProposalModelService(target_id)

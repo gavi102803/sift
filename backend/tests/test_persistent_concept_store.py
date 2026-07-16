@@ -204,6 +204,54 @@ async def test_persistent_store_round_trips_turns_without_auto_note_updates(tmp_
 
 
 @pytest.mark.asyncio
+async def test_persistent_store_replaces_edited_turn_branch(tmp_path) -> None:
+    database_path = tmp_path / "sift.db"
+    session_factory = _session_factory(f"sqlite:///{database_path}")
+    service = ConceptService(store=PersistentConceptStore(session_factory))
+    concept = service.create_concept(CreateConceptRequest(rawCapture="RAG"))
+    await service.submit_turn(concept.id, ConceptTurnRequest(question="Old follow-up"))
+    await service.submit_turn(concept.id, ConceptTurnRequest(question="Discard this branch"))
+
+    await service.submit_turn(
+        concept.id,
+        ConceptTurnRequest(question="Edited follow-up", replacingTurnIndex=2),
+    )
+
+    turns = ConceptService(store=PersistentConceptStore(session_factory)).list_turns(concept.id)
+    assert [turn.content for turn in turns] == [
+        "RAG",
+        "RAG captured as a draft concept.",
+        "Edited follow-up",
+        "Draft answer for: Edited follow-up",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_persistent_store_rebuilds_card_when_initial_query_is_edited(tmp_path) -> None:
+    database_path = tmp_path / "sift.db"
+    session_factory = _session_factory(f"sqlite:///{database_path}")
+    service = ConceptService(store=PersistentConceptStore(session_factory))
+    concept = service.create_concept(CreateConceptRequest(rawCapture="RAG"))
+
+    await service.submit_turn(
+        concept.id,
+        ConceptTurnRequest(question="Agent runtime", replacingTurnIndex=0),
+    )
+
+    reloaded_service = ConceptService(store=PersistentConceptStore(session_factory))
+    rebuilt = reloaded_service.get_concept(concept.id)
+    turns = reloaded_service.list_turns(concept.id)
+    assert rebuilt.display_title == "Agent runtime"
+    assert rebuilt.note_revision == concept.note_revision + 1
+    assert rebuilt.blocks
+    assert all(block.id not in {old.id for old in concept.blocks} for block in rebuilt.blocks)
+    assert [turn.content for turn in turns] == [
+        "Agent runtime",
+        "Agent runtime captured as a draft concept.",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_persistent_store_records_full_note_manual_edit_audit(tmp_path) -> None:
     database_path = tmp_path / "sift.db"
     session_factory = _session_factory(f"sqlite:///{database_path}")

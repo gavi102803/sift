@@ -17,6 +17,7 @@ from sift_backend.config import Settings, load_settings
 from sift_backend.persistence.concept_store import PersistentConceptStore
 from sift_backend.persistence.database import create_session_factory
 from sift_backend.runtime.concept_runtime import LightweightHermesRuntime
+from sift_backend.runtime.managed_api import require_managed_provider_connection
 from sift_backend.runtime.providers import build_runtime_model_provider, resolve_runtime_model
 from sift_backend.runtime.research_stack import SiftReadabilityExtractProvider
 from sift_backend.runtime.tools import RuntimeWebProvider, build_web_provider_registry
@@ -87,12 +88,39 @@ def _build_web_provider(settings: Settings) -> RuntimeWebProvider:
     return registry.create(provider_name)
 
 
-def get_concept_service(request: Request) -> ConceptService:
+def get_concept_service(request: Request, *, requires_runtime: bool = False) -> ConceptService:
     service = getattr(request.app.state, "concept_service", None)
     if service is None:
         service = build_concept_service()
         request.app.state.concept_service = service
-    return service
+    principal = getattr(request.state, "principal", service.principal)
+    settings = getattr(request.app.state, "settings", None)
+    if settings is not None and settings.auth_mode == "managed" and requires_runtime:
+        connection, api_key = require_managed_provider_connection(request)
+        provider = build_runtime_model_provider(
+            connection.provider_id,
+            base_url=connection.base_url,
+            api_key=api_key,
+        )
+        runtime = LightweightHermesRuntime(
+            model_provider=provider,
+            model=connection.model,
+            web_search_tool=_build_web_provider(settings),
+            web_extract_tool=SiftReadabilityExtractProvider(),
+            web_search_enabled=settings.runtime_web_search_enabled,
+        )
+        return ConceptService(
+            store=service.store,
+            model_service=SiftRuntimeConceptModelService(runtime),
+            principal=principal,
+        )
+    if principal == service.principal:
+        return service
+    return ConceptService(
+        store=service.store,
+        model_service=service.model_service,
+        principal=principal,
+    )
 
 
 @router.get("/concepts", response_model=list[ConceptDTO], response_model_by_alias=True)
@@ -102,7 +130,7 @@ async def list_concepts(request: Request) -> list[ConceptDTO]:
 
 @router.post("/concepts", response_model=ConceptDTO, response_model_by_alias=True)
 async def create_concept(request: Request, payload: CreateConceptRequest) -> ConceptDTO:
-    return await get_concept_service(request).create_concept_async(
+    return await get_concept_service(request, requires_runtime=True).create_concept_async(
         payload,
         idempotency_key=_idempotency_key(request),
     )
@@ -113,8 +141,9 @@ async def stream_create_concept(
     request: Request,
     payload: CreateConceptRequest,
 ) -> StreamingResponse:
+    service = get_concept_service(request, requires_runtime=True)
+
     async def events():
-        service = get_concept_service(request)
         idempotency_key = _idempotency_key(request)
         yield _stream_line(ConceptInitialStreamEvent(type="started"))
         async for event in service.create_concept_stream(
@@ -231,7 +260,7 @@ async def submit_concept_turn(
     concept_id: UUID,
     payload: ConceptTurnRequest,
 ) -> ConceptTurnResponse:
-    return await get_concept_service(request).submit_turn(
+    return await get_concept_service(request, requires_runtime=True).submit_turn(
         concept_id,
         payload,
         idempotency_key=_idempotency_key(request),
@@ -244,8 +273,9 @@ async def stream_concept_turn(
     concept_id: UUID,
     payload: ConceptTurnRequest,
 ) -> StreamingResponse:
+    service = get_concept_service(request, requires_runtime=True)
+
     async def events():
-        service = get_concept_service(request)
         idempotency_key = _idempotency_key(request)
         yield _stream_line(ConceptTurnStreamEvent(type="started"))
         async for event in service.submit_turn_stream(

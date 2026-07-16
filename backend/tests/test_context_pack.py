@@ -3,6 +3,7 @@ from uuid import uuid4
 from sift_backend.ai.context_pack import (
     RecentTurn,
     build_concept_turn_context_pack,
+    build_initial_concept_context_pack,
     concept_turn_response_format,
     initial_concept_response_format,
 )
@@ -62,6 +63,21 @@ def test_context_pack_includes_card_memory_note_blocks_and_query() -> None:
     assert "RAG retrieves external context" in pack.messages[1].content
     assert "isUserLocked" in pack.messages[1].content
     assert pack.messages[-1].content == "How is RAG different from fine-tuning?"
+
+
+def test_prompts_follow_current_query_language_and_keep_citations_out_of_note_blocks() -> None:
+    initial = build_initial_concept_context_pack("什么是 ACP？", "zh-Hans")
+    turn = build_concept_turn_context_pack(
+        concept=make_concept(),
+        card_memory="English card memory.",
+        recent_turns=[],
+        user_query="请用中文解释。",
+    )
+
+    for prompt in (initial.messages[0].content, turn.messages[0].content):
+        assert "language" in prompt
+        assert "proper nouns, code, and source titles" in prompt
+        assert "Do not put bracketed numeric citation markers" in prompt
 
 
 def test_context_pack_keeps_only_recent_ten_turns() -> None:

@@ -21,7 +21,9 @@ struct ProfileView: View {
                 identityCard
                 aiSection
                 appearanceSection
-                developerSection
+                if !appServices.apiClient.requiresBetaActivation {
+                    developerSection
+                }
 
                 if let errorMessage {
                     InlineErrorView(message: errorMessage) {
@@ -56,7 +58,11 @@ struct ProfileView: View {
                 Text("Sift")
                     .font(SiftFont.sans(16, .semibold))
                     .foregroundStyle(SiftColor.textPrimary)
-                Text("Your knowledge, on this device")
+                Text(
+                    appServices.apiClient.requiresBetaActivation
+                        ? "Managed beta"
+                        : "Your knowledge, on this device"
+                )
                     .font(SiftFont.cardDesc)
                     .foregroundStyle(SiftColor.textFaint)
             }

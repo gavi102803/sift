@@ -38,7 +38,7 @@ final class BackendEndpointTests: XCTestCase {
             defaultURL)
     }
 
-    /// Release/Managed: editable Personal URL is ignored; only env > managed > default.
+    /// Release/Managed: editable Personal URL is ignored; only env > managed > safe failure URL.
     func testReleaseIgnoresSavedAndUsesManaged() {
         XCTAssertEqual(
             BackendEndpointResolver.resolve(
@@ -48,8 +48,8 @@ final class BackendEndpointTests: XCTestCase {
         XCTAssertEqual(
             BackendEndpointResolver.resolve(
                 envOverride: nil, savedPersonal: savedURL, managed: nil,
-                allowsPersonal: false, defaultURL: defaultURL),
-            defaultURL)
+                allowsPersonal: false, defaultURL: BackendEndpointResolver.missingManagedURL),
+            BackendEndpointResolver.missingManagedURL)
     }
 
     // MARK: - Validation

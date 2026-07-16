@@ -58,6 +58,8 @@ enum CompanionErrorKind: Equatable {
                 case 400...499: self = .requestRejected
                 default: self = .unknown
                 }
+            case .betaActivationRequired, .providerKeyRequired, .managedUnsupported:
+                self = .requestRejected
             }
             return
         }

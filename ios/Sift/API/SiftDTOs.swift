@@ -1,5 +1,32 @@
 import Foundation
 
+struct BetaSessionDTO: Codable {
+    var betaAccessToken: String
+    var ownerId: String
+    var expiresAt: Date
+}
+
+struct ActivateBetaRequest: Codable {
+    var inviteCode: String
+    var installationId: String
+}
+
+struct ManagedProviderConnectionDTO: Codable {
+    var providerId: String
+    var baseURL: String
+    var model: String
+}
+
+struct ManagedProviderConnectionRequest: Codable {
+    var providerId: String
+    var baseURL: String?
+    var model: String
+}
+
+struct ManagedProviderTestDTO: Codable {
+    var ok: Bool
+}
+
 struct CreateConceptRequest: Codable {
     var rawCapture: String
     var locale: String
@@ -224,6 +251,7 @@ struct CreateConceptRelationRequest: Codable {
 
 struct ConceptTurnRequest: Codable {
     var question: String
+    var replacingTurnIndex: Int? = nil
 }
 
 struct ConceptHistoryTurnDTO: Codable, Identifiable {

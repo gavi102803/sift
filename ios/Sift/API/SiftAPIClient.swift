@@ -2,6 +2,11 @@ import Foundation
 
 protocol SiftAPIClient {
     var backendDescription: String { get }
+    var requiresBetaActivation: Bool { get }
+    var hasBetaSession: Bool { get }
+
+    func activateBeta(inviteCode: String) async throws
+    func clearBetaSession()
 
     func getAppStatus() async throws -> AppStatusDTO
     func getModelProviderSettings() async throws -> ModelProviderSettingsDTO
@@ -66,6 +71,12 @@ protocol SiftAPIClient {
 }
 
 extension SiftAPIClient {
+    var requiresBetaActivation: Bool { false }
+    var hasBetaSession: Bool { true }
+
+    func activateBeta(inviteCode: String) async throws {}
+    func clearBetaSession() {}
+
     func createConcept(
         _ request: CreateConceptRequest,
         idempotencyKey: UUID?
@@ -94,7 +105,7 @@ extension SiftAPIClient {
         idempotencyKey: UUID?
     ) -> AsyncThrowingStream<ConceptInitialStreamEvent, Error> {
         AsyncThrowingStream { continuation in
-            Task {
+            let task = Task {
                 do {
                     let concept = try await createConcept(request, idempotencyKey: idempotencyKey)
                     continuation.yield(ConceptInitialStreamEvent(type: "started", delta: nil, concept: nil))
@@ -109,6 +120,7 @@ extension SiftAPIClient {
                     continuation.finish(throwing: error)
                 }
             }
+            continuation.onTermination = { @Sendable _ in task.cancel() }
         }
     }
 
@@ -118,13 +130,24 @@ extension SiftAPIClient {
 }
 
 enum SiftAPIClientFactory {
+#if DEBUG
+    private static let uiTestCredentialStore = InMemoryManagedCredentialStore(
+        installationId: "sift-ui-test-installation"
+    )
+#endif
+
     /// The live client resolves its base URL per request via
     /// `BackendEndpointResolver`, so a saved Personal URL applies immediately.
     /// Mock is intentionally **not** a silent fallback here — it is only used for
     /// previews/tests via `AppServices.preview`, so a real backend being down is
     /// reported as "unavailable", never disguised as mock data.
     static func makeDefault() -> any SiftAPIClient {
-        HTTPSiftAPIClient()
+#if DEBUG
+        if ProcessInfo.processInfo.environment["SIFT_UI_TEST_IN_MEMORY_CREDENTIALS"] == "1" {
+            return HTTPSiftAPIClient(credentialStore: uiTestCredentialStore)
+        }
+#endif
+        return HTTPSiftAPIClient()
     }
 }
 
@@ -133,13 +156,26 @@ struct HTTPSiftAPIClient: SiftAPIClient {
     /// is resolved per request from `BackendEndpointResolver`, so a freshly-saved
     /// Personal backend URL takes effect immediately without an app restart.
     private let fixedBaseURL: URL?
+    private let credentialStore: any ManagedCredentialStore
+    private let sessionController: ManagedSessionController
+    private let managedModeOverride: Bool?
     var urlSession: URLSession = .shared
     var jsonDecoder: JSONDecoder = JSONDecoder()
     var jsonEncoder: JSONEncoder = JSONEncoder()
 
-    init(baseURL: URL? = nil, urlSession: URLSession = .shared) {
+    init(
+        baseURL: URL? = nil,
+        urlSession: URLSession = .shared,
+        credentialStore: any ManagedCredentialStore = KeychainManagedCredentialStore.shared,
+        managedMode: Bool? = nil
+    ) {
         self.fixedBaseURL = baseURL
         self.urlSession = urlSession
+        self.credentialStore = credentialStore
+        self.sessionController = ManagedSessionController(credentialStore: credentialStore)
+        self.managedModeOverride = managedMode
+        self.jsonDecoder.dateDecodingStrategy = .iso8601
+        self.jsonEncoder.dateEncodingStrategy = .iso8601
     }
 
     var baseURL: URL {
@@ -150,12 +186,46 @@ struct HTTPSiftAPIClient: SiftAPIClient {
         baseURL.absoluteString
     }
 
+    var requiresBetaActivation: Bool {
+        managedModeOverride ?? ManagedBuild.isEnabled
+    }
+
+    var hasBetaSession: Bool {
+        credentialStore.betaSession.map { $0.expiresAt > Date() } ?? false
+    }
+
+    func activateBeta(inviteCode: String) async throws {
+        let response: BetaSessionDTO = try await post(
+            path: "/v1/beta/activate",
+            body: ActivateBetaRequest(
+                inviteCode: inviteCode,
+                installationId: credentialStore.installationId
+            ),
+            authorized: false
+        )
+        credentialStore.betaSession = ManagedBetaSession(
+            betaAccessToken: response.betaAccessToken,
+            ownerId: response.ownerId,
+            expiresAt: response.expiresAt
+        )
+    }
+
+    func clearBetaSession() {
+        credentialStore.clearBetaSession()
+    }
+
     func getAppStatus() async throws -> AppStatusDTO {
         try await get(path: "/v1/app-status")
     }
 
     func getModelProviderSettings() async throws -> ModelProviderSettingsDTO {
-        try await get(path: "/v1/model-provider-settings")
+        if requiresBetaActivation {
+            let connection: ManagedProviderConnectionDTO = try await get(
+                path: "/v1/provider-connection"
+            )
+            return managedSettings(from: connection)
+        }
+        return try await get(path: "/v1/model-provider-settings")
     }
 
     func listRuntimeModelProviders() async throws -> RuntimeProviderCatalogDTO {
@@ -169,29 +239,108 @@ struct HTTPSiftAPIClient: SiftAPIClient {
     func updateModelProviderSettings(
         _ request: UpdateModelProviderSettingsRequest
     ) async throws -> ModelProviderSettingsDTO {
-        try await put(path: "/v1/model-provider-settings", body: request)
+        if requiresBetaActivation {
+            if let apiKey = request.apiKey, !apiKey.isEmpty {
+                credentialStore.providerKey = apiKey
+            }
+            let managedRequest = ManagedProviderConnectionRequest(
+                providerId: request.providerType,
+                baseURL: request.baseURL,
+                model: request.explainModel
+            )
+            let _: ManagedProviderTestDTO = try await post(
+                path: "/v1/providers/test",
+                body: managedRequest,
+                includesProviderKey: true
+            )
+            let connection: ManagedProviderConnectionDTO = try await put(
+                path: "/v1/provider-connection",
+                body: managedRequest
+            )
+            return managedSettings(from: connection)
+        }
+        return try await put(path: "/v1/model-provider-settings", body: request)
     }
 
     func getWebProviderSettings() async throws -> WebProviderSettingsDTO {
-        try await get(path: "/v1/web-provider-settings")
+        if requiresBetaActivation {
+            return WebProviderSettingsDTO(
+                providerType: "ddgs",
+                apiKeyConfigured: false,
+                apiKeyPreview: nil,
+                webSearchEnabled: true
+            )
+        }
+        return try await get(path: "/v1/web-provider-settings")
     }
 
     func updateWebProviderSettings(
         _ request: UpdateWebProviderSettingsRequest
     ) async throws -> WebProviderSettingsDTO {
-        try await put(path: "/v1/web-provider-settings", body: request)
+        if requiresBetaActivation {
+            guard request.providerType == "ddgs", request.apiKey?.isEmpty != false else {
+                throw SiftAPIError.managedUnsupported
+            }
+            return WebProviderSettingsDTO(
+                providerType: "ddgs",
+                apiKeyConfigured: false,
+                apiKeyPreview: nil,
+                webSearchEnabled: request.webSearchEnabled
+            )
+        }
+        return try await put(path: "/v1/web-provider-settings", body: request)
     }
 
     func listProviderModels() async throws -> ProviderModelListDTO {
-        try await get(path: "/v1/model-provider-settings/models")
+        if requiresBetaActivation {
+            let connection: ManagedProviderConnectionDTO = try await get(
+                path: "/v1/provider-connection"
+            )
+            return ProviderModelListDTO(
+                models: [ProviderModelDTO(id: connection.model, ownedBy: connection.providerId)]
+            )
+        }
+        return try await get(path: "/v1/model-provider-settings/models")
     }
 
     func runModelDiagnostic() async throws -> ModelDiagnosticDTO {
-        try await post(path: "/v1/model-diagnostic", body: EmptyRequest())
+        if requiresBetaActivation {
+            let connection: ManagedProviderConnectionDTO = try await get(
+                path: "/v1/provider-connection"
+            )
+            let result: ManagedProviderTestDTO = try await post(
+                path: "/v1/providers/test",
+                body: ManagedProviderConnectionRequest(
+                    providerId: connection.providerId,
+                    baseURL: connection.baseURL,
+                    model: connection.model
+                ),
+                includesProviderKey: true
+            )
+            return ModelDiagnosticDTO(
+                ok: result.ok,
+                provider: connection.providerId,
+                model: connection.model,
+                message: result.ok ? "Provider connection is ready." : "Provider test failed.",
+                webSearchUsed: nil,
+                citationCount: nil
+            )
+        }
+        return try await post(path: "/v1/model-diagnostic", body: EmptyRequest())
     }
 
     func runWebSearchDiagnostic() async throws -> ModelDiagnosticDTO {
-        try await post(path: "/v1/web-search-diagnostic", body: EmptyRequest())
+        if requiresBetaActivation {
+            return ModelDiagnosticDTO(
+                ok: true,
+                provider: "ddgs",
+                model: "managed",
+                message: "Managed beta web search is ready.",
+                webSearchUsed: false,
+                citationCount: 0
+            )
+        }
+        return try await post(path: "/v1/web-search-diagnostic", body: EmptyRequest())
     }
 
     func listConcepts() async throws -> [ConceptDTO] {
@@ -251,7 +400,12 @@ struct HTTPSiftAPIClient: SiftAPIClient {
         _ request: CreateConceptRequest,
         idempotencyKey: UUID?
     ) async throws -> ConceptDTO {
-        try await post(path: "/v1/concepts", body: request, idempotencyKey: idempotencyKey)
+        try await post(
+            path: "/v1/concepts",
+            body: request,
+            idempotencyKey: idempotencyKey,
+            includesProviderKey: requiresBetaActivation
+        )
     }
 
     func streamCreateConcept(
@@ -265,6 +419,7 @@ struct HTTPSiftAPIClient: SiftAPIClient {
                         path: "/v1/concepts/stream",
                         body: request,
                         idempotencyKey: idempotencyKey,
+                        includesProviderKey: requiresBetaActivation,
                         continuation: continuation
                     )
                     continuation.finish()
@@ -287,7 +442,8 @@ struct HTTPSiftAPIClient: SiftAPIClient {
         try await post(
             path: "/v1/concepts/\(conceptId.uuidString)/turns",
             body: request,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            includesProviderKey: requiresBetaActivation
         )
     }
 
@@ -304,12 +460,13 @@ struct HTTPSiftAPIClient: SiftAPIClient {
         idempotencyKey: UUID?
     ) -> AsyncThrowingStream<ConceptTurnStreamEvent, Error> {
         AsyncThrowingStream { continuation in
-            Task {
+            let task = Task {
                 do {
                     try await streamPost(
                         path: "/v1/concepts/\(conceptId.uuidString)/turns/stream",
                         body: request,
                         idempotencyKey: idempotencyKey,
+                        includesProviderKey: requiresBetaActivation,
                         continuation: continuation
                     )
                     continuation.finish()
@@ -317,6 +474,7 @@ struct HTTPSiftAPIClient: SiftAPIClient {
                     continuation.finish(throwing: error)
                 }
             }
+            continuation.onTermination = { @Sendable _ in task.cancel() }
         }
     }
 
@@ -340,16 +498,14 @@ struct HTTPSiftAPIClient: SiftAPIClient {
     }
 
     private func get<Response: Decodable>(path: String) async throws -> Response {
-        let urlRequest = URLRequest(url: baseURL.appending(path: path))
+        var urlRequest = URLRequest(url: baseURL.appending(path: path))
+        try await authorize(&urlRequest)
         let (data, response) = try await urlSession.data(for: urlRequest)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SiftAPIError.invalidResponse
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
-            throw SiftAPIError.httpStatus(
-                httpResponse.statusCode,
-                detail: errorDetail(from: data)
-            )
+            throw await responseError(status: httpResponse.statusCode, data: data)
         }
         return try jsonDecoder.decode(Response.self, from: data)
     }
@@ -357,13 +513,18 @@ struct HTTPSiftAPIClient: SiftAPIClient {
     private func post<Request: Encodable, Response: Decodable>(
         path: String,
         body: Request,
-        idempotencyKey: UUID? = nil
+        idempotencyKey: UUID? = nil,
+        authorized: Bool = true,
+        includesProviderKey: Bool = false
     ) async throws -> Response {
         var urlRequest = URLRequest(url: baseURL.appending(path: path))
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let idempotencyKey {
             urlRequest.setValue(idempotencyKey.uuidString, forHTTPHeaderField: "Idempotency-Key")
+        }
+        if authorized {
+            try await authorize(&urlRequest, includesProviderKey: includesProviderKey)
         }
         urlRequest.httpBody = try jsonEncoder.encode(body)
 
@@ -372,10 +533,7 @@ struct HTTPSiftAPIClient: SiftAPIClient {
             throw SiftAPIError.invalidResponse
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
-            throw SiftAPIError.httpStatus(
-                httpResponse.statusCode,
-                detail: errorDetail(from: data)
-            )
+            throw await responseError(status: httpResponse.statusCode, data: data)
         }
         if Response.self == EmptyResponse.self {
             return EmptyResponse() as! Response
@@ -387,6 +545,7 @@ struct HTTPSiftAPIClient: SiftAPIClient {
         path: String,
         body: Request,
         idempotencyKey: UUID? = nil,
+        includesProviderKey: Bool = false,
         continuation: AsyncThrowingStream<Event, Error>.Continuation
     ) async throws {
         var urlRequest = URLRequest(url: baseURL.appending(path: path))
@@ -396,6 +555,7 @@ struct HTTPSiftAPIClient: SiftAPIClient {
         if let idempotencyKey {
             urlRequest.setValue(idempotencyKey.uuidString, forHTTPHeaderField: "Idempotency-Key")
         }
+        try await authorize(&urlRequest, includesProviderKey: includesProviderKey)
         urlRequest.httpBody = try jsonEncoder.encode(body)
 
         let (bytes, response) = try await urlSession.bytes(for: urlRequest)
@@ -407,13 +567,11 @@ struct HTTPSiftAPIClient: SiftAPIClient {
             for try await byte in bytes {
                 data.append(byte)
             }
-            throw SiftAPIError.httpStatus(
-                httpResponse.statusCode,
-                detail: errorDetail(from: data)
-            )
+            throw await responseError(status: httpResponse.statusCode, data: data)
         }
 
         for try await line in bytes.lines {
+            try Task.checkCancellation()
             guard !line.isEmpty, let data = line.data(using: .utf8) else { continue }
             continuation.yield(try jsonDecoder.decode(Event.self, from: data))
         }
@@ -427,16 +585,14 @@ struct HTTPSiftAPIClient: SiftAPIClient {
         urlRequest.httpMethod = "PATCH"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.httpBody = try jsonEncoder.encode(body)
+        try await authorize(&urlRequest)
 
         let (data, response) = try await urlSession.data(for: urlRequest)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SiftAPIError.invalidResponse
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
-            throw SiftAPIError.httpStatus(
-                httpResponse.statusCode,
-                detail: errorDetail(from: data)
-            )
+            throw await responseError(status: httpResponse.statusCode, data: data)
         }
         return try jsonDecoder.decode(Response.self, from: data)
     }
@@ -449,16 +605,14 @@ struct HTTPSiftAPIClient: SiftAPIClient {
         urlRequest.httpMethod = "PUT"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.httpBody = try jsonEncoder.encode(body)
+        try await authorize(&urlRequest)
 
         let (data, response) = try await urlSession.data(for: urlRequest)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SiftAPIError.invalidResponse
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
-            throw SiftAPIError.httpStatus(
-                httpResponse.statusCode,
-                detail: errorDetail(from: data)
-            )
+            throw await responseError(status: httpResponse.statusCode, data: data)
         }
         return try jsonDecoder.decode(Response.self, from: data)
     }
@@ -466,28 +620,77 @@ struct HTTPSiftAPIClient: SiftAPIClient {
     private func delete<Response: Decodable>(path: String) async throws -> Response {
         var urlRequest = URLRequest(url: baseURL.appending(path: path))
         urlRequest.httpMethod = "DELETE"
+        try await authorize(&urlRequest)
 
         let (data, response) = try await urlSession.data(for: urlRequest)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SiftAPIError.invalidResponse
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
-            throw SiftAPIError.httpStatus(
-                httpResponse.statusCode,
-                detail: errorDetail(from: data)
-            )
+            throw await responseError(status: httpResponse.statusCode, data: data)
         }
         return try jsonDecoder.decode(Response.self, from: data)
     }
 
     private func errorDetail(from data: Data) -> SiftAPIErrorDetail? {
-        try? jsonDecoder.decode(SiftAPIErrorEnvelope.self, from: data).detail
+        try? jsonDecoder.decode(SiftAPIErrorEnvelope.self, from: data).resolvedDetail
+    }
+
+    private func responseError(status: Int, data: Data) async -> SiftAPIError {
+        let detail = errorDetail(from: data)
+        if status == 401,
+           ["authentication_required", "beta_token_expired", "beta_token_revoked"].contains(detail?.code) {
+            await sessionController.clearSession()
+        }
+        return .httpStatus(status, detail: detail)
+    }
+
+    private func authorize(
+        _ request: inout URLRequest,
+        includesProviderKey: Bool = false
+    ) async throws {
+        guard requiresBetaActivation else { return }
+        let session = try await sessionController.sessionForRequest(
+            baseURL: baseURL,
+            urlSession: urlSession
+        )
+        request.setValue(
+            "Bearer \(session.betaAccessToken)",
+            forHTTPHeaderField: "Authorization"
+        )
+        request.setValue(
+            credentialStore.installationId,
+            forHTTPHeaderField: "X-Sift-Installation"
+        )
+        if includesProviderKey {
+            guard let providerKey = credentialStore.providerKey, !providerKey.isEmpty else {
+                throw SiftAPIError.providerKeyRequired
+            }
+            request.setValue(providerKey, forHTTPHeaderField: "X-Sift-Provider-Key")
+        }
+    }
+
+    private func managedSettings(
+        from connection: ManagedProviderConnectionDTO
+    ) -> ModelProviderSettingsDTO {
+        ModelProviderSettingsDTO(
+            providerType: connection.providerId,
+            baseURL: connection.baseURL,
+            apiKeyConfigured: credentialStore.providerKey?.isEmpty == false,
+            apiKeyPreview: credentialStore.providerKey.map { "***\($0.suffix(4))" },
+            explainModel: connection.model,
+            webSearchEnabled: true,
+            supportsWebSearch: true
+        )
     }
 }
 
 enum SiftAPIError: LocalizedError {
     case invalidResponse
     case httpStatus(Int, detail: SiftAPIErrorDetail?)
+    case betaActivationRequired
+    case providerKeyRequired
+    case managedUnsupported
 
     var errorDescription: String? {
         switch self {
@@ -499,6 +702,12 @@ enum SiftAPIError: LocalizedError {
             } else {
                 "The server returned status \(status)."
             }
+        case .betaActivationRequired:
+            "Activate beta access to continue."
+        case .providerKeyRequired:
+            "Add your provider API key to continue."
+        case .managedUnsupported:
+            "This setting is not available in the managed beta."
         }
     }
 }
@@ -521,7 +730,10 @@ private struct EmptyRequest: Codable {}
 private struct EmptyResponse: Codable {}
 
 private struct SiftAPIErrorEnvelope: Decodable {
-    var detail: SiftAPIErrorDetail
+    var detail: SiftAPIErrorDetail?
+    var error: SiftAPIErrorDetail?
+
+    var resolvedDetail: SiftAPIErrorDetail? { error ?? detail }
 }
 
 struct SiftAPIErrorDetail: Decodable {
@@ -529,6 +741,16 @@ struct SiftAPIErrorDetail: Decodable {
     var message: String
 
     var displayMessage: String {
+        switch code {
+        case "invite_invalid": return "That invite code is invalid."
+        case "invite_consumed": return "That invite code has already been used on another device."
+        case "invalid_provider_key": return "Check your provider API key and try again."
+        case "provider_quota_exhausted": return "Your provider quota is used up."
+        case "provider_unreachable": return "Your provider could not be reached. Try again."
+        case "backend_unavailable": return "Sift is temporarily unavailable. Try again."
+        case "owner_scope_not_found": return "That item is no longer available."
+        default: break
+        }
         let normalized = message.lowercased()
         if normalized.contains("billing_not_active") {
             return "Runtime provider billing is not active. Enable billing with the selected provider, then retry."

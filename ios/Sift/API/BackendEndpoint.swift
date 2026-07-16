@@ -11,6 +11,7 @@ import Foundation
 /// Release / Managed (TestFlight) builds never read a user-editable URL.
 enum BackendEndpointResolver {
     static let defaultURL = URL(string: "http://127.0.0.1:8000")!
+    static let missingManagedURL = URL(string: "https://not-configured.invalid")!
 
     /// Whether this build lets the user edit a Personal backend URL.
     static var allowsPersonalOverride: Bool {
@@ -29,7 +30,7 @@ enum BackendEndpointResolver {
             savedPersonal: PersonalBackendURLStore.savedURL(),
             managed: managedEndpointURL(),
             allowsPersonal: allowsPersonalOverride,
-            defaultURL: defaultURL
+            defaultURL: allowsPersonalOverride ? defaultURL : missingManagedURL
         )
     }
 

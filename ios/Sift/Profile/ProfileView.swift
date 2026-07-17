@@ -104,9 +104,13 @@ struct ProfileView: View {
                     WebSearchSettingsView()
                 } label: {
                     SiftSettingRow(icon: "globe", title: "Research") {
-                        Text(webLabel)
-                            .font(SiftFont.mono(12))
-                            .foregroundStyle(SiftColor.textBody)
+                        HStack(spacing: 8) {
+                            ProviderBrandMark(providerId: webProviderId, size: 18, cornerRadius: 5)
+                            Text(webLabel)
+                                .font(SiftFont.mono(12))
+                                .foregroundStyle(SiftColor.textBody)
+                                .lineLimit(1)
+                        }
                     }
                 }
                 .buttonStyle(.plain)
@@ -174,6 +178,10 @@ struct ProfileView: View {
             return appStatus?.webSearchEnabled == true ? "on" : "off"
         }
         return webSettings.webSearchEnabled ? webSettings.providerType : "off"
+    }
+
+    private var webProviderId: String {
+        webSettings?.providerType ?? "disabled"
     }
 
     private func refresh() async {

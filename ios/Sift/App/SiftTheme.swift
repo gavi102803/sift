@@ -412,6 +412,12 @@ struct ProviderBrandMark: View {
         case "kilocode": return "brand-kilocode"
         case "xiaomi": return "brand-xiaomi"
         case "opencode-zen", "opencode": return "brand-opencode"
+        case "ddgs", "duckduckgo": return "brand-duckduckgo"
+        case "tavily": return "brand-tavily"
+        case "exa": return "brand-exa"
+        case "firecrawl": return "brand-firecrawl"
+        case "brave-free", "brave": return "brand-brave"
+        case "xai": return "brand-xai"
         default: return nil
         }
     }

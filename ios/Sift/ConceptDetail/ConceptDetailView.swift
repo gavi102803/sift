@@ -121,6 +121,7 @@ struct ConceptDetailView: View {
                                     ConceptFollowUpView(
                                         concept: concept,
                                         turns: turns,
+                                        hiddenTurnId: editingQuery?.id,
                                         isSubmitting: isSubmittingFollowUp,
                                         isRetryingGeneration: isRetryingGeneration,
                                         onRetryGeneration: { Task { await retryGeneration(concept) } },
@@ -144,8 +145,6 @@ struct ConceptDetailView: View {
                             .padding(.bottom, SiftLayout.tabBarClearance + 76)
                         }
                         .scrollContentBackground(.hidden)
-                        .scaleEffect(isPresentingQueryEditor ? 0.995 : 1)
-                        .saturation(isPresentingQueryEditor ? 0.82 : 1)
                         .allowsHitTesting(!isPresentingQueryEditor)
 
                         if let editingQuery {
@@ -153,7 +152,7 @@ struct ConceptDetailView: View {
                                 text: editingQuery.content,
                                 onCancel: cancelQueryEditing
                             )
-                            .transition(.opacity.combined(with: .scale(scale: 0.985)))
+                            .transition(.opacity)
                         }
                     }
                     .onChange(of: detailMode) { _, newValue in
@@ -389,8 +388,7 @@ struct ConceptDetailView: View {
         .padding(.leading, 10)
         .padding(.trailing, 6)
         .padding(.vertical, 6)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 25, style: .continuous))
-        .background(SiftColor.surface.opacity(0.92), in: RoundedRectangle(cornerRadius: 25, style: .continuous))
+        .background { composerGlassBackground }
         .overlay {
             RoundedRectangle(cornerRadius: 25, style: .continuous)
                 .strokeBorder(SiftColor.hairline, lineWidth: 1)
@@ -398,6 +396,17 @@ struct ConceptDetailView: View {
         .shadow(color: .black.opacity(0.07), radius: 12, y: 4)
         .padding(.horizontal, 18)
         .padding(.bottom, SiftLayout.tabBarClearance)
+    }
+
+    @ViewBuilder
+    private var composerGlassBackground: some View {
+        if #available(iOS 26.0, *) {
+            Color.clear
+                .glassEffect(.regular, in: .rect(cornerRadius: 25))
+        } else {
+            RoundedRectangle(cornerRadius: 25, style: .continuous)
+                .fill(.regularMaterial)
+        }
     }
 
     private var composerActionColor: Color {
@@ -626,15 +635,12 @@ struct ConceptDetailView: View {
 
     private func editAndResend(_ turn: ConceptHistoryTurnDTO) {
         guard let index = turns.firstIndex(where: { $0.id == turn.id }) else { return }
-        queryEditorPreviousDraft = followUpText
-        followUpText = turn.content
-        editingTurnIndex = index
-        withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
+        withAnimation(.spring(response: 0.36, dampingFraction: 1)) {
+            queryEditorPreviousDraft = followUpText
+            followUpText = turn.content
+            editingTurnIndex = index
             detailMode = .followUp
             isPresentingQueryEditor = true
-        }
-        Task { @MainActor in
-            await Task.yield()
             isFollowUpFocused = true
         }
     }
@@ -650,22 +656,22 @@ struct ConceptDetailView: View {
     }
 
     private func cancelQueryEditing() {
-        withAnimation(.spring(response: 0.36, dampingFraction: 0.88)) {
+        withAnimation(.spring(response: 0.36, dampingFraction: 1)) {
             isPresentingQueryEditor = false
+            editingTurnIndex = nil
+            followUpText = queryEditorPreviousDraft
+            queryEditorPreviousDraft = ""
+            isFollowUpFocused = false
         }
-        editingTurnIndex = nil
-        followUpText = queryEditorPreviousDraft
-        queryEditorPreviousDraft = ""
-        isFollowUpFocused = false
     }
 
     private func restoreQueryEditor(afterFailureAt index: Int) {
         guard turns.indices.contains(index) else { return }
         editingTurnIndex = index
-        withAnimation(.spring(response: 0.36, dampingFraction: 0.88)) {
+        withAnimation(.spring(response: 0.36, dampingFraction: 1)) {
             isPresentingQueryEditor = true
+            isFollowUpFocused = true
         }
-        isFollowUpFocused = true
     }
 
     private func restoreFailedFollowUpDraft() {

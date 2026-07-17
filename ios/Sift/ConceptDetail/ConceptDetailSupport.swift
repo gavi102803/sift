@@ -258,10 +258,7 @@ struct EditingQueryFocusLayer: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            Rectangle()
-                .fill(.ultraThinMaterial)
-                .opacity(0.72)
-                .ignoresSafeArea()
+            editingBackdrop
                 .contentShape(Rectangle())
                 .onTapGesture(perform: onCancel)
 
@@ -284,6 +281,14 @@ struct EditingQueryFocusLayer: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 64)
         }
+    }
+
+    @ViewBuilder
+    private var editingBackdrop: some View {
+        Rectangle()
+            .fill(.ultraThinMaterial)
+            .opacity(0.78)
+            .ignoresSafeArea()
     }
 }
 

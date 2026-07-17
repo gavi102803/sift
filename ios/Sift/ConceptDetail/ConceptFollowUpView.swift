@@ -6,6 +6,7 @@ import SwiftUI
 struct ConceptFollowUpView: View {
     var concept: Concept
     var turns: [ConceptHistoryTurnDTO]
+    var hiddenTurnId: UUID? = nil
     var isSubmitting: Bool
     var isRetryingGeneration: Bool = false
     var onRetryGeneration: () -> Void = {}
@@ -41,6 +42,8 @@ struct ConceptFollowUpView: View {
                     onRetry: onRetryAssistant,
                     onEditUserTurn: onEditUserTurn
                 )
+                .opacity(turn.id == hiddenTurnId ? 0 : 1)
+                .accessibilityHidden(turn.id == hiddenTurnId)
             }
 
             // Status-driven trailing element. Generation is in progress or has

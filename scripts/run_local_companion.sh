@@ -60,4 +60,6 @@ if [[ "$TAILNET_MODE" == "1" || "$HOST" == "0.0.0.0" ]]; then
   echo "Personal Tailnet dogfood: configure iPhone with https://<mac-machine>.<tailnet>.ts.net"
   echo "Do not expose this local backend to the public internet."
 fi
+echo "Applying local database migrations"
+"$PYTHON" -m alembic upgrade head
 exec "$PYTHON" -m uvicorn sift_backend.main:create_app --factory --host "$HOST" --port "$PORT" --reload

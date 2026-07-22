@@ -99,11 +99,20 @@ Status: Internal MVP validation
 
 ## Known MVP Limitations
 
-- Backend auth and per-user accounts are not implemented.
+- Managed Beta activation, token lifecycle, owner isolation, and ephemeral BYOK relay are implemented
+  at repository level; real hosted deployment and signed-device evidence are still pending.
 - Multi-device sync is not implemented.
 - App Intents, Shortcuts, Spotlight, sharing, collaboration, and spaced repetition are deferred.
 - The iOS app uses local SwiftData mirrors plus backend authority; conflict handling beyond the current MVP flows is not complete.
-- Initial concept generation still persists only after the structured model response validates; the app shows a local generating draft while it waits.
-- Full revision browsing and rollback UI are not implemented.
+- Initial concept and follow-up generation, including legacy compatibility endpoints, use persistent
+  ModelRun tasks; the DeepSeek 20-turn live recovery protocol passed on 2026-07-19.
+- The privacy-safe CLI report covers run reliability plus capture, follow-up, seven-day reuse,
+  restore, and review-decision aggregates; it is not a hosted analytics dashboard or cohort system.
+- The 20-turn recovery runner is resumable and cost-gated, and its Mock process-kill rehearsal is
+  automated; the equivalent DeepSeek run completed with 20 successful follow-ups, 42 unique turns,
+  Backend kill/restart recovery, idempotent replay, early-context recall, and a live Simulator App
+  terminate/relaunch follow-up recovery. Multi-day and signed-device evidence remain gates.
+- Revision browsing, preview, online restore, offline disable behavior, and periodic-review Proposal
+  refresh are covered on Simulator; signed-device validation remains a release gate.
 - Complex relation suggestions without an existing target concept are not auto-created.
 - Real device validation is still required before any broader internal release.

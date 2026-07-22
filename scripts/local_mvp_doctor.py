@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import http.client
 import sqlite3
 import sys
@@ -10,7 +11,6 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
-
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND_SRC = ROOT / "backend" / "src"
@@ -41,6 +41,7 @@ def main() -> int:
     checks = [
         backend_check(args.backend_url, skip=args.no_network),
         sqlite_check(settings.database_url),
+        migration_check(settings.database_url),
         provider_check(settings),
     ]
     for check in checks:
@@ -92,6 +93,67 @@ def sqlite_check(database_url: str) -> Check:
     except sqlite3.Error as error:
         return Check("sqlite", False, f"not writable at {db_path}: {error}")
     return Check("sqlite", True, f"writable at {db_path}")
+
+
+def migration_check(database_url: str) -> Check:
+    if not database_url.startswith("sqlite:///"):
+        return Check("migration", True, "managed database migration is checked by deployment")
+
+    db_path = sqlite_path(database_url)
+    if not db_path.exists():
+        return Check("migration", False, f"database does not exist at {db_path}")
+
+    expected = expected_migration_head()
+    try:
+        with sqlite3.connect(db_path) as connection:
+            row = connection.execute("SELECT version_num FROM alembic_version").fetchone()
+    except sqlite3.Error as error:
+        return Check("migration", False, f"could not read Alembic version: {error}")
+
+    current = row[0] if row else None
+    if current != expected:
+        return Check(
+            "migration",
+            False,
+            f"database revision={current or '(none)'}, expected={expected}; run Alembic upgrade",
+        )
+    return Check("migration", True, f"database revision={current}")
+
+
+def expected_migration_head() -> str:
+    revisions: set[str] = set()
+    parents: set[str] = set()
+    versions = ROOT / "backend" / "alembic" / "versions"
+    for path in versions.glob("*.py"):
+        values: dict[str, str | None] = {}
+        for node in ast.parse(path.read_text()).body:
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                continue
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            value = node.value
+            if not isinstance(value, ast.Constant) or not isinstance(value.value, (str, type(None))):
+                continue
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id in {"revision", "down_revision"}:
+                    values[target.id] = value.value
+        revision = values.get("revision")
+        parent = values.get("down_revision")
+        if revision:
+            revisions.add(revision)
+        if parent:
+            parents.add(parent)
+    heads = revisions - parents
+    if len(heads) != 1:
+        raise RuntimeError(f"expected one migration head, found {sorted(heads)}")
+    return heads.pop()
+
+
+def sqlite_path(database_url: str) -> Path:
+    raw_path = database_url.removeprefix("sqlite:///")
+    db_path = Path(raw_path)
+    if not db_path.is_absolute():
+        db_path = (ROOT / "backend" / db_path).resolve()
+    return db_path
 
 
 def provider_check(settings) -> Check:

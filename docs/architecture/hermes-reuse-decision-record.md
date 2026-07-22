@@ -1,6 +1,6 @@
 # Hermes Reuse Decision Record
 
-Date: 2026-06-27
+Date: 2026-07-21
 
 Decision: Sift is Hermes-informed, not Hermes-integrated.
 
@@ -36,11 +36,24 @@ Pinned upstream:
 | Protocol driver boundary | Design reference only | Implemented in docs | `agent/transports/*` | `docs/architecture/protocol-driver-contract.md` | None | Sift drivers are local contracts. |
 | Hermes CLI | Not adopted | Final | CLI package and entrypoints | None | None | Sift is not a CLI agent runtime. |
 | Hermes gateway / API server semantics | Not adopted | Final | Gateway/API server paths | None | None | Sift backend owns its API. |
-| Hermes agent loop | Not adopted | Final | Agent runtime paths | None | None | Sift owns runtime orchestration. |
+| Hermes agent loop and harness patterns | Design reference only | Harness v1 implemented locally | Agent runtime paths | `backend/src/sift_backend/model_runtime/harness/`, `backend/src/sift_backend/runtime/execution_observer.py` | `backend/tests/test_agent_harness.py`, `backend/tests/test_model_runs_and_revisions.py` | Sift does not import Hermes' general-purpose loop. It ports bounded execution ideas into Sift-owned AgentSpecs, budgets, tool policy, steps, and durable ModelRun events. |
 | Hermes memory | Not adopted | Final | Memory provider paths | None | None | Sift owns Knowledge Mutation Layer, Card, Patch, Proposal, and LearningState. |
 | Hermes OAuth flows | Not adopted | Final | Auth/OAuth provider paths | None | None | Current Sift Profile avoids OAuth-dependent providers. |
 | Hermes auxiliary model semantics | Not adopted | Final | Auxiliary model config paths | None | None | Sift default model eligibility is Sift-owned. |
 | Copilot ACP / external process providers | Not adopted | Final | `plugins/model-providers/copilot-acp` | None | None | External process runtime is outside current product boundary. |
+
+## Sift Agent Harness v1 Boundary
+
+The Sift Agent Harness is a bounded execution layer above the model runtime and below durable
+concept commits. It currently defines a versioned `AgentSpec` for initial card generation,
+follow-up, continuity summary, and periodic knowledge review. The harness enforces model/tool/step
+budgets before calls, restricts tools per workflow, and records step, usage, prompt-version, and
+termination metadata on the durable `ModelRun`.
+
+The harness does not own Concept, Note, Revision, or Proposal truth. Model output still passes schema
+validation and is committed through the existing Concept and Knowledge Mutation application rules.
+This preserves recovery and idempotency while avoiding a general-purpose shell, MCP, or arbitrary
+tool loop in the dogfood product.
 
 ## Release Rule
 

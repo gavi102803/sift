@@ -83,6 +83,52 @@ Phase 0 keeps the local backend behavior:
    ```
 
 7. Capture a concept and verify it is persisted in the Mac backend SQLite DB.
+8. After a dogfood session, print the privacy-safe reliability summary:
+
+   ```bash
+   backend/.venv/bin/python scripts/model_run_metrics.py
+   ```
+
+   The report contains aggregate run counts, success rate, p50/p95 latency,
+   recovery attempts, terminal-integrity checks, summaries, capture outcomes,
+   follow-ups per concept, revision restores, and periodic Proposal decisions.
+   `withFollowUpAfter7Days` is a conservative reuse proxy: it counts a concept
+   only when a user follow-up was persisted at least seven days after the
+   concept was created. It is not a page-view or cohort-retention metric. The
+   report does not read or output captures, answers, deltas, Provider keys,
+   owner IDs, or error messages.
+
+9. Before the recovery milestone is closed, run the resumable 20-turn protocol:
+
+   ```bash
+   backend/.venv/bin/python scripts/recovery_dogfood.py
+   ```
+
+   If the Backend uses a real Provider, this command exits before creating a
+   ModelRun. Live execution requires an explicit cost acknowledgement:
+
+   ```bash
+   backend/.venv/bin/python scripts/recovery_dogfood.py --confirm-live-cost
+   ```
+
+   The runner saves only IDs, counters, protocol hash, and progress under
+   `.data/recovery-dogfood-state.json`; it does not persist questions or model
+   answers. Re-running the same command resumes from that state and reuses
+   deterministic idempotency keys. While it runs, stop and restart the Backend
+   once, or interrupt the local connection, then confirm the final JSON has
+   `passed=true`, `persistedTurns=42`, `eventIntegrityPassed=true`,
+   `maintenancePassed=true`, `earlyContextRecallPassed=true`, and
+   `transientNetworkFailures>0`. A crash
+   during a Provider stream can legitimately cause one additional paid Provider
+   call, while durable Concept and Turn writes must remain unique.
+
+   Simulator UI automation separately terminates the app during both an
+   initial run and a follow-up run. Relaunch acceptance requires one recovered
+   question, one recovered answer, one submission request, and no false
+   "previous follow-up was not sent" error. The explicitly authorized DeepSeek
+   session completed this check on 2026-07-19: the Backend persisted one
+   follow-up pair while the App was terminated, and the relaunched Simulator
+   displayed the recovered answer once.
 
 ## Non-Goals
 
@@ -102,3 +148,11 @@ Phase 0 keeps the local backend behavior:
 - A fake `https://example.ts.net` reports unavailable without crashing.
 - `SIFT_BACKEND_BASE_URL` remains the highest-priority override.
 - Release/Managed builds do not expose editable backend URL controls.
+- The ModelRun metrics report contains no capture content, model output,
+  credentials, owner identifiers, or raw errors.
+- Capture success excludes active attempts from its denominator, and product
+  reuse metrics are derived only from IDs, timestamps, roles, and statuses.
+- The recovery runner refuses a non-Mock Provider without
+  `--confirm-live-cost`, survives connection errors and temporary 502/503/504
+  responses, and a second run against the same state produces no duplicate
+  initial or follow-up ModelRuns.

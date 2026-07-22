@@ -12,7 +12,7 @@ fi
 
 check_backend() {
   cd "$ROOT"
-  "$PYTHON" -m ruff check backend/src backend/tests scripts/smoke-backend-mvp.py scripts/local_mvp_doctor.py scripts/check_managed_deployment.py scripts/revoke_beta_owner.py
+  "$PYTHON" -m ruff check backend/src backend/tests scripts/smoke-backend-mvp.py scripts/local_mvp_doctor.py scripts/check_managed_deployment.py scripts/revoke_beta_owner.py scripts/evaluate_continuity.py scripts/model_run_metrics.py scripts/recovery_dogfood.py
   "$PYTHON" -m pytest backend
 }
 

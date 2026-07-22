@@ -5,6 +5,80 @@ import SwiftData
 struct ConceptLocalStore {
     var modelContext: ModelContext
 
+    @discardableResult
+    func upsertModelRun(_ dto: ModelRunDTO, lastSequence: Int? = nil) throws -> ModelRunMirror {
+        let runId = dto.id
+        let descriptor = FetchDescriptor<ModelRunMirror>(
+            predicate: #Predicate { mirror in mirror.runId == runId }
+        )
+        let existing = try modelContext.fetch(descriptor).first
+        let mirror = existing ?? ModelRunMirror(
+            runId: dto.id,
+            kind: dto.kind,
+            status: dto.status,
+            conceptId: dto.conceptId,
+            clientDraftId: dto.clientDraftId,
+            idempotencyKey: dto.idempotencyKey,
+            updatedAt: dto.updatedAt
+        )
+        mirror.kind = dto.kind
+        mirror.status = dto.status
+        mirror.conceptId = dto.conceptId
+        mirror.clientDraftId = dto.clientDraftId
+        mirror.idempotencyKey = dto.idempotencyKey
+        mirror.lastSequence = max(mirror.lastSequence, lastSequence ?? mirror.lastSequence)
+        mirror.updatedAt = dto.updatedAt
+        if existing == nil { modelContext.insert(mirror) }
+        return mirror
+    }
+
+    func reconcileSucceededModelRun(_ run: ModelRunDTO) throws {
+        guard run.status == "succeeded" else { return }
+        if let dto = run.result?.concept {
+            let drafts = try modelContext.fetch(FetchDescriptor<Concept>()).filter {
+                $0.id.uuidString.caseInsensitiveCompare(run.clientDraftId ?? "") == .orderedSame
+                    || $0.captureGenerationIdempotencyKey == run.idempotencyKey
+            }
+            let question = drafts.first?.displayTitle ?? dto.displayTitle
+            let concept = try upsertConcept(from: dto)
+            replaceInitialGenerationAnswer(
+                concept: concept,
+                question: question,
+                answer: dto.initialAnswer ?? dto.oneLineExplanation
+            )
+            for draft in drafts {
+                markCaptureGenerationCompleted(draft)
+                if draft.id != concept.id { modelContext.delete(draft) }
+            }
+        }
+        if let response = run.result?.response {
+            let concept = try upsertConcept(from: response.concept)
+            if let key = UUID(uuidString: run.idempotencyKey) {
+                clearFollowUpOperation(concept: concept, key: key)
+            }
+            if let proposal = response.proposal {
+                _ = try upsertProposal(proposal, conceptId: response.concept.id)
+            }
+        }
+        if let proposal = run.result?.proposal, let conceptId = run.conceptId {
+            _ = try upsertProposal(proposal, conceptId: conceptId)
+        }
+    }
+
+    func reconcileFailedModelRun(_ run: ModelRunDTO) throws {
+        guard run.kind == "initialConcept", run.status == "failed" else { return }
+        let drafts = try modelContext.fetch(FetchDescriptor<Concept>()).filter {
+            $0.id.uuidString.caseInsensitiveCompare(run.clientDraftId ?? "") == .orderedSame
+                || $0.captureGenerationIdempotencyKey == run.idempotencyKey
+        }
+        for draft in drafts where ConceptStatusRules.isLocalOnly(draft.captureStatus) {
+            markCaptureGenerationTerminalFailure(
+                draft,
+                error: SiftAPIError.modelRunFailed(code: run.errorCode ?? "model_run_failed")
+            )
+        }
+    }
+
     func createDraft(rawCapture: String, locale: String = Locale.current.identifier) -> Concept {
         let title = rawCapture.trimmingCharacters(in: .whitespacesAndNewlines)
         let concept = Concept(
@@ -292,6 +366,10 @@ struct ConceptLocalStore {
 
     func upsertConcept(from dto: ConceptDTO) throws -> Concept {
         let existingConcept = try fetchConcept(id: dto.id)
+        let previousRevision = existingConcept?.noteRevision
+        let previousBlockSignature = existingConcept?.note?.blocks
+            .sorted { ($0.position ?? 0) < ($1.position ?? 0) }
+            .map { "\($0.id.uuidString):\($0.position ?? 0):\($0.content)" }
         let concept = existingConcept ?? Concept(
             id: dto.id,
             canonicalTitle: dto.canonicalTitle,
@@ -305,7 +383,12 @@ struct ConceptLocalStore {
         concept.captureStatus = dto.captureStatus
         concept.noteRevision = dto.noteRevision
         concept.answerSourceJSON = encodeAnswerSource(dto.answerSource)
-        concept.updatedAt = .now
+        if let createdAt = dto.createdAt, existingConcept == nil {
+            concept.createdAt = createdAt
+        }
+        if let updatedAt = dto.updatedAt {
+            concept.updatedAt = updatedAt
+        }
 
         if existingConcept == nil {
             modelContext.insert(concept)
@@ -314,7 +397,14 @@ struct ConceptLocalStore {
         let note = concept.note ?? ConceptNote(concept: concept)
         let existingNoteRevision = note.revision
         note.revision = dto.noteRevision
-        note.updatedAt = .now
+        let incomingBlockSignature = dto.blocks
+            .sorted { ($0.position ?? 0) < ($1.position ?? 0) }
+            .map { "\($0.id.uuidString):\($0.position ?? 0):\($0.content)" }
+        if existingConcept == nil
+            || previousRevision != dto.noteRevision
+            || previousBlockSignature != incomingBlockSignature {
+            note.updatedAt = dto.updatedAt ?? .now
+        }
         note.updatedBy = "backend"
         concept.note = note
 
@@ -555,7 +645,9 @@ struct ConceptLocalStore {
             patchOperationsJSON: "[]",
             rationale: dto.rationale,
             confidence: dto.confidence,
-            status: dto.status
+            status: dto.status,
+            origin: dto.origin,
+            sourceRunId: dto.sourceRunId
         )
 
         proposal.conceptId = conceptId
@@ -564,6 +656,8 @@ struct ConceptLocalStore {
         proposal.rationale = dto.rationale
         proposal.confidence = dto.confidence
         proposal.status = dto.status
+        proposal.origin = dto.origin
+        proposal.sourceRunId = dto.sourceRunId
         if dto.status != ProposalStatus.proposed.rawValue {
             proposal.resolvedAt = .now
         }
@@ -573,6 +667,23 @@ struct ConceptLocalStore {
         }
 
         return proposal
+    }
+
+    func reconcileProposedProposals(
+        _ dtos: [UpdateProposalDTO],
+        conceptId: UUID
+    ) throws {
+        let remoteIds = Set(dtos.map(\.id))
+        let local = try modelContext.fetch(FetchDescriptor<ConceptUpdateProposal>()).filter {
+            $0.conceptId == conceptId && $0.status == ProposalStatus.proposed.rawValue
+        }
+        for proposal in local where !remoteIds.contains(proposal.id) {
+            proposal.status = ProposalStatus.stale.rawValue
+            proposal.resolvedAt = .now
+        }
+        for dto in dtos {
+            _ = try upsertProposal(dto, conceptId: conceptId)
+        }
     }
 
     func mergeIdempotencyKey(for proposal: ConceptUpdateProposal) -> UUID {

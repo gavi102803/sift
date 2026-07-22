@@ -15,6 +15,7 @@ struct SiftApp: App {
             Conversation.self,
             ModelThread.self,
             ConversationMessage.self,
+            ModelRunMirror.self,
             ConceptUpdateProposal.self,
             AnswerSource.self,
             Tag.self,

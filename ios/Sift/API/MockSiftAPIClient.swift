@@ -198,6 +198,31 @@ struct MockSiftAPIClient: SiftAPIClient {
         )
     }
 
+    func archiveConcepts(ids: [UUID]) async throws -> [ConceptDTO] {
+        try await Task.sleep(nanoseconds: delayNanoseconds)
+        return ids.map { concept(id: $0, status: .archived) }
+    }
+
+    func restoreConcepts(ids: [UUID]) async throws -> [ConceptDTO] {
+        try await Task.sleep(nanoseconds: delayNanoseconds)
+        return ids.map { concept(id: $0, status: .ready) }
+    }
+
+    private func concept(id: UUID, status: CaptureStatus) -> ConceptDTO {
+        ConceptDTO(
+            id: id,
+            canonicalTitle: "RAG",
+            displayTitle: "RAG",
+            oneLineExplanation: "Retrieval-augmented generation improves answers with retrieved context.",
+            maturity: ConceptMaturity.growing.rawValue,
+            captureStatus: status.rawValue,
+            noteRevision: 1,
+            blocks: [],
+            createdAt: .now,
+            updatedAt: .now
+        )
+    }
+
     func updateConceptSummary(id: UUID, request: UpdateConceptSummaryRequest) async throws -> ConceptDTO {
         try await Task.sleep(nanoseconds: delayNanoseconds)
         return ConceptDTO(

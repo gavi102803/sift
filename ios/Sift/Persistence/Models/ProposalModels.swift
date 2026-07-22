@@ -2,6 +2,38 @@ import Foundation
 import SwiftData
 
 @Model
+final class ModelRunMirror {
+    @Attribute(.unique) var runId: UUID
+    var kind: String
+    var status: String
+    var conceptId: UUID?
+    var clientDraftId: String?
+    var idempotencyKey: String
+    var lastSequence: Int
+    var updatedAt: Date
+
+    init(
+        runId: UUID,
+        kind: String,
+        status: String,
+        conceptId: UUID? = nil,
+        clientDraftId: String? = nil,
+        idempotencyKey: String,
+        lastSequence: Int = 0,
+        updatedAt: Date = .now
+    ) {
+        self.runId = runId
+        self.kind = kind
+        self.status = status
+        self.conceptId = conceptId
+        self.clientDraftId = clientDraftId
+        self.idempotencyKey = idempotencyKey
+        self.lastSequence = lastSequence
+        self.updatedAt = updatedAt
+    }
+}
+
+@Model
 final class ConceptUpdateProposal {
     @Attribute(.unique) var id: UUID
     var conceptId: UUID
@@ -11,6 +43,8 @@ final class ConceptUpdateProposal {
     var rationale: String
     var confidence: Double
     var status: String
+    var origin: String?
+    var sourceRunId: UUID?
     var mergeIdempotencyKey: String?
     var mergeOperationStatus: String?
     var createdAt: Date
@@ -25,6 +59,8 @@ final class ConceptUpdateProposal {
         rationale: String,
         confidence: Double,
         status: String = ProposalStatus.proposed.rawValue,
+        origin: String? = nil,
+        sourceRunId: UUID? = nil,
         mergeIdempotencyKey: String? = nil,
         mergeOperationStatus: String? = nil,
         createdAt: Date = .now,
@@ -38,6 +74,8 @@ final class ConceptUpdateProposal {
         self.rationale = rationale
         self.confidence = confidence
         self.status = status
+        self.origin = origin
+        self.sourceRunId = sourceRunId
         self.mergeIdempotencyKey = mergeIdempotencyKey
         self.mergeOperationStatus = mergeOperationStatus
         self.createdAt = createdAt

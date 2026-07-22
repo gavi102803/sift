@@ -52,6 +52,8 @@ enum CompanionErrorKind: Equatable {
             switch apiError {
             case .invalidResponse:
                 self = .unknown
+            case .modelRunFailed:
+                self = .companionError
             case .httpStatus(let code, _):
                 switch code {
                 case 500...599: self = .companionError

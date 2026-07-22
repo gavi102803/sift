@@ -17,6 +17,9 @@
 		100000000000000000000117 /* SiftTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000017 /* SiftTheme.swift */; };
 		100000000000000000000118 /* SiftLogo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000018 /* SiftLogo.swift */; };
 		100000000000000000000107 /* ConceptDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000007 /* ConceptDetailView.swift */; };
+		100000000000000000000133 /* ConceptHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000033 /* ConceptHistoryView.swift */; };
+		100000000000000000000134 /* ConceptMaintenanceObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000034 /* ConceptMaintenanceObserver.swift */; };
+		100000000000000000000135 /* ConceptArchiveSelectionPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000035 /* ConceptArchiveSelectionPlan.swift */; };
 		100000000000000000000108 /* ConceptLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000008 /* ConceptLibraryView.swift */; };
 		100000000000000000000114 /* ConceptSearchIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000014 /* ConceptSearchIndex.swift */; };
 		100000000000000000000109 /* ConceptLocalStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000009 /* ConceptLocalStore.swift */; };
@@ -83,6 +86,9 @@
 		100000000000000000000017 /* SiftTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/SiftTheme.swift; sourceTree = "<group>"; };
 		100000000000000000000018 /* SiftLogo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/SiftLogo.swift; sourceTree = "<group>"; };
 		100000000000000000000007 /* ConceptDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConceptDetail/ConceptDetailView.swift; sourceTree = "<group>"; };
+		100000000000000000000033 /* ConceptHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConceptDetail/ConceptHistoryView.swift; sourceTree = "<group>"; };
+		100000000000000000000034 /* ConceptMaintenanceObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/ConceptMaintenance/ConceptMaintenanceObserver.swift; sourceTree = "<group>"; };
+		100000000000000000000035 /* ConceptArchiveSelectionPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/ConceptArchiving/ConceptArchiveSelectionPlan.swift; sourceTree = "<group>"; };
 		100000000000000000000008 /* ConceptLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Library/ConceptLibraryView.swift; sourceTree = "<group>"; };
 		100000000000000000000014 /* ConceptSearchIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Library/ConceptSearchIndex.swift; sourceTree = "<group>"; };
 		100000000000000000000009 /* ConceptLocalStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence/ConceptLocalStore.swift; sourceTree = "<group>"; };
@@ -173,6 +179,9 @@
 				100000000000000000000017 /* SiftTheme.swift */,
 				100000000000000000000018 /* SiftLogo.swift */,
 				100000000000000000000007 /* ConceptDetailView.swift */,
+				100000000000000000000033 /* ConceptHistoryView.swift */,
+				100000000000000000000034 /* ConceptMaintenanceObserver.swift */,
+				100000000000000000000035 /* ConceptArchiveSelectionPlan.swift */,
 				100000000000000000000020 /* ConceptReadingView.swift */,
 				100000000000000000000021 /* ConceptFollowUpView.swift */,
 				100000000000000000000022 /* ConceptProposalCard.swift */,
@@ -399,6 +408,9 @@
 				100000000000000000000117 /* SiftTheme.swift in Sources */,
 				100000000000000000000118 /* SiftLogo.swift in Sources */,
 				100000000000000000000107 /* ConceptDetailView.swift in Sources */,
+				100000000000000000000133 /* ConceptHistoryView.swift in Sources */,
+				100000000000000000000134 /* ConceptMaintenanceObserver.swift in Sources */,
+				100000000000000000000135 /* ConceptArchiveSelectionPlan.swift in Sources */,
 				100000000000000000000120 /* ConceptReadingView.swift in Sources */,
 				100000000000000000000121 /* ConceptFollowUpView.swift in Sources */,
 				100000000000000000000122 /* ConceptProposalCard.swift in Sources */,

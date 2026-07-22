@@ -4,6 +4,49 @@ import XCTest
 
 final class ProductLogicTests: XCTestCase {
 
+    func testArchiveSelectionPlanSeparatesLocalDraftsFromBackendConcepts() {
+        let ready = Concept(
+            canonicalTitle: "Ready",
+            displayTitle: "Ready",
+            captureStatus: CaptureStatus.ready.rawValue
+        )
+        let review = Concept(
+            canonicalTitle: "Review",
+            displayTitle: "Review",
+            captureStatus: CaptureStatus.needsDisambiguation.rawValue
+        )
+        let failed = Concept(
+            canonicalTitle: "Failed",
+            displayTitle: "Failed",
+            captureStatus: CaptureStatus.generationFailed.rawValue
+        )
+
+        let plan = ConceptArchiveSelectionPlan(concepts: [ready, review, failed])
+
+        XCTAssertEqual(Set(plan.remoteConceptIds), [ready.id])
+        XCTAssertEqual(Set(plan.localDraftIds), [review.id, failed.id])
+        XCTAssertEqual(plan.totalCount, 3)
+        XCTAssertEqual(plan.confirmationTitle, "Delete 3 selected items?")
+        XCTAssertEqual(plan.confirmationActionTitle, "Move Cards and Discard Drafts")
+        XCTAssertTrue(plan.confirmationMessage.contains("permanently discarded"))
+    }
+
+    func testLocalDraftArchivePlanNeverCreatesBackendWork() {
+        let draft = Concept(
+            canonicalTitle: "Unfinished",
+            displayTitle: "Unfinished",
+            captureStatus: CaptureStatus.needsDisambiguation.rawValue
+        )
+
+        let plan = ConceptArchiveSelectionPlan(concepts: [draft])
+
+        XCTAssertTrue(plan.remoteConceptIds.isEmpty)
+        XCTAssertEqual(plan.localDraftIds, [draft.id])
+        XCTAssertEqual(plan.confirmationTitle, "Discard 1 unfinished draft?")
+        XCTAssertEqual(plan.confirmationActionTitle, "Discard Draft")
+        XCTAssertTrue(plan.confirmationMessage.contains("cannot be restored"))
+    }
+
     func testCitationMarkupReplacesRetrievalPositionsWithSourceTitles() {
         let citations = [
             CitationDTO(
@@ -300,6 +343,7 @@ final class ProductLogicTests: XCTestCase {
         XCTAssertEqual(CaptureStatusBadge.label(for: CaptureStatus.generating.rawValue), "Generating")
         XCTAssertEqual(CaptureStatusBadge.label(for: CaptureStatus.draft.rawValue), "Draft")
         XCTAssertEqual(CaptureStatusBadge.label(for: CaptureStatus.generationFailed.rawValue), "Needs retry")
+        XCTAssertEqual(CaptureStatusBadge.label(for: CaptureStatus.needsDisambiguation.rawValue), "Needs review")
         XCTAssertFalse(CaptureStatusBadge.subtitle(for: CaptureStatus.generationFailed.rawValue).isEmpty)
     }
 

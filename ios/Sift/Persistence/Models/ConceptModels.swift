@@ -17,6 +17,7 @@ final class Concept {
     var captureGenerationOperationStatus: String?
     var createdAt: Date
     var updatedAt: Date
+    var lastViewedAt: Date?
 
     @Relationship(deleteRule: .cascade, inverse: \ConceptNote.concept)
     var note: ConceptNote?
@@ -38,7 +39,8 @@ final class Concept {
         captureGenerationIdempotencyKey: String? = nil,
         captureGenerationOperationStatus: String? = nil,
         createdAt: Date = .now,
-        updatedAt: Date = .now
+        updatedAt: Date = .now,
+        lastViewedAt: Date? = nil
     ) {
         self.id = id
         self.canonicalTitle = canonicalTitle
@@ -54,6 +56,7 @@ final class Concept {
         self.captureGenerationOperationStatus = captureGenerationOperationStatus
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.lastViewedAt = lastViewedAt
     }
 }
 

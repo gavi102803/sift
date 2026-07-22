@@ -27,6 +27,8 @@ private struct PreviewSiftAPIClient: SiftAPIClient {
     func runModelDiagnostic() async throws -> ModelDiagnosticDTO { try await base.runModelDiagnostic() }
     func runWebSearchDiagnostic() async throws -> ModelDiagnosticDTO { try await base.runWebSearchDiagnostic() }
     func listConcepts() async throws -> [ConceptDTO] { try await base.listConcepts() }
+    func archiveConcepts(ids: [UUID]) async throws -> [ConceptDTO] { try await base.archiveConcepts(ids: ids) }
+    func restoreConcepts(ids: [UUID]) async throws -> [ConceptDTO] { try await base.restoreConcepts(ids: ids) }
     func updateConceptSummary(id: UUID, request: UpdateConceptSummaryRequest) async throws -> ConceptDTO { concept }
     func updateNoteBlock(conceptId: UUID, blockId: UUID, request: UpdateNoteBlockRequest) async throws -> ConceptDTO { concept }
     func updateConceptNote(id: UUID, request: UpdateConceptNoteRequest) async throws -> ConceptDTO { concept }
@@ -135,7 +137,7 @@ private enum ConceptPreview {
         let schema = Schema([
             Concept.self, ConceptNote.self, NoteBlock.self, NoteRevision.self,
             UpdateEvent.self, Conversation.self, ModelThread.self, ConversationMessage.self,
-            ConceptUpdateProposal.self, AnswerSource.self, Tag.self, ConceptTag.self,
+            ModelRunMirror.self, ConceptUpdateProposal.self, AnswerSource.self, Tag.self, ConceptTag.self,
             Topic.self, ConceptTopic.self, ConceptRelation.self
         ])
         let container = try! ModelContainer(

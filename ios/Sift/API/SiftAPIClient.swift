@@ -24,6 +24,8 @@ protocol SiftAPIClient {
     func runWebSearchDiagnostic() async throws -> ModelDiagnosticDTO
     func listConcepts() async throws -> [ConceptDTO]
     func getConcept(id: UUID) async throws -> ConceptDTO
+    func archiveConcepts(ids: [UUID]) async throws -> [ConceptDTO]
+    func restoreConcepts(ids: [UUID]) async throws -> [ConceptDTO]
     func updateConceptSummary(id: UUID, request: UpdateConceptSummaryRequest) async throws -> ConceptDTO
     func updateNoteBlock(
         conceptId: UUID,
@@ -41,6 +43,14 @@ protocol SiftAPIClient {
     func addRelation(conceptId: UUID, request: CreateConceptRelationRequest) async throws -> ConceptDTO
     func removeRelation(conceptId: UUID, relationId: UUID) async throws -> ConceptDTO
     func listTurns(conceptId: UUID) async throws -> [ConceptHistoryTurnDTO]
+    func listModelRuns(active: Bool) async throws -> [ModelRunDTO]
+    func getModelRun(id: UUID) async throws -> ModelRunDTO
+    func listModelRunEvents(id: UUID, afterSequence: Int) async throws -> [ModelRunEventDTO]
+    func resumeModelRun(id: UUID) async throws -> ModelRunDTO
+    func listProposals(conceptId: UUID, status: ProposalStatus?) async throws -> [UpdateProposalDTO]
+    func listRevisions(conceptId: UUID) async throws -> [NoteRevisionSummaryDTO]
+    func getRevision(conceptId: UUID, revision: Int) async throws -> NoteRevisionDTO
+    func restoreRevision(conceptId: UUID, revision: Int) async throws -> ConceptDTO
     func createConcept(_ request: CreateConceptRequest) async throws -> ConceptDTO
     func createConcept(
         _ request: CreateConceptRequest,
@@ -49,6 +59,11 @@ protocol SiftAPIClient {
     func streamCreateConcept(
         _ request: CreateConceptRequest,
         idempotencyKey: UUID?
+    ) -> AsyncThrowingStream<ConceptInitialStreamEvent, Error>
+    func streamCreateConcept(
+        _ request: CreateConceptRequest,
+        idempotencyKey: UUID?,
+        clientDraftId: UUID?
     ) -> AsyncThrowingStream<ConceptInitialStreamEvent, Error>
     func submitTurn(conceptId: UUID, request: ConceptTurnRequest) async throws -> ConceptTurnResponse
     func submitTurn(
@@ -124,9 +139,26 @@ extension SiftAPIClient {
         }
     }
 
+    func streamCreateConcept(
+        _ request: CreateConceptRequest,
+        idempotencyKey: UUID?,
+        clientDraftId: UUID?
+    ) -> AsyncThrowingStream<ConceptInitialStreamEvent, Error> {
+        streamCreateConcept(request, idempotencyKey: idempotencyKey)
+    }
+
     func mergeProposal(id: UUID, idempotencyKey: UUID?) async throws -> ConceptDTO {
         try await mergeProposal(id: id)
     }
+
+    func listModelRuns(active: Bool) async throws -> [ModelRunDTO] { [] }
+    func getModelRun(id: UUID) async throws -> ModelRunDTO { throw SiftAPIError.invalidResponse }
+    func listModelRunEvents(id: UUID, afterSequence: Int) async throws -> [ModelRunEventDTO] { [] }
+    func resumeModelRun(id: UUID) async throws -> ModelRunDTO { throw SiftAPIError.invalidResponse }
+    func listProposals(conceptId: UUID, status: ProposalStatus?) async throws -> [UpdateProposalDTO] { [] }
+    func listRevisions(conceptId: UUID) async throws -> [NoteRevisionSummaryDTO] { [] }
+    func getRevision(conceptId: UUID, revision: Int) async throws -> NoteRevisionDTO { throw SiftAPIError.invalidResponse }
+    func restoreRevision(conceptId: UUID, revision: Int) async throws -> ConceptDTO { throw SiftAPIError.invalidResponse }
 }
 
 enum SiftAPIClientFactory {
@@ -351,6 +383,14 @@ struct HTTPSiftAPIClient: SiftAPIClient {
         try await get(path: "/v1/concepts/\(id.uuidString)")
     }
 
+    func archiveConcepts(ids: [UUID]) async throws -> [ConceptDTO] {
+        try await patch(path: "/v1/concepts/archive", body: BatchConceptRequest(conceptIds: ids))
+    }
+
+    func restoreConcepts(ids: [UUID]) async throws -> [ConceptDTO] {
+        try await patch(path: "/v1/concepts/restore", body: BatchConceptRequest(conceptIds: ids))
+    }
+
     func updateConceptSummary(id: UUID, request: UpdateConceptSummaryRequest) async throws -> ConceptDTO {
         try await patch(path: "/v1/concepts/\(id.uuidString)", body: request)
     }
@@ -392,6 +432,47 @@ struct HTTPSiftAPIClient: SiftAPIClient {
         try await get(path: "/v1/concepts/\(conceptId.uuidString)/turns")
     }
 
+    func listModelRuns(active: Bool) async throws -> [ModelRunDTO] {
+        try await get(path: "/v1/model-runs", queryItems: [URLQueryItem(name: "active", value: active ? "true" : "false")])
+    }
+
+    func getModelRun(id: UUID) async throws -> ModelRunDTO {
+        try await get(path: "/v1/model-runs/\(id.uuidString)")
+    }
+
+    func listModelRunEvents(id: UUID, afterSequence: Int) async throws -> [ModelRunEventDTO] {
+        try await get(
+            path: "/v1/model-runs/\(id.uuidString)/events",
+            queryItems: [URLQueryItem(name: "afterSequence", value: String(afterSequence))]
+        )
+    }
+
+    func resumeModelRun(id: UUID) async throws -> ModelRunDTO {
+        try await post(path: "/v1/model-runs/\(id.uuidString)/resume", body: EmptyRequest(), includesProviderKey: requiresBetaActivation)
+    }
+
+    func listProposals(
+        conceptId: UUID,
+        status: ProposalStatus?
+    ) async throws -> [UpdateProposalDTO] {
+        try await get(
+            path: "/v1/concepts/\(conceptId.uuidString)/proposals",
+            queryItems: status.map { [URLQueryItem(name: "status", value: $0.rawValue)] } ?? []
+        )
+    }
+
+    func listRevisions(conceptId: UUID) async throws -> [NoteRevisionSummaryDTO] {
+        try await get(path: "/v1/concepts/\(conceptId.uuidString)/revisions")
+    }
+
+    func getRevision(conceptId: UUID, revision: Int) async throws -> NoteRevisionDTO {
+        try await get(path: "/v1/concepts/\(conceptId.uuidString)/revisions/\(revision)")
+    }
+
+    func restoreRevision(conceptId: UUID, revision: Int) async throws -> ConceptDTO {
+        try await post(path: "/v1/concepts/\(conceptId.uuidString)/revisions/\(revision)/restore", body: EmptyRequest())
+    }
+
     func createConcept(_ request: CreateConceptRequest) async throws -> ConceptDTO {
         try await createConcept(request, idempotencyKey: nil)
     }
@@ -412,16 +493,63 @@ struct HTTPSiftAPIClient: SiftAPIClient {
         _ request: CreateConceptRequest,
         idempotencyKey: UUID?
     ) -> AsyncThrowingStream<ConceptInitialStreamEvent, Error> {
+        streamCreateConcept(request, idempotencyKey: idempotencyKey, clientDraftId: nil)
+    }
+
+    func streamCreateConcept(
+        _ request: CreateConceptRequest,
+        idempotencyKey: UUID?,
+        clientDraftId: UUID?
+    ) -> AsyncThrowingStream<ConceptInitialStreamEvent, Error> {
         AsyncThrowingStream { continuation in
             Task {
                 do {
-                    try await streamPost(
-                        path: "/v1/concepts/stream",
-                        body: request,
-                        idempotencyKey: idempotencyKey,
-                        includesProviderKey: requiresBetaActivation,
-                        continuation: continuation
-                    )
+                    do {
+                        let run: ModelRunDTO = try await post(
+                            path: "/v1/concept-runs",
+                            body: CreateConceptRunRequest(
+                                capture: request,
+                                clientDraftId: clientDraftId?.uuidString
+                            ),
+                            idempotencyKey: idempotencyKey,
+                            includesProviderKey: requiresBetaActivation
+                        )
+                        continuation.yield(ConceptInitialStreamEvent(type: "started", delta: nil, concept: nil, modelRun: run))
+                        let completed = try await waitForModelRun(run) { event in
+                            if event.type == "delta", let delta = event.data?.content {
+                                continuation.yield(
+                                    ConceptInitialStreamEvent(
+                                        type: "delta",
+                                        delta: delta,
+                                        concept: nil,
+                                        modelRun: run,
+                                        sequence: event.sequence
+                                    )
+                                )
+                            } else if event.type == "stepStarted", let label = event.data?.label {
+                                continuation.yield(
+                                    ConceptInitialStreamEvent(
+                                        type: "progress",
+                                        delta: nil,
+                                        concept: nil,
+                                        modelRun: run,
+                                        sequence: event.sequence,
+                                        progressLabel: label
+                                    )
+                                )
+                            }
+                        }
+                        guard let concept = completed.result?.concept else { throw SiftStreamingError.incomplete }
+                        continuation.yield(ConceptInitialStreamEvent(type: "completed", delta: nil, concept: concept, modelRun: completed))
+                    } catch SiftAPIError.httpStatus(404, _) {
+                        try await streamPost(
+                            path: "/v1/concepts/stream",
+                            body: request,
+                            idempotencyKey: idempotencyKey,
+                            includesProviderKey: requiresBetaActivation,
+                            continuation: continuation
+                        )
+                    }
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -462,13 +590,49 @@ struct HTTPSiftAPIClient: SiftAPIClient {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    try await streamPost(
-                        path: "/v1/concepts/\(conceptId.uuidString)/turns/stream",
-                        body: request,
-                        idempotencyKey: idempotencyKey,
-                        includesProviderKey: requiresBetaActivation,
-                        continuation: continuation
-                    )
+                    do {
+                        let run: ModelRunDTO = try await post(
+                            path: "/v1/concepts/\(conceptId.uuidString)/turn-runs",
+                            body: CreateTurnRunRequest(turn: request),
+                            idempotencyKey: idempotencyKey,
+                            includesProviderKey: requiresBetaActivation
+                        )
+                        continuation.yield(ConceptTurnStreamEvent(type: "started", delta: nil, response: nil, modelRun: run))
+                        let completed = try await waitForModelRun(run) { event in
+                            if event.type == "delta", let delta = event.data?.content {
+                                continuation.yield(
+                                    ConceptTurnStreamEvent(
+                                        type: "delta",
+                                        delta: delta,
+                                        response: nil,
+                                        modelRun: run,
+                                        sequence: event.sequence
+                                    )
+                                )
+                            } else if event.type == "stepStarted", let label = event.data?.label {
+                                continuation.yield(
+                                    ConceptTurnStreamEvent(
+                                        type: "progress",
+                                        delta: nil,
+                                        response: nil,
+                                        modelRun: run,
+                                        sequence: event.sequence,
+                                        progressLabel: label
+                                    )
+                                )
+                            }
+                        }
+                        guard let response = completed.result?.response else { throw SiftStreamingError.incomplete }
+                        continuation.yield(ConceptTurnStreamEvent(type: "completed", delta: nil, response: response, modelRun: completed))
+                    } catch SiftAPIError.httpStatus(404, _) {
+                        try await streamPost(
+                            path: "/v1/concepts/\(conceptId.uuidString)/turns/stream",
+                            body: request,
+                            idempotencyKey: idempotencyKey,
+                            includesProviderKey: requiresBetaActivation,
+                            continuation: continuation
+                        )
+                    }
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -497,8 +661,40 @@ struct HTTPSiftAPIClient: SiftAPIClient {
         )
     }
 
-    private func get<Response: Decodable>(path: String) async throws -> Response {
-        var urlRequest = URLRequest(url: baseURL.appending(path: path))
+    private func waitForModelRun(
+        _ initial: ModelRunDTO,
+        onEvent: (ModelRunEventDTO) -> Void
+    ) async throws -> ModelRunDTO {
+        var run = initial
+        var lastSequence = 0
+        while true {
+            try Task.checkCancellation()
+            if run.status == "waitingForCredential" {
+                run = try await resumeModelRun(id: run.id)
+            } else if ["queued", "running"].contains(run.status) {
+                run = try await getModelRun(id: run.id)
+            }
+            let events = try await listModelRunEvents(id: run.id, afterSequence: lastSequence)
+            for event in events {
+                guard event.sequence > lastSequence else { continue }
+                lastSequence = event.sequence
+                onEvent(event)
+            }
+            guard ["queued", "running", "waitingForCredential"].contains(run.status) else {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        guard run.status == "succeeded" else {
+            throw SiftAPIError.modelRunFailed(code: run.errorCode ?? "model_run_failed")
+        }
+        return run
+    }
+
+    private func get<Response: Decodable>(path: String, queryItems: [URLQueryItem] = []) async throws -> Response {
+        var components = URLComponents(url: baseURL.appending(path: path), resolvingAgainstBaseURL: false)!
+        components.queryItems = queryItems.isEmpty ? nil : queryItems
+        var urlRequest = URLRequest(url: components.url!)
         try await authorize(&urlRequest)
         let (data, response) = try await urlSession.data(for: urlRequest)
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -687,6 +883,7 @@ struct HTTPSiftAPIClient: SiftAPIClient {
 
 enum SiftAPIError: LocalizedError {
     case invalidResponse
+    case modelRunFailed(code: String)
     case httpStatus(Int, detail: SiftAPIErrorDetail?)
     case betaActivationRequired
     case providerKeyRequired
@@ -696,6 +893,8 @@ enum SiftAPIError: LocalizedError {
         switch self {
         case .invalidResponse:
             "The server returned an invalid response."
+        case .modelRunFailed(let code):
+            "The agent run stopped safely (\(code))."
         case .httpStatus(let status, let detail):
             if let detail {
                 "Server \(status): \(detail.displayMessage)"

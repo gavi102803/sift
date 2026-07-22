@@ -4,6 +4,131 @@ import XCTest
 
 @MainActor
 final class ConceptLocalStoreTests: XCTestCase {
+    func testProposedProposalReconciliationIsIdempotentAndStalesMissingRemoteProposal() throws {
+        let context = try makeModelContext()
+        let store = ConceptLocalStore(modelContext: context)
+        let conceptId = UUID()
+        let staleId = UUID()
+        let currentId = UUID()
+
+        func proposal(id: UUID, rationale: String) -> UpdateProposalDTO {
+            UpdateProposalDTO(
+                id: id,
+                baseNoteRevision: 1,
+                patchOperations: [],
+                rationale: rationale,
+                confidence: 0.8,
+                status: ProposalStatus.proposed.rawValue,
+                origin: "periodicReview",
+                sourceRunId: UUID()
+            )
+        }
+
+        try store.reconcileProposedProposals(
+            [
+                proposal(id: staleId, rationale: "Older review"),
+                proposal(id: currentId, rationale: "Current review")
+            ],
+            conceptId: conceptId
+        )
+        try store.reconcileProposedProposals(
+            [proposal(id: currentId, rationale: "Current review")],
+            conceptId: conceptId
+        )
+
+        let proposals = try context.fetch(FetchDescriptor<ConceptUpdateProposal>())
+        XCTAssertEqual(proposals.count, 2)
+        XCTAssertEqual(
+            proposals.first(where: { $0.id == staleId })?.status,
+            ProposalStatus.stale.rawValue
+        )
+        XCTAssertEqual(
+            proposals.first(where: { $0.id == currentId })?.status,
+            ProposalStatus.proposed.rawValue
+        )
+    }
+
+    func testModelRunMirrorIsIdempotentAndSequenceOnlyMovesForward() throws {
+        let context = try makeModelContext()
+        let store = ConceptLocalStore(modelContext: context)
+        let runId = UUID()
+        let now = Date()
+        let queued = ModelRunDTO(
+            id: runId,
+            kind: "followUp",
+            status: "queued",
+            conceptId: UUID(),
+            clientDraftId: nil,
+            idempotencyKey: "operation-key",
+            dependencyRunId: nil,
+            checkpoint: nil,
+            result: nil,
+            resultRef: nil,
+            errorCode: nil,
+            errorMessage: nil,
+            childRunIds: [],
+            createdAt: now,
+            updatedAt: now
+        )
+
+        let original = try store.upsertModelRun(queued, lastSequence: 4)
+        var completed = queued
+        completed.status = "succeeded"
+        completed.updatedAt = now.addingTimeInterval(1)
+        let refreshed = try store.upsertModelRun(completed, lastSequence: 3)
+
+        XCTAssertTrue(original === refreshed)
+        XCTAssertEqual(refreshed.status, "succeeded")
+        XCTAssertEqual(refreshed.lastSequence, 4)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<ModelRunMirror>()).count, 1)
+    }
+
+    func testSucceededInitialRunReconcilesRecoverableDraftAfterRelaunch() throws {
+        let context = try makeModelContext()
+        let store = ConceptLocalStore(modelContext: context)
+        let draft = store.createDraft(rawCapture: "Durable capture")
+        store.recordInitialCaptureQuestion(concept: draft, question: draft.displayTitle)
+        _ = store.beginCaptureGeneration(for: draft)
+        store.markCaptureGenerationUnknown(draft)
+        try context.save()
+
+        let remoteId = UUID()
+        let dto = conceptDTO(
+            id: remoteId,
+            revision: 1,
+            blockId: UUID(),
+            content: "Recovered durable knowledge"
+        )
+        let run = ModelRunDTO(
+            id: UUID(),
+            kind: "initialConcept",
+            status: "succeeded",
+            conceptId: remoteId,
+            clientDraftId: draft.id.uuidString,
+            idempotencyKey: UUID().uuidString,
+            dependencyRunId: nil,
+            checkpoint: "modelCompleted",
+            result: ModelRunResultDTO(concept: dto, response: nil),
+            resultRef: remoteId.uuidString,
+            errorCode: nil,
+            errorMessage: nil,
+            childRunIds: [],
+            createdAt: .now,
+            updatedAt: .now
+        )
+
+        try store.reconcileSucceededModelRun(run)
+        try context.save()
+
+        let concepts = try context.fetch(FetchDescriptor<Concept>())
+        XCTAssertEqual(concepts.map(\.id), [remoteId])
+        XCTAssertEqual(concepts.first?.captureStatus, CaptureStatus.ready.rawValue)
+        XCTAssertEqual(
+            store.localConversationTurns(for: try XCTUnwrap(concepts.first)).map(\.content),
+            ["Durable capture", "Runs an agent."]
+        )
+    }
+
     func testGenerateFailureLeavesRecoverableDraft() async throws {
         let context = try makeModelContext()
         let store = ConceptLocalStore(modelContext: context)
@@ -31,6 +156,64 @@ final class ConceptLocalStoreTests: XCTestCase {
         XCTAssertEqual(concepts.count, 1)
         XCTAssertEqual(concepts.first?.id, draft.id)
         XCTAssertEqual(concepts.first?.captureStatus, CaptureStatus.generationFailed.rawValue)
+    }
+
+    func testModelRunFailureLeavesRetryableFailedDraft() async throws {
+        let context = try makeModelContext()
+        let store = ConceptLocalStore(modelContext: context)
+        let service = CaptureFlowService(
+            localStore: store,
+            apiClient: TestAPIClient(
+                createConceptResult: .failure(
+                    SiftAPIError.modelRunFailed(code: "agent_budget_exceeded")
+                )
+            )
+        )
+        guard case .newDraft(let draft) = try service.resolveCapture(rawCapture: "Bounded run") else {
+            return XCTFail("Expected a new local draft")
+        }
+
+        do {
+            _ = try await service.generateConcept(from: draft)
+            XCTFail("Expected generation to fail")
+        } catch SiftAPIError.modelRunFailed {
+            XCTAssertEqual(draft.captureStatus, CaptureStatus.generationFailed.rawValue)
+            XCTAssertNil(draft.captureGenerationIdempotencyKey)
+        }
+    }
+
+    func testRelaunchReconcilesFailedInitialRunIntoRetryableDraft() throws {
+        let context = try makeModelContext()
+        let store = ConceptLocalStore(modelContext: context)
+        let draft = store.createDraft(rawCapture: "Recovered failure")
+        let key = store.beginCaptureGeneration(for: draft)
+        let run = ModelRunDTO(
+            id: UUID(),
+            kind: "initialConcept",
+            status: "failed",
+            conceptId: nil,
+            clientDraftId: draft.id.uuidString,
+            idempotencyKey: key.uuidString,
+            providerSnapshot: [:],
+            dependencyRunId: nil,
+            checkpoint: nil,
+            result: nil,
+            resultRef: nil,
+            errorCode: "agent_budget_exceeded",
+            errorMessage: nil,
+            childRunIds: [],
+            createdAt: .now,
+            updatedAt: .now
+        )
+
+        try store.reconcileFailedModelRun(run)
+
+        XCTAssertEqual(draft.captureStatus, CaptureStatus.generationFailed.rawValue)
+        XCTAssertEqual(
+            draft.captureGenerationOperationStatus,
+            LocalOperationStatus.failed.rawValue
+        )
+        XCTAssertNil(draft.captureGenerationIdempotencyKey)
     }
 
     func testCaptureGenerationKeySurvivesLocalReload() throws {
@@ -423,6 +606,44 @@ final class ConceptLocalStoreTests: XCTestCase {
         XCTAssertEqual(try context.fetch(FetchDescriptor<NoteBlock>()).count, 1)
     }
 
+    func testRemoteRefreshPreservesAuthoritativeConceptAndNoteTimestamps() throws {
+        let context = try makeModelContext()
+        let store = ConceptLocalStore(modelContext: context)
+        let createdAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let updatedAt = Date(timeIntervalSince1970: 1_700_000_300)
+        let conceptId = UUID()
+        let blockId = UUID()
+        let dto = ConceptDTO(
+            id: conceptId,
+            canonicalTitle: "Stable ordering",
+            displayTitle: "Stable ordering",
+            oneLineExplanation: "Reads do not mutate timestamps.",
+            maturity: ConceptMaturity.initial.rawValue,
+            captureStatus: CaptureStatus.ready.rawValue,
+            noteRevision: 1,
+            blocks: [
+                NoteBlockDTO(
+                    id: blockId,
+                    blockType: NoteBlockType.whatItIs.rawValue,
+                    content: "Stable content",
+                    source: NoteBlockSource.ai.rawValue,
+                    isUserLocked: false,
+                    position: 0
+                )
+            ],
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+
+        let inserted = try store.upsertConcept(from: dto)
+        let noteUpdatedAt = try XCTUnwrap(inserted.note?.updatedAt)
+        let refreshed = try store.upsertConcept(from: dto)
+
+        XCTAssertEqual(refreshed.createdAt, createdAt)
+        XCTAssertEqual(refreshed.updatedAt, updatedAt)
+        XCTAssertEqual(refreshed.note?.updatedAt, noteUpdatedAt)
+    }
+
     func testReplacingInitialExchangeRemovesOldLocalPair() throws {
         let context = try makeModelContext()
         let store = ConceptLocalStore(modelContext: context)
@@ -482,6 +703,7 @@ final class ConceptLocalStoreTests: XCTestCase {
             Conversation.self,
             ModelThread.self,
             ConversationMessage.self,
+            ModelRunMirror.self,
             ConceptUpdateProposal.self,
             AnswerSource.self,
             Tag.self,
@@ -502,6 +724,38 @@ final class SiftAPIClientIdempotencyTests: XCTestCase {
         URLProtocolRequestRecorder.reset()
         URLProtocolRequestRecorder.handler = { request in
             let path = request.url?.path ?? ""
+            if path.hasSuffix("/turn-runs") {
+                return HTTPURLProtocolResponse(
+                    statusCode: 200,
+                    contentType: "application/json",
+                    body: self.encoded(
+                        ModelRunDTO(
+                            id: UUID(),
+                            kind: "followUp",
+                            status: "succeeded",
+                            conceptId: UUID(uuidString: "00000000-0000-0000-0000-000000000111"),
+                            clientDraftId: nil,
+                            idempotencyKey: "test",
+                            dependencyRunId: nil,
+                            checkpoint: "modelCompleted",
+                            result: ModelRunResultDTO(concept: nil, response: self.turnResponse()),
+                            resultRef: nil,
+                            errorCode: nil,
+                            errorMessage: nil,
+                            childRunIds: [],
+                            createdAt: .now,
+                            updatedAt: .now
+                        )
+                    )
+                )
+            }
+            if path.hasSuffix("/events") {
+                return HTTPURLProtocolResponse(
+                    statusCode: 200,
+                    contentType: "application/json",
+                    body: self.encoded([ModelRunEventDTO]())
+                )
+            }
             if path.hasSuffix("/turns/stream") {
                 return HTTPURLProtocolResponse(
                     statusCode: 200,
@@ -540,11 +794,73 @@ final class SiftAPIClientIdempotencyTests: XCTestCase {
         )
 
         let requests = URLProtocolRequestRecorder.requests()
-        XCTAssertEqual(streamEvents.map(\.type), ["completed"])
+        XCTAssertEqual(streamEvents.map(\.type), ["started", "completed"])
         XCTAssertEqual(
-            requests.map { $0.value(forHTTPHeaderField: "Idempotency-Key") },
+            requests.compactMap { $0.value(forHTTPHeaderField: "Idempotency-Key") },
             [key.uuidString, key.uuidString, key.uuidString]
         )
+    }
+
+    func testInitialModelRunSendsDraftIdSeparatelyFromIdempotencyKey() async throws {
+        let runId = UUID()
+        let draftId = UUID()
+        let operationKey = UUID()
+        URLProtocolRequestRecorder.handler = { request in
+            let path = request.url?.path ?? ""
+            if path == "/v1/concept-runs" {
+                return HTTPURLProtocolResponse(
+                    statusCode: 200,
+                    contentType: "application/json",
+                    body: self.encoded(
+                        ModelRunDTO(
+                            id: runId,
+                            kind: "initialConcept",
+                            status: "succeeded",
+                            conceptId: self.conceptDTO().id,
+                            clientDraftId: draftId.uuidString,
+                            idempotencyKey: operationKey.uuidString,
+                            dependencyRunId: nil,
+                            checkpoint: "modelCompleted",
+                            result: ModelRunResultDTO(concept: self.conceptDTO(), response: nil),
+                            resultRef: self.conceptDTO().id.uuidString,
+                            errorCode: nil,
+                            errorMessage: nil,
+                            childRunIds: [],
+                            createdAt: .now,
+                            updatedAt: .now
+                        )
+                    )
+                )
+            }
+            if path.hasSuffix("/events") {
+                return HTTPURLProtocolResponse(
+                    statusCode: 200,
+                    contentType: "application/json",
+                    body: self.encoded([ModelRunEventDTO]())
+                )
+            }
+            return HTTPURLProtocolResponse(
+                statusCode: 404,
+                contentType: "application/json",
+                body: Data("{\"detail\":\"not found\"}".utf8)
+            )
+        }
+
+        let stream = makeHTTPClient().streamCreateConcept(
+            CreateConceptRequest(rawCapture: "RAG", locale: "en"),
+            idempotencyKey: operationKey,
+            clientDraftId: draftId
+        )
+        for try await _ in stream {}
+
+        let request = try XCTUnwrap(URLProtocolRequestRecorder.requests().first)
+        let body = try XCTUnwrap(requestBody(request))
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: body) as? [String: Any]
+        )
+        XCTAssertEqual(payload["clientDraftId"] as? String, draftId.uuidString)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Idempotency-Key"), operationKey.uuidString)
+        XCTAssertNotEqual(payload["clientDraftId"] as? String, operationKey.uuidString)
     }
 
     func testGetAndPatchDoNotWriteIdempotencyHeader() async throws {
@@ -617,7 +933,9 @@ final class SiftAPIClientIdempotencyTests: XCTestCase {
     }
 
     private func encoded<T: Encodable>(_ value: T) -> Data {
-        try! JSONEncoder().encode(value)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return try! encoder.encode(value)
     }
 }
 
@@ -906,6 +1224,14 @@ private struct TestAPIClient: SiftAPIClient {
     }
 
     func getConcept(id: UUID) async throws -> ConceptDTO {
+        throw TestError.unimplemented
+    }
+
+    func archiveConcepts(ids: [UUID]) async throws -> [ConceptDTO] {
+        throw TestError.unimplemented
+    }
+
+    func restoreConcepts(ids: [UUID]) async throws -> [ConceptDTO] {
         throw TestError.unimplemented
     }
 

@@ -7,7 +7,7 @@ struct RecordView: View {
     @Environment(CompanionMonitor.self) private var companion: CompanionMonitor?
     var onSearch: () -> Void = {}
     var onOpenConcept: (UUID, ConceptDetailMode) -> Void = { _, _ in }
-    var onReplaceOpenedConcept: (UUID, UUID) -> Void = { _, _ in }
+    var onGenerateConcept: (Concept) -> Void = { _ in }
     @State private var captureText = ""
     @State private var errorMessage: String?
     @State private var isSubmitting = false
@@ -190,15 +190,7 @@ struct RecordView: View {
         captureText = ""
         onOpenConcept(draft.id, .followUp)
         isSubmitting = false
-        do {
-            let generated = try await service.generateConcept(from: draft)
-            companion?.noteSuccess()
-            onReplaceOpenedConcept(draft.id, generated.id)
-        } catch {
-            // The user is now on the concept; its status becomes generationFailed
-            // and the detail view shows the retry card. Record stays clean.
-            companion?.note(error)
-        }
+        onGenerateConcept(draft)
     }
 
     private func toggleSpeechCapture() async {

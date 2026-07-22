@@ -32,6 +32,64 @@ struct CreateConceptRequest: Codable {
     var locale: String
 }
 
+struct CreateConceptRunRequest: Codable {
+    var capture: CreateConceptRequest
+    var clientDraftId: String?
+}
+
+struct CreateTurnRunRequest: Codable {
+    var turn: ConceptTurnRequest
+}
+
+struct ModelRunResultDTO: Codable {
+    var concept: ConceptDTO?
+    var response: ConceptTurnResponse?
+    var proposal: UpdateProposalDTO? = nil
+}
+
+struct ModelRunDTO: Codable, Identifiable {
+    var id: UUID
+    var kind: String
+    var status: String
+    var conceptId: UUID?
+    var clientDraftId: String?
+    var idempotencyKey: String
+    var providerSnapshot: [String: String] = [:]
+    var agentSpec: String?
+    var agentSpecVersion: String?
+    var promptVersion: String?
+    var budget: [String: Int]?
+    var currentStep: String?
+    var modelCallCount: Int?
+    var toolCallCount: Int?
+    var terminationReason: String?
+    var dependencyRunId: UUID?
+    var checkpoint: String?
+    var result: ModelRunResultDTO?
+    var resultRef: String?
+    var errorCode: String?
+    var errorMessage: String?
+    var childRunIds: [UUID]
+    var createdAt: Date
+    var updatedAt: Date
+}
+
+struct ModelRunEventDTO: Codable, Identifiable {
+    struct DataPayload: Codable {
+        var content: String?
+        var step: String?
+        var label: String?
+        var modelCalls: Int?
+        var toolCalls: Int?
+    }
+
+    var sequence: Int
+    var type: String
+    var data: DataPayload? = nil
+    var createdAt: Date
+    var id: Int { sequence }
+}
+
 struct AppStatusDTO: Codable {
     var env: String
     var modelProvider: String
@@ -148,6 +206,8 @@ struct ConceptDTO: Codable, Identifiable {
     var topics: [String] = []
     var answerSource: AnswerSourceDTO?
     var relations: [ConceptRelationDTO] = []
+    var createdAt: Date?
+    var updatedAt: Date?
 
     init(
         id: UUID,
@@ -162,7 +222,9 @@ struct ConceptDTO: Codable, Identifiable {
         tags: [String] = [],
         topics: [String] = [],
         answerSource: AnswerSourceDTO? = nil,
-        relations: [ConceptRelationDTO] = []
+        relations: [ConceptRelationDTO] = [],
+        createdAt: Date? = nil,
+        updatedAt: Date? = nil
     ) {
         self.id = id
         self.canonicalTitle = canonicalTitle
@@ -177,6 +239,8 @@ struct ConceptDTO: Codable, Identifiable {
         self.topics = topics
         self.answerSource = answerSource
         self.relations = relations
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -194,7 +258,13 @@ struct ConceptDTO: Codable, Identifiable {
         topics = try container.decodeIfPresent([String].self, forKey: .topics) ?? []
         answerSource = try container.decodeIfPresent(AnswerSourceDTO.self, forKey: .answerSource)
         relations = try container.decodeIfPresent([ConceptRelationDTO].self, forKey: .relations) ?? []
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt)
     }
+}
+
+struct BatchConceptRequest: Codable {
+    var conceptIds: [UUID]
 }
 
 struct ConceptRelationDTO: Codable, Identifiable {
@@ -207,13 +277,36 @@ struct ConceptRelationDTO: Codable, Identifiable {
     var source: String
 }
 
-struct NoteBlockDTO: Codable, Identifiable {
+struct NoteBlockDTO: Codable, Identifiable, Hashable {
     var id: UUID
     var blockType: String
     var content: String
     var source: String
     var isUserLocked: Bool
     var position: Int? = nil
+}
+
+struct NoteRevisionSummaryDTO: Codable, Identifiable {
+    var revision: Int
+    var source: String
+    var createdAt: Date
+    var isCurrent: Bool
+    var restoredFromRevision: Int?
+    var id: Int { revision }
+}
+
+struct NoteRevisionDTO: Codable, Identifiable, Hashable {
+    var revision: Int
+    var source: String
+    var createdAt: Date
+    var isCurrent: Bool
+    var restoredFromRevision: Int?
+    var snapshotSchemaVersion: Int
+    var displayTitle: String
+    var canonicalTitle: String
+    var oneLineExplanation: String
+    var blocks: [NoteBlockDTO]
+    var id: Int { revision }
 }
 
 struct UpdateConceptSummaryRequest: Codable {
@@ -281,12 +374,18 @@ struct ConceptTurnStreamEvent: Codable {
     var type: String
     var delta: String?
     var response: ConceptTurnResponse?
+    var modelRun: ModelRunDTO? = nil
+    var sequence: Int? = nil
+    var progressLabel: String? = nil
 }
 
 struct ConceptInitialStreamEvent: Codable {
     var type: String
     var delta: String?
     var concept: ConceptDTO?
+    var modelRun: ModelRunDTO? = nil
+    var sequence: Int? = nil
+    var progressLabel: String? = nil
 }
 
 struct UpdateProposalDTO: Codable, Identifiable {
@@ -296,6 +395,8 @@ struct UpdateProposalDTO: Codable, Identifiable {
     var rationale: String
     var confidence: Double
     var status: String
+    var origin: String? = nil
+    var sourceRunId: UUID? = nil
 }
 
 struct PatchOperationDTO: Codable, Identifiable {

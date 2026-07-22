@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 private struct ConceptRoute: Hashable {
     var id: UUID
@@ -13,6 +14,7 @@ enum SiftLayout {
 
 struct AppView: View {
     @Environment(\.appServices) private var appServices
+    @Environment(\.modelContext) private var modelContext
     @State private var selectedTab: AppTab = .record
     @State private var librarySearchText = ""
     @State private var recordPath: [ConceptRoute] = []
@@ -52,8 +54,8 @@ struct AppView: View {
                                 ConceptRoute(id: conceptId, initialMode: initialMode)
                             )
                         },
-                        onReplaceOpenedConcept: { oldId, newId in
-                            replaceLastConcept(in: &recordPath, oldId: oldId, newId: newId)
+                        onGenerateConcept: { draft in
+                            startCaptureGeneration(for: draft)
                         }
                     )
                     .navigationDestination(for: ConceptRoute.self) { route in
@@ -92,7 +94,87 @@ struct AppView: View {
         }
         .task {
             await companion.refresh(using: appServices)
+            await recoverModelRuns()
         }
+    }
+
+    private func recoverModelRuns() async {
+        guard let runs = try? await appServices.apiClient.listModelRuns(active: false) else { return }
+        let store = ConceptLocalStore(modelContext: modelContext)
+        for run in runs {
+            _ = try? store.upsertModelRun(run)
+            if run.status == "succeeded" {
+                try? store.reconcileSucceededModelRun(run)
+                replaceActiveDraftRoute(for: run)
+            } else if run.status == "failed" {
+                try? store.reconcileFailedModelRun(run)
+            } else if ["queued", "running", "waitingForCredential"].contains(run.status) {
+                Task { await observeModelRun(run) }
+            }
+        }
+        try? modelContext.save()
+    }
+
+    private func observeModelRun(_ initial: ModelRunDTO) async {
+        var run = initial
+        let store = ConceptLocalStore(modelContext: modelContext)
+        let mirror = try? store.upsertModelRun(run)
+        var lastSequence = mirror?.lastSequence ?? 0
+        do {
+            while ["queued", "running", "waitingForCredential"].contains(run.status) {
+                if run.status == "waitingForCredential" {
+                    run = try await appServices.apiClient.resumeModelRun(id: run.id)
+                } else {
+                    try await Task.sleep(for: .milliseconds(250))
+                    run = try await appServices.apiClient.getModelRun(id: run.id)
+                }
+                let events = try await appServices.apiClient.listModelRunEvents(
+                    id: run.id,
+                    afterSequence: lastSequence
+                )
+                for event in events where event.sequence > lastSequence {
+                    lastSequence = event.sequence
+                }
+                _ = try store.upsertModelRun(run, lastSequence: lastSequence)
+                try modelContext.save()
+            }
+            try store.reconcileSucceededModelRun(run)
+            replaceActiveDraftRoute(for: run)
+            try modelContext.save()
+        } catch is CancellationError {
+            return
+        } catch {
+            // The persisted mirror remains recoverable on the next app launch.
+        }
+    }
+
+    private func startCaptureGeneration(for draft: Concept) {
+        let draftId = draft.id
+        Task { @MainActor in
+            let service = CaptureFlowService(
+                localStore: ConceptLocalStore(modelContext: modelContext),
+                apiClient: appServices.apiClient
+            )
+            do {
+                let generated = try await service.generateConcept(from: draft)
+                companion.noteSuccess()
+                replaceLastConcept(in: &recordPath, oldId: draftId, newId: generated.id)
+            } catch is CancellationError {
+                return
+            } catch {
+                // The durable draft remains visible and retryable from its detail page.
+                companion.note(error)
+            }
+        }
+    }
+
+    private func replaceActiveDraftRoute(for run: ModelRunDTO) {
+        guard run.kind == "initialConcept",
+              run.status == "succeeded",
+              let draftIdString = run.clientDraftId,
+              let draftId = UUID(uuidString: draftIdString),
+              let generatedId = run.result?.concept?.id else { return }
+        replaceLastConcept(in: &recordPath, oldId: draftId, newId: generatedId)
     }
 
     private func replaceLastConcept(in path: inout [UUID], oldId: UUID, newId: UUID) {
@@ -106,8 +188,6 @@ struct AppView: View {
         guard oldId != newId else { return }
         if path.last?.id == oldId {
             path[path.count - 1].id = newId
-        } else {
-            path.append(ConceptRoute(id: newId, initialMode: .followUp))
         }
     }
 }

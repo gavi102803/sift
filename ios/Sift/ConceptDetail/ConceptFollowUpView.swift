@@ -8,6 +8,7 @@ struct ConceptFollowUpView: View {
     var turns: [ConceptHistoryTurnDTO]
     var hiddenTurnId: UUID? = nil
     var isSubmitting: Bool
+    var progressLabel: String? = nil
     var isRetryingGeneration: Bool = false
     var onRetryGeneration: () -> Void = {}
     var onAddAssistantToNote: (ConceptHistoryTurnDTO) -> Void = { _ in }
@@ -44,6 +45,16 @@ struct ConceptFollowUpView: View {
                 )
                 .opacity(turn.id == hiddenTurnId ? 0 : 1)
                 .accessibilityHidden(turn.id == hiddenTurnId)
+            }
+
+            if isSubmitting,
+               hasStreamingAssistantTurn,
+               let progressLabel,
+               turns.last?.content.isEmpty == true {
+                Text(progressLabel)
+                    .font(SiftFont.sans(12, .medium))
+                    .foregroundStyle(SiftColor.textMuted)
+                    .accessibilityLabel("Agent progress: \(progressLabel)")
             }
 
             // Status-driven trailing element. Generation is in progress or has

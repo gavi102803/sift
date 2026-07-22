@@ -164,7 +164,7 @@ final class LibraryCategoryIntegrityTests: XCTestCase {
         let schema = Schema([
             Concept.self, ConceptNote.self, NoteBlock.self, NoteRevision.self,
             UpdateEvent.self, Conversation.self, ModelThread.self, ConversationMessage.self,
-            ConceptUpdateProposal.self, AnswerSource.self, Tag.self, ConceptTag.self,
+            ModelRunMirror.self, ConceptUpdateProposal.self, AnswerSource.self, Tag.self, ConceptTag.self,
             Topic.self, ConceptTopic.self, ConceptRelation.self
         ])
         return try ModelContainer(

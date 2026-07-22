@@ -12,7 +12,7 @@ struct SuggestedUpdateCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Suggested update")
+            Text(proposal.origin == "periodicReview" ? "Periodic review" : "Suggested update")
                 .font(SiftFont.eyebrow)
                 .tracking(0.6)
                 .foregroundStyle(SiftColor.accentTextOnWash)

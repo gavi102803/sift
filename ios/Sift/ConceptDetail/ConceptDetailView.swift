@@ -6,6 +6,11 @@ enum ConceptDetailMode: Hashable {
     case followUp
 }
 
+private enum ConceptDetailSheet: String, Identifiable {
+    case history
+    var id: String { rawValue }
+}
+
 struct ConceptDetailView: View {
     @Environment(\.appServices) private var appServices
     @Environment(\.modelContext) private var modelContext
@@ -21,6 +26,7 @@ struct ConceptDetailView: View {
     @State private var conceptTopicNames: [String] = []
     @State private var errorMessage: String?
     @State private var isSubmittingFollowUp = false
+    @State private var followUpProgressLabel: String?
     @State private var isRefreshingConcept = false
     @State private var resolvingProposalId: UUID?
     @State private var resolvingRelationId: UUID?
@@ -39,6 +45,8 @@ struct ConceptDetailView: View {
     @State private var editingTurnIndex: Int?
     @State private var isPresentingQueryEditor = false
     @State private var queryEditorPreviousDraft = ""
+    @State private var presentedSheet: ConceptDetailSheet?
+    @State private var maintenanceRunIds: [UUID] = []
     @StateObject private var speechCapture = SpeechCaptureService()
     @FocusState private var isFollowUpFocused: Bool
 
@@ -123,6 +131,7 @@ struct ConceptDetailView: View {
                                         turns: turns,
                                         hiddenTurnId: editingQuery?.id,
                                         isSubmitting: isSubmittingFollowUp,
+                                        progressLabel: followUpProgressLabel,
                                         isRetryingGeneration: isRetryingGeneration,
                                         onRetryGeneration: { Task { await retryGeneration(concept) } },
                                         onAddAssistantToNote: { turn in
@@ -196,12 +205,15 @@ struct ConceptDetailView: View {
             }
             if concept != nil {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        beginNoteEdit()
+                    Menu {
+                        Button("Edit card", systemImage: "square.and.pencil") { beginNoteEdit() }
+                        Button("Version history", systemImage: "clock.arrow.circlepath") { presentedSheet = .history }
+                            .accessibilityIdentifier("concept.history.open")
                     } label: {
-                        Image(systemName: "square.and.pencil")
+                        Image(systemName: "ellipsis.circle")
                     }
-                    .accessibilityLabel("Edit concept")
+                    .accessibilityLabel("Concept actions")
+                    .accessibilityIdentifier("concept.actions")
                 }
             }
         }
@@ -219,11 +231,24 @@ struct ConceptDetailView: View {
                 )
             }
         }
+        .sheet(item: $presentedSheet) { sheet in
+            switch sheet {
+            case .history:
+                ConceptHistoryView(conceptId: conceptId) { restored in
+                    refreshOrganization(for: restored.id)
+                }
+            }
+        }
         .task(id: conceptId) {
+            concept?.lastViewedAt = .now
             await refreshConcept(conceptId)
             refreshOrganization(for: conceptId)
             await refreshTurns(conceptId)
+            await refreshProposals(conceptId)
             restoreFailedFollowUpDraft()
+        }
+        .task(id: maintenanceRunIds) {
+            await observeMaintenanceRuns(maintenanceRunIds, conceptId: conceptId)
         }
         .onChange(of: localConversationSignature) { _, _ in
             syncLocalInitialTurnsIfNeeded()
@@ -337,6 +362,7 @@ struct ConceptDetailView: View {
             .lineLimit(1...4)
             .frame(minHeight: 36, alignment: .center)
             .focused($isFollowUpFocused)
+            .accessibilityIdentifier("concept.composer.input")
 
             Button {
                 Task {
@@ -422,6 +448,11 @@ struct ConceptDetailView: View {
         guard !question.isEmpty else { return }
 
         isSubmittingFollowUp = true
+        followUpProgressLabel = "Preparing card memory"
+        defer {
+            isSubmittingFollowUp = false
+            followUpProgressLabel = nil
+        }
         errorMessage = nil
         followUpText = ""
         withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
@@ -452,6 +483,7 @@ struct ConceptDetailView: View {
         let operationKey = store.reserveFollowUpOperation(concept: concept, question: question)
         do {
             var finalResponse: ConceptTurnResponse?
+            var completedRun: ModelRunDTO?
             for try await event in appServices.apiClient.streamTurn(
                 conceptId: concept.id,
                 request: ConceptTurnRequest(
@@ -460,8 +492,17 @@ struct ConceptDetailView: View {
                 ),
                 idempotencyKey: operationKey
             ) {
+                if let run = event.modelRun {
+                    try store.upsertModelRun(run, lastSequence: event.sequence)
+                    if run.status == "succeeded" {
+                        completedRun = run
+                    }
+                }
                 if let delta = event.delta, !delta.isEmpty {
                     appendAssistantDelta(delta, turnId: assistantTurnId)
+                }
+                if let progressLabel = event.progressLabel {
+                    followUpProgressLabel = progressLabel
                 }
                 if let response = event.response {
                     finalResponse = response
@@ -494,6 +535,7 @@ struct ConceptDetailView: View {
                 turnId: assistantTurnId,
                 answerSource: response.answerSource
             )
+            followUpProgressLabel = nil
             if replacementIndex == 0 {
                 store.replaceInitialExchange(
                     concept: updatedConcept,
@@ -505,6 +547,7 @@ struct ConceptDetailView: View {
             queryEditorPreviousDraft = ""
             companion?.noteSuccess()
             isReadingOffline = false
+            maintenanceRunIds = completedRun?.childRunIds ?? []
         } catch is CancellationError {
             if let replacementIndex {
                 turns.removeAll { $0.id == assistantTurnId || $0.id == userTurnId }
@@ -545,7 +588,6 @@ struct ConceptDetailView: View {
             }
             present(error)
         }
-        isSubmittingFollowUp = false
     }
 
     private func toggleFollowUpSpeechCapture() async {
@@ -755,6 +797,43 @@ struct ConceptDetailView: View {
 
     // MARK: - Proposals
 
+    private func observeMaintenanceRuns(_ runIds: [UUID], conceptId: UUID) async {
+        guard !runIds.isEmpty else { return }
+        let store = ConceptLocalStore(modelContext: modelContext)
+        do {
+            try await ConceptMaintenanceObserver(apiClient: appServices.apiClient).observe(
+                runIds: runIds
+            ) { run, lastSequence in
+                try store.upsertModelRun(run, lastSequence: lastSequence)
+                try modelContext.save()
+            }
+            await refreshProposals(conceptId)
+        } catch is CancellationError {
+            return
+        } catch {
+            // Maintenance remains recoverable through persisted ModelRuns and the next page load.
+            companion?.note(error)
+        }
+    }
+
+    private func refreshProposals(_ conceptId: UUID) async {
+        do {
+            let remote = try await appServices.apiClient.listProposals(
+                conceptId: conceptId,
+                status: .proposed
+            )
+            try ConceptLocalStore(modelContext: modelContext).reconcileProposedProposals(
+                remote,
+                conceptId: conceptId
+            )
+            try modelContext.save()
+        } catch is CancellationError {
+            return
+        } catch {
+            // Passive refresh: keep the locally persisted proposal visible while offline.
+        }
+    }
+
     private func mergeProposal(_ proposal: ConceptUpdateProposal) async {
         resolvingProposalId = proposal.id
         errorMessage = nil
@@ -783,6 +862,7 @@ struct ConceptDetailView: View {
     /// safely reuse the same idempotency key.
     private func isTerminalFailure(_ error: Error) -> Bool {
         if case SiftAPIError.httpStatus = error { return true }
+        if case SiftAPIError.modelRunFailed = error { return true }
         return false
     }
 

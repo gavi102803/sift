@@ -41,7 +41,14 @@ struct CaptureFlowService {
             let request = CreateConceptRequest(rawCapture: draft.displayTitle, locale: draft.language)
             var dto: ConceptDTO?
             var streamedAnswer = ""
-            for try await event in apiClient.streamCreateConcept(request, idempotencyKey: idempotencyKey) {
+            for try await event in apiClient.streamCreateConcept(
+                request,
+                idempotencyKey: idempotencyKey,
+                clientDraftId: draft.id
+            ) {
+                if let run = event.modelRun {
+                    try localStore.upsertModelRun(run, lastSequence: event.sequence)
+                }
                 if let delta = event.delta, !delta.isEmpty {
                     streamedAnswer += delta
                     localStore.appendInitialGenerationAnswerDelta(
@@ -95,6 +102,9 @@ struct CaptureFlowService {
 
     private func isTerminalGenerationFailure(_ error: Error) -> Bool {
         if case SiftAPIError.httpStatus = error {
+            return true
+        }
+        if case SiftAPIError.modelRunFailed = error {
             return true
         }
         if error is URLError {

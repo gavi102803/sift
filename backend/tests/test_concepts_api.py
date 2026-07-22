@@ -78,6 +78,47 @@ def test_get_concept_returns_card_by_id() -> None:
     assert response.json()["displayTitle"] == "RAG"
 
 
+def test_concept_timestamps_are_authoritative_and_reads_do_not_change_them() -> None:
+    client = make_client()
+    created = client.post("/v1/concepts", json={"rawCapture": "RAG", "locale": "en"}).json()
+
+    fetched = client.get(f"/v1/concepts/{created['id']}").json()
+    listed = client.get("/v1/concepts").json()[0]
+
+    assert created["createdAt"] is not None
+    assert created["updatedAt"] is not None
+    assert fetched["createdAt"] == created["createdAt"]
+    assert fetched["updatedAt"] == created["updatedAt"]
+    assert listed["updatedAt"] == created["updatedAt"]
+
+
+def test_batch_archive_and_restore_are_atomic_and_recoverable() -> None:
+    client = make_client()
+    first = client.post("/v1/concepts", json={"rawCapture": "RAG", "locale": "en"}).json()
+    second = client.post("/v1/concepts", json={"rawCapture": "Agent", "locale": "en"}).json()
+
+    archived = client.patch(
+        "/v1/concepts/archive",
+        json={"conceptIds": [first["id"], second["id"]]},
+    )
+    assert archived.status_code == 200
+    assert {item["captureStatus"] for item in archived.json()} == {"archived"}
+
+    restored = client.patch(
+        "/v1/concepts/restore",
+        json={"conceptIds": [first["id"], second["id"]]},
+    )
+    assert restored.status_code == 200
+    assert {item["captureStatus"] for item in restored.json()} == {"ready"}
+
+    failed = client.patch(
+        "/v1/concepts/archive",
+        json={"conceptIds": [first["id"], "00000000-0000-0000-0000-000000000001"]},
+    )
+    assert failed.status_code == 404
+    assert client.get(f"/v1/concepts/{first['id']}").json()["captureStatus"] == "ready"
+
+
 def test_get_concept_returns_404_for_missing_card() -> None:
     client = make_client()
 

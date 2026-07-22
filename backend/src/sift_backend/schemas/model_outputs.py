@@ -41,6 +41,44 @@ class MemoryPatch(SiftBaseModel):
     user_preferences: list[str] = Field(default_factory=list, alias="userPreferences")
 
 
+class ContinuitySummaryEntry(SiftBaseModel):
+    content: str = Field(min_length=1)
+    source_turn_ids: list[int] = Field(min_length=1, alias="sourceTurnIds")
+
+
+class ContinuitySummaryResult(SiftBaseModel):
+    prior_answers: list[ContinuitySummaryEntry] = Field(
+        default_factory=list,
+        alias="priorAnswers",
+    )
+    confirmed_understanding: list[ContinuitySummaryEntry] = Field(
+        default_factory=list,
+        alias="confirmedUnderstanding",
+    )
+    user_context: list[ContinuitySummaryEntry] = Field(
+        default_factory=list,
+        alias="userContext",
+    )
+    recurring_confusions: list[ContinuitySummaryEntry] = Field(
+        default_factory=list,
+        alias="recurringConfusions",
+    )
+    open_questions: list[ContinuitySummaryEntry] = Field(
+        default_factory=list,
+        alias="openQuestions",
+    )
+
+    @property
+    def entries(self) -> list[ContinuitySummaryEntry]:
+        return [
+            *self.prior_answers,
+            *self.confirmed_understanding,
+            *self.user_context,
+            *self.recurring_confusions,
+            *self.open_questions,
+        ]
+
+
 class ModelMeta(SiftBaseModel):
     provider: str
     model: str

@@ -1,8 +1,9 @@
 import json
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TypeVar
 
 from pydantic import ValidationError
 
@@ -10,6 +11,12 @@ from sift_backend.ai.context_pack import (
     RecentTurn,
     build_concept_turn_context_pack,
     build_initial_concept_context_pack,
+    continuity_summary_response_format,
+)
+from sift_backend.runtime.execution_observer import (
+    RuntimeExecutionPolicyError,
+    record_model_call,
+    record_tool_call,
 )
 from sift_backend.runtime.tools import (
     RuntimeCitation,
@@ -30,7 +37,11 @@ from sift_backend.runtime.types import (
 )
 from sift_backend.schemas.common import AnswerSourceType
 from sift_backend.schemas.concepts import CitationDTO, ConceptDTO
-from sift_backend.schemas.model_outputs import ConceptInitialResult, ConceptTurnResult
+from sift_backend.schemas.model_outputs import (
+    ConceptInitialResult,
+    ConceptTurnResult,
+    ContinuitySummaryResult,
+)
 
 
 @dataclass(frozen=True)
@@ -69,6 +80,7 @@ class RetrievalDecision(StrEnum):
 
 ConceptRuntimeStreamEvent = ConceptRuntimeDelta | ConceptRuntimeResult
 ConceptInitialRuntimeStreamEvent = ConceptRuntimeDelta | ConceptInitialRuntimeResult
+StructuredResult = TypeVar("StructuredResult")
 
 
 class LightweightHermesRuntime:
@@ -116,9 +128,8 @@ class LightweightHermesRuntime:
             response_format=context_pack.response_format,
         )
         started_at = time.perf_counter()
-        completion = await self.model_provider.complete(request)
+        completion, result = await self._complete_structured(request, _validate_initial)
         latency_ms = round((time.perf_counter() - started_at) * 1000)
-        result = _validate_initial(_parse_json(completion.content))
         result = _result_with_streamed_initial_answer(result, answer)
         _validate_answer_source_citations(result.answer_source, evidence)
         return _initial_with_runtime_metadata(result, completion, latency_ms, evidence)
@@ -144,21 +155,8 @@ class LightweightHermesRuntime:
             response_format=context_pack.response_format,
         )
         started_at = time.perf_counter()
-        completed: RuntimeModelResponse | None = None
-        chunks: list[str] = []
-        async for event in self.model_provider.stream(request):
-            if isinstance(event, RuntimeModelDelta):
-                chunks.append(event.content)
-            if isinstance(event, RuntimeModelCompleted):
-                completed = event.response
-        if completed is None:
-            completed = RuntimeModelResponse(
-                content="".join(chunks),
-                provider=self.model_provider.provider_name,
-                model=self.model,
-            )
+        completed, result = await self._complete_structured(request, _validate_initial)
         latency_ms = round((time.perf_counter() - started_at) * 1000)
-        result = _validate_initial(_parse_json(completed.content))
         result = _result_with_streamed_initial_answer(result, answer)
         _validate_answer_source_citations(result.answer_source, evidence)
         yield ConceptInitialRuntimeResult(
@@ -196,12 +194,65 @@ class LightweightHermesRuntime:
             response_format=context_pack.response_format,
         )
         started_at = time.perf_counter()
-        completion = await self.model_provider.complete(request)
+        completion, result = await self._complete_structured(request, _validate_turn)
         latency_ms = round((time.perf_counter() - started_at) * 1000)
-        result = _validate_turn(_parse_json(completion.content))
         result = _result_with_streamed_turn_answer(result, answer)
         _validate_answer_source_citations(result.answer_source, evidence)
         return _turn_with_runtime_metadata(result, completion, latency_ms, evidence)
+
+    async def summarize_concept_continuity(
+        self,
+        concept: ConceptDTO,
+        source_turns: list[tuple[int, RecentTurn]],
+    ) -> ContinuitySummaryResult:
+        turn_payload = [
+            {"id": turn_id, "role": turn.role, "content": turn.content}
+            for turn_id, turn in source_turns
+        ]
+        messages = (
+            RuntimeMessage(
+                role="system",
+                content=(
+                    "Create a compact continuity summary for one Sift concept. Use only the "
+                    "supplied conversation turns; do not add domain facts, assumptions, or web "
+                    "knowledge. Every entry must cite one or more supplied turn IDs. Summarize "
+                    "earlier answers, confirmed user understanding, user context, recurring "
+                    "confusions, and open questions. Omit unsupported categories. The current "
+                    "card is reference context only and always remains authoritative."
+                ),
+            ),
+            RuntimeMessage(
+                role="user",
+                content=json.dumps(
+                    {
+                        "concept": {
+                            "displayTitle": concept.display_title,
+                            "oneLineExplanation": concept.one_line_explanation,
+                            "noteRevision": concept.note_revision,
+                        },
+                        "sourceTurns": turn_payload,
+                    },
+                    ensure_ascii=False,
+                ),
+            ),
+        )
+        _, result = await self._complete_structured(
+            RuntimeModelRequest(
+                model=self.model,
+                messages=messages,
+                response_format=continuity_summary_response_format(),
+            ),
+            _validate_continuity_summary,
+        )
+        allowed_ids = {turn_id for turn_id, _ in source_turns}
+        if any(
+            not set(entry.source_turn_ids).issubset(allowed_ids) for entry in result.entries
+        ):
+            raise SiftRuntimeError(
+                "invalid_summary_source",
+                "Continuity summary cited a turn outside the supplied context.",
+            )
+        return result
 
     async def stream_concept_turn_answer(
         self,
@@ -237,26 +288,47 @@ class LightweightHermesRuntime:
             response_format=context_pack.response_format,
         )
         started_at = time.perf_counter()
-        completed: RuntimeModelResponse | None = None
-        chunks: list[str] = []
-        async for event in self.model_provider.stream(request):
-            if isinstance(event, RuntimeModelDelta):
-                chunks.append(event.content)
-            if isinstance(event, RuntimeModelCompleted):
-                completed = event.response
-        if completed is None:
-            completed = RuntimeModelResponse(
-                content="".join(chunks),
-                provider=self.model_provider.provider_name,
-                model=self.model,
-            )
+        completed, result = await self._complete_structured(request, _validate_turn)
         latency_ms = round((time.perf_counter() - started_at) * 1000)
-        result = _validate_turn(_parse_json(completed.content))
         result = _result_with_streamed_turn_answer(result, answer)
         _validate_answer_source_citations(result.answer_source, evidence)
         yield ConceptRuntimeResult(
             _turn_with_runtime_metadata(result, completed, latency_ms, evidence)
         )
+
+    async def _complete_structured(
+        self,
+        request: RuntimeModelRequest,
+        validate: Callable[[dict], StructuredResult],
+    ) -> tuple[RuntimeModelResponse, StructuredResult]:
+        current_request = request
+        for attempt in range(2):
+            record_model_call()
+            completion = await self.model_provider.complete(current_request)
+            try:
+                return completion, validate(_parse_json(completion.content))
+            except SiftRuntimeError as error:
+                if error.code not in {"invalid_json", "invalid_schema"} or attempt == 1:
+                    raise
+                current_request = RuntimeModelRequest(
+                    model=request.model,
+                    messages=request.messages
+                    + (
+                        RuntimeMessage(
+                            role="system",
+                            content=(
+                                "The previous structured response could not be parsed or "
+                                "validated. Return one complete JSON object only. Do not include "
+                                "reasoning, commentary, prefixes, suffixes, or markdown fences."
+                            ),
+                        ),
+                    ),
+                    response_format=request.response_format,
+                    temperature=request.temperature,
+                    structured_output_strategy=request.structured_output_strategy,
+                    tools=request.tools,
+                )
+        raise AssertionError("structured completion retry loop exited unexpectedly")
 
     async def _complete_initial_answer(
         self,
@@ -268,6 +340,7 @@ class LightweightHermesRuntime:
             model=self.model,
             messages=_initial_answer_messages(raw_capture, locale, evidence),
         )
+        record_model_call()
         completion = await self.model_provider.complete(request)
         return _natural_answer_text(completion.content)
 
@@ -283,6 +356,7 @@ class LightweightHermesRuntime:
         )
         chunks: list[str] = []
         yielded = False
+        record_model_call()
         async for event in self.model_provider.stream(request):
             if isinstance(event, RuntimeModelDelta):
                 chunks.append(event.content)
@@ -313,6 +387,7 @@ class LightweightHermesRuntime:
                 evidence,
             ),
         )
+        record_model_call()
         completion = await self.model_provider.complete(request)
         return _natural_answer_text(completion.content)
 
@@ -336,6 +411,7 @@ class LightweightHermesRuntime:
         )
         chunks: list[str] = []
         yielded = False
+        record_model_call()
         async for event in self.model_provider.stream(request):
             if isinstance(event, RuntimeModelDelta):
                 chunks.append(event.content)
@@ -379,6 +455,7 @@ class LightweightHermesRuntime:
             tools=(_web_search_tool_spec(),),
         )
         try:
+            record_model_call()
             completion = await self.model_provider.complete(request)
         except SiftRuntimeError:
             return ()
@@ -396,6 +473,7 @@ class LightweightHermesRuntime:
         query = tool_call.arguments.get("query")
         if not isinstance(query, str) or not query.strip():
             query = fallback_query
+        record_tool_call("web.search")
         result = await self.tool_registry.dispatch("web.search", {"query": query.strip()})
         if not isinstance(result, list) or not all(
             isinstance(citation, RuntimeCitation) for citation in result
@@ -418,7 +496,10 @@ class LightweightHermesRuntime:
                 )
             return []
         try:
+            record_tool_call("web.search")
             citations = await self.tool_registry.dispatch("web.search", {"query": query})
+        except RuntimeExecutionPolicyError:
+            raise
         except SiftRuntimeError:
             if decision == RetrievalDecision.REQUIRED:
                 raise
@@ -451,7 +532,10 @@ class LightweightHermesRuntime:
             return []
         urls = [citation.url for citation in citations if citation.url]
         try:
+            record_tool_call("web.extract")
             documents = await self.tool_registry.dispatch("web.extract", {"urls": urls})
+        except RuntimeExecutionPolicyError:
+            raise
         except SiftRuntimeError:
             documents = []
         except Exception:
@@ -801,6 +885,16 @@ def _validate_initial(payload: dict) -> ConceptInitialResult:
         raise SiftRuntimeError(
             "invalid_schema",
             "Runtime response did not match the initial concept schema.",
+        ) from error
+
+
+def _validate_continuity_summary(payload: dict) -> ContinuitySummaryResult:
+    try:
+        return ContinuitySummaryResult.model_validate(payload)
+    except ValidationError as error:
+        raise SiftRuntimeError(
+            "invalid_schema",
+            "Runtime response did not match the continuity summary schema.",
         ) from error
 
 

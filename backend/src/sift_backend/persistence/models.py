@@ -1,6 +1,16 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -23,6 +33,7 @@ class ConceptRecord(Base):
     initial_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
     maturity: Mapped[str] = mapped_column(String(32), nullable=False)
     capture_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    archived_from_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     note_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     answer_source_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
@@ -215,6 +226,8 @@ class NoteRevisionRecord(Base):
     snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
     source_message_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     merge_mode: Mapped[str] = mapped_column(String(32), nullable=False)
+    snapshot_schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    restored_from_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
@@ -361,12 +374,19 @@ class UpdateProposalRecord(Base):
     rationale: Mapped[str] = mapped_column(Text, nullable=False)
     confidence: Mapped[float] = mapped_column(nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
+    origin: Mapped[str] = mapped_column(String(32), nullable=False, default="followUp")
+    source_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class TurnRecord(Base):
     __tablename__ = "concept_turns"
+    __table_args__ = (
+        UniqueConstraint(
+            "concept_id", "operation_key", "role", name="uq_concept_turn_operation_role"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     concept_id: Mapped[str] = mapped_column(
@@ -378,4 +398,99 @@ class TurnRecord(Base):
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     answer_source_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    operation_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ModelRunRecord(Base):
+    __tablename__ = "model_runs"
+    __table_args__ = (
+        UniqueConstraint(
+            "owner_id", "kind", "idempotency_key", name="uq_model_runs_owner_kind_key"
+        ),
+        Index(
+            "uq_model_runs_running_concept",
+            "concept_id",
+            unique=True,
+            sqlite_where=text("status = 'running' AND concept_id IS NOT NULL"),
+            postgresql_where=text("status = 'running' AND concept_id IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    concept_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    client_draft_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_snapshot_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    agent_spec: Mapped[str] = mapped_column(String(64), nullable=False, default="legacy")
+    agent_spec_version: Mapped[str] = mapped_column(String(32), nullable=False, default="1")
+    prompt_version: Mapped[str] = mapped_column(String(64), nullable=False, default="legacy")
+    budget_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    current_step: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    model_call_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tool_call_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    termination_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    dependency_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    checkpoint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    checkpoint_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lease_owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ModelRunEventRecord(Base):
+    __tablename__ = "model_run_events"
+    __table_args__ = (UniqueConstraint("run_id", "sequence", name="uq_model_run_events_sequence"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("model_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    data_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ConceptContinuitySummaryRecord(Base):
+    __tablename__ = "concept_continuity_summaries"
+
+    concept_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("concepts.id", ondelete="CASCADE"), primary_key=True
+    )
+    owner_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    summary_json: Mapped[str] = mapped_column(Text, nullable=False)
+    through_turn_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_turns_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ConceptMaintenanceStateRecord(Base):
+    __tablename__ = "concept_maintenance_states"
+
+    concept_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("concepts.id", ondelete="CASCADE"), primary_key=True
+    )
+    owner_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    last_reviewed_turn_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    review_due: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )

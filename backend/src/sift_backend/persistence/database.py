@@ -3,6 +3,7 @@ from typing import Any
 
 from sqlalchemy import Engine, create_engine, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 # Register identity tables on the shared metadata before create_all is used in local/test mode.
 from sift_backend.identity_access import persistence as _identity_persistence  # noqa: F401, E402
@@ -20,7 +21,10 @@ def create_session_factory(
         connect_args["check_same_thread"] = False
         _ensure_sqlite_parent_dir(database_url)
 
-    engine = create_engine(database_url, connect_args=connect_args)
+    engine_options: dict[str, Any] = {"connect_args": connect_args}
+    if database_url in {"sqlite://", "sqlite:///:memory:"}:
+        engine_options["poolclass"] = StaticPool
+    engine = create_engine(database_url, **engine_options)
     if initialize_schema:
         initialize_database(engine)
     return sessionmaker(bind=engine, expire_on_commit=False)
@@ -53,6 +57,18 @@ def _ensure_sqlite_schema(engine: Engine) -> None:
     if "answer_source_json" not in columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE concept_turns ADD COLUMN answer_source_json TEXT"))
+    if "operation_key" not in columns:
+        with engine.begin() as connection:
+            connection.execute(
+                text("ALTER TABLE concept_turns ADD COLUMN operation_key VARCHAR(255)")
+            )
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_concept_turn_operation_role "
+                "ON concept_turns (concept_id, operation_key, role)"
+            )
+        )
 
     if "concepts" not in table_names:
         return
@@ -61,6 +77,11 @@ def _ensure_sqlite_schema(engine: Engine) -> None:
     if "answer_source_json" not in concept_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE concepts ADD COLUMN answer_source_json TEXT"))
+    if "archived_from_status" not in concept_columns:
+        with engine.begin() as connection:
+            connection.execute(
+                text("ALTER TABLE concepts ADD COLUMN archived_from_status VARCHAR(32)")
+            )
 
     if "note_blocks" not in table_names:
         return

@@ -62,6 +62,12 @@ class ConceptDTO(SiftBaseModel):
     sources: list["SourceDTO"] = Field(default_factory=list)
     claims: list["ClaimDTO"] = Field(default_factory=list)
     learning_state: "LearningStateDTO | None" = Field(default=None, alias="learningState")
+    created_at: str | None = Field(default=None, alias="createdAt")
+    updated_at: str | None = Field(default=None, alias="updatedAt")
+
+
+class BatchConceptRequest(SiftBaseModel):
+    concept_ids: list[UUID] = Field(min_length=1, alias="conceptIds")
 
 
 class CreateConceptRequest(SiftBaseModel):
@@ -199,6 +205,24 @@ class UpdateProposalDTO(SiftBaseModel):
     rationale: str
     confidence: float = Field(ge=0, le=1)
     status: ProposalStatus = ProposalStatus.proposed
+    origin: str = "followUp"
+    source_run_id: UUID | None = Field(default=None, alias="sourceRunId")
+
+
+class NoteRevisionSummaryDTO(SiftBaseModel):
+    revision: int
+    source: str
+    created_at: str = Field(alias="createdAt")
+    is_current: bool = Field(default=False, alias="isCurrent")
+    restored_from_revision: int | None = Field(default=None, alias="restoredFromRevision")
+
+
+class NoteRevisionDTO(NoteRevisionSummaryDTO):
+    snapshot_schema_version: int = Field(alias="snapshotSchemaVersion")
+    display_title: str = Field(alias="displayTitle")
+    canonical_title: str = Field(alias="canonicalTitle")
+    one_line_explanation: str = Field(alias="oneLineExplanation")
+    blocks: list[NoteBlockDTO] = Field(default_factory=list)
 
 
 class ConceptTurnResponse(SiftBaseModel):

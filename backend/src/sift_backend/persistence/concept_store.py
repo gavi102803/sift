@@ -1,4 +1,8 @@
+import hashlib
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -12,6 +16,7 @@ from sift_backend.concepts.service import CaptureAttemptDTO, IdempotencyRecordDT
 from sift_backend.persistence.models import (
     CaptureAttemptRecord,
     ClaimRecord,
+    ConceptContinuitySummaryRecord,
     ConceptRecord,
     ConceptRelationRecord,
     ConceptTagRecord,
@@ -49,6 +54,8 @@ from sift_backend.schemas.concepts import (
     LearningStateEntryDTO,
     LearningStateUpdateDTO,
     NoteBlockDTO,
+    NoteRevisionDTO,
+    NoteRevisionSummaryDTO,
     SourceDTO,
     UpdateProposalDTO,
 )
@@ -62,9 +69,38 @@ class PersistentConceptStore:
 
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
         self.session_factory = session_factory
+        self._transaction_session: ContextVar[Session | None] = ContextVar(
+            f"concept-store-session-{id(self)}",
+            default=None,
+        )
+
+    @contextmanager
+    def transaction(self, session: Session) -> Iterator[None]:
+        """Join store operations to a caller-owned transaction."""
+        current = self._transaction_session.get()
+        if current is not None and current is not session:
+            raise RuntimeError("Concept store is already bound to another transaction.")
+        token = self._transaction_session.set(session)
+        try:
+            yield
+        finally:
+            self._transaction_session.reset(token)
+
+    @contextmanager
+    def _session(self) -> Iterator[Session]:
+        current = self._transaction_session.get()
+        if current is not None:
+            yield current
+            return
+        with self.session_factory() as session:
+            yield session
+
+    def _commit(self, session: Session) -> None:
+        if self._transaction_session.get() is not session:
+            session.commit()
 
     def save_concept(self, concept: ConceptDTO, owner_id: str | None = None) -> ConceptDTO:
-        with self.session_factory() as session:
+        with self._session() as session:
             record = session.get(ConceptRecord, str(concept.id))
             if record is None:
                 record = ConceptRecord(id=str(concept.id))
@@ -96,18 +132,18 @@ class PersistentConceptStore:
                 _replace_learning_state(session, record, concept.learning_state)
             _replace_tag_assignments(session, record, concept.tags)
             _replace_topic_assignments(session, record, concept.topics)
-            session.commit()
+            self._commit(session)
             return self.get_concept(concept.id, owner_id=owner_id)
 
     def add_sources(self, concept_id: UUID, sources: list[SourceDTO]) -> list[SourceDTO]:
         if not sources:
             return []
-        with self.session_factory() as session:
+        with self._session() as session:
             if session.get(ConceptRecord, str(concept_id)) is None:
                 raise _not_found("Concept not found.")
             for source in sources:
                 session.merge(_source_to_record(source))
-            session.commit()
+            self._commit(session)
             return _source_records_to_dtos(
                 session.scalars(
                     select(SourceRecord).where(SourceRecord.concept_id == str(concept_id))
@@ -117,12 +153,12 @@ class PersistentConceptStore:
     def add_claims(self, concept_id: UUID, claims: list[ClaimDTO]) -> list[ClaimDTO]:
         if not claims:
             return []
-        with self.session_factory() as session:
+        with self._session() as session:
             if session.get(ConceptRecord, str(concept_id)) is None:
                 raise _not_found("Concept not found.")
             for claim in claims:
                 session.merge(_claim_to_record(claim))
-            session.commit()
+            self._commit(session)
             return _claim_records_to_dtos(
                 session.scalars(
                     select(ClaimRecord).where(ClaimRecord.concept_id == str(concept_id))
@@ -134,7 +170,7 @@ class PersistentConceptStore:
         concept_id: UUID,
         updates: list[LearningStateUpdateDTO],
     ) -> LearningStateDTO:
-        with self.session_factory() as session:
+        with self._session() as session:
             if session.get(ConceptRecord, str(concept_id)) is None:
                 raise _not_found("Concept not found.")
             for update in updates:
@@ -159,7 +195,7 @@ class PersistentConceptStore:
                         origin=update.origin.value,
                     )
                 )
-            session.commit()
+            self._commit(session)
             records = session.scalars(
                 select(LearningStateEntryRecord)
                 .where(LearningStateEntryRecord.concept_id == str(concept_id))
@@ -168,7 +204,7 @@ class PersistentConceptStore:
             return _learning_state_from_records(concept_id, records)
 
     def list_concepts(self, owner_id: str | None = None) -> list[ConceptDTO]:
-        with self.session_factory() as session:
+        with self._session() as session:
             statement = select(ConceptRecord).order_by(ConceptRecord.created_at)
             if owner_id is not None:
                 statement = statement.where(ConceptRecord.owner_id == owner_id)
@@ -178,12 +214,43 @@ class PersistentConceptStore:
             return [_record_to_concept(record) for record in records]
 
     def get_concept(self, concept_id: UUID, owner_id: str | None = None) -> ConceptDTO:
-        with self.session_factory() as session:
+        with self._session() as session:
             record = session.get(ConceptRecord, str(concept_id))
             if record is None or (owner_id is not None and record.owner_id != owner_id):
                 raise _not_found("Concept not found.")
             _attach_knowledge_records(session, record)
             return _record_to_concept(record)
+
+    def set_concepts_archived(
+        self,
+        concept_ids: list[UUID],
+        *,
+        archived: bool,
+        owner_id: str,
+    ) -> list[ConceptDTO]:
+        unique_ids = list(dict.fromkeys(str(concept_id) for concept_id in concept_ids))
+        with self._session() as session:
+            records = session.scalars(
+                select(ConceptRecord).where(
+                    ConceptRecord.id.in_(unique_ids),
+                    ConceptRecord.owner_id == owner_id,
+                )
+            ).all()
+            if len(records) != len(unique_ids):
+                raise _not_found("Concept not found.")
+            for record in records:
+                if archived:
+                    if record.capture_status != CaptureStatus.archived.value:
+                        record.archived_from_status = record.capture_status
+                    record.capture_status = CaptureStatus.archived.value
+                else:
+                    record.capture_status = record.archived_from_status or CaptureStatus.ready.value
+                    record.archived_from_status = None
+            self._commit(session)
+            for record in records:
+                session.refresh(record)
+                _attach_knowledge_records(session, record)
+            return [_record_to_concept(record) for record in records]
 
     def add_relation(
         self,
@@ -203,7 +270,7 @@ class PersistentConceptStore:
                 detail="A concept cannot relate to itself.",
             )
 
-        with self.session_factory() as session:
+        with self._session() as session:
             source = session.get(ConceptRecord, str(source_concept_id))
             target = session.get(ConceptRecord, str(target_concept_id))
             if source is None or target is None:
@@ -228,11 +295,11 @@ class PersistentConceptStore:
                         source="user",
                     )
                 )
-                session.commit()
+                self._commit(session)
             return self.get_concept(source_concept_id)
 
     def remove_relation(self, concept_id: UUID, relation_id: UUID) -> ConceptDTO:
-        with self.session_factory() as session:
+        with self._session() as session:
             if session.get(ConceptRecord, str(concept_id)) is None:
                 raise _not_found("Concept not found.")
             relation = session.get(ConceptRelationRecord, str(relation_id))
@@ -244,7 +311,7 @@ class PersistentConceptStore:
             }:
                 raise _not_found("Concept relation not found.")
             session.delete(relation)
-            session.commit()
+            self._commit(session)
             return self.get_concept(concept_id)
 
     def record_note_audit(
@@ -254,7 +321,7 @@ class PersistentConceptStore:
         actor: str,
         proposal_id: UUID | None = None,
     ) -> None:
-        with self.session_factory() as session:
+        with self._session() as session:
             record = session.get(ConceptRecord, str(concept_id))
             if record is None:
                 raise _not_found("Concept not found.")
@@ -273,26 +340,36 @@ class PersistentConceptStore:
                         revision=record.note_revision,
                         snapshot_json=_snapshot_json(record),
                         merge_mode=event_type,
+                        snapshot_schema_version=2,
                     )
                 )
-            session.add(
-                UpdateEventRecord(
-                    id=str(uuid4()),
-                    concept_id=str(concept_id),
-                    note_revision=record.note_revision,
-                    proposal_id=str(proposal_id) if proposal_id is not None else None,
-                    event_type=event_type,
-                    actor=actor,
+            existing_event = session.scalar(
+                select(UpdateEventRecord).where(
+                    UpdateEventRecord.concept_id == str(concept_id),
+                    UpdateEventRecord.note_revision == record.note_revision,
+                    UpdateEventRecord.event_type == event_type,
+                    UpdateEventRecord.actor == actor,
                 )
             )
-            session.commit()
+            if existing_event is None:
+                session.add(
+                    UpdateEventRecord(
+                        id=str(uuid4()),
+                        concept_id=str(concept_id),
+                        note_revision=record.note_revision,
+                        proposal_id=str(proposal_id) if proposal_id is not None else None,
+                        event_type=event_type,
+                        actor=actor,
+                    )
+                )
+            self._commit(session)
 
     def save_proposal(
         self,
         proposal: UpdateProposalDTO,
         concept_id: UUID | None = None,
     ) -> UpdateProposalDTO:
-        with self.session_factory() as session:
+        with self._session() as session:
             record = session.get(UpdateProposalRecord, str(proposal.id))
             if record is None:
                 if concept_id is None:
@@ -310,27 +387,133 @@ class PersistentConceptStore:
             record.rationale = proposal.rationale
             record.confidence = proposal.confidence
             record.status = proposal.status.value
+            record.origin = proposal.origin
+            record.source_run_id = str(proposal.source_run_id) if proposal.source_run_id else None
             if proposal.status != ProposalStatus.proposed and record.resolved_at is None:
                 record.resolved_at = datetime.now(UTC)
-            session.commit()
+            self._commit(session)
             return self.get_proposal(proposal.id)
 
     def get_proposal(self, proposal_id: UUID) -> UpdateProposalDTO:
-        with self.session_factory() as session:
+        with self._session() as session:
             record = session.get(UpdateProposalRecord, str(proposal_id))
             if record is None:
                 raise _not_found("Update proposal not found.")
             return _record_to_proposal(record)
 
     def get_proposal_concept_id(self, proposal_id: UUID) -> UUID:
-        with self.session_factory() as session:
+        with self._session() as session:
             record = session.get(UpdateProposalRecord, str(proposal_id))
             if record is None:
                 raise _not_found("Update proposal concept mapping not found.")
             return UUID(record.concept_id)
 
+    def list_proposals(
+        self, concept_id: UUID, owner_id: str, proposal_status: ProposalStatus | None = None
+    ) -> list[UpdateProposalDTO]:
+        self.get_concept(concept_id, owner_id=owner_id)
+        with self._session() as session:
+            query = select(UpdateProposalRecord).where(
+                UpdateProposalRecord.concept_id == str(concept_id)
+            )
+            if proposal_status is not None:
+                query = query.where(UpdateProposalRecord.status == proposal_status.value)
+            return [
+                _record_to_proposal(row)
+                for row in session.scalars(query.order_by(UpdateProposalRecord.created_at)).all()
+            ]
+
+    def list_revisions(self, concept_id: UUID, owner_id: str) -> list[NoteRevisionSummaryDTO]:
+        concept = self.get_concept(concept_id, owner_id=owner_id)
+        with self._session() as session:
+            rows = session.scalars(
+                select(NoteRevisionRecord)
+                .where(NoteRevisionRecord.concept_id == str(concept_id))
+                .order_by(NoteRevisionRecord.revision.desc())
+            ).all()
+            return [
+                NoteRevisionSummaryDTO(
+                    revision=row.revision,
+                    source=row.merge_mode,
+                    createdAt=_dt_to_iso(row.created_at),
+                    isCurrent=row.revision == concept.note_revision,
+                    restoredFromRevision=row.restored_from_revision,
+                )
+                for row in rows
+            ]
+
+    def get_revision(self, concept_id: UUID, revision: int, owner_id: str) -> NoteRevisionDTO:
+        concept = self.get_concept(concept_id, owner_id=owner_id)
+        with self._session() as session:
+            row = session.scalar(
+                select(NoteRevisionRecord).where(
+                    NoteRevisionRecord.concept_id == str(concept_id),
+                    NoteRevisionRecord.revision == revision,
+                )
+            )
+            if row is None:
+                raise _not_found("Note revision not found.")
+            return _revision_dto(row, current_revision=concept.note_revision)
+
+    def restore_revision(self, concept_id: UUID, revision: int, owner_id: str) -> ConceptDTO:
+        with self._session() as session:
+            concept = session.get(ConceptRecord, str(concept_id))
+            if concept is None or concept.owner_id != owner_id:
+                raise _not_found("Concept not found.")
+            source = session.scalar(
+                select(NoteRevisionRecord).where(
+                    NoteRevisionRecord.concept_id == str(concept_id),
+                    NoteRevisionRecord.revision == revision,
+                )
+            )
+            if source is None:
+                raise _not_found("Note revision not found.")
+            snapshot = json.loads(source.snapshot_json)
+            concept.canonical_title = (
+                snapshot.get("canonicalTitle")
+                or snapshot.get("displayTitle")
+                or concept.canonical_title
+            )
+            concept.display_title = snapshot.get("displayTitle") or concept.display_title
+            concept.one_line_explanation = snapshot.get("oneLineExplanation", "")
+            concept.note_revision += 1
+            concept.blocks = [
+                _snapshot_block_to_record(item, concept_id, position)
+                for position, item in enumerate(snapshot.get("blocks", []))
+            ]
+            session.flush()
+            new_revision = NoteRevisionRecord(
+                id=str(uuid4()),
+                concept_id=str(concept_id),
+                revision=concept.note_revision,
+                snapshot_json=_snapshot_json(concept),
+                merge_mode="revisionRestore",
+                snapshot_schema_version=2,
+                restored_from_revision=revision,
+            )
+            session.add(new_revision)
+            session.add(
+                UpdateEventRecord(
+                    id=str(uuid4()),
+                    concept_id=str(concept_id),
+                    note_revision=concept.note_revision,
+                    event_type="revisionRestore",
+                    actor="user",
+                )
+            )
+            for proposal in session.scalars(
+                select(UpdateProposalRecord).where(
+                    UpdateProposalRecord.concept_id == str(concept_id),
+                    UpdateProposalRecord.status == ProposalStatus.proposed.value,
+                )
+            ).all():
+                proposal.status = ProposalStatus.stale.value
+                proposal.resolved_at = datetime.now(UTC)
+            self._commit(session)
+        return self.get_concept(concept_id, owner_id=owner_id)
+
     def get_recent_turns(self, concept_id: UUID, limit: int = 10) -> list[RecentTurn]:
-        with self.session_factory() as session:
+        with self._session() as session:
             records = session.scalars(
                 select(TurnRecord)
                 .where(TurnRecord.concept_id == str(concept_id))
@@ -346,23 +529,68 @@ class PersistentConceptStore:
                 for record in reversed(records)
             ]
 
+    def get_continuity_context(self, concept_id: UUID) -> tuple[list[RecentTurn], str]:
+        with self._session() as session:
+            records = session.scalars(
+                select(TurnRecord)
+                .where(TurnRecord.concept_id == str(concept_id))
+                .order_by(TurnRecord.id)
+            ).all()
+            summary = session.get(ConceptContinuitySummaryRecord, str(concept_id))
+            if summary is not None and len(records) >= 6:
+                source = records[:-6]
+                digest = hashlib.sha256(
+                    "\n".join(f"{row.id}:{row.role}:{row.content}" for row in source).encode()
+                ).hexdigest()
+                if digest == summary.source_turns_hash:
+                    recent = records[-6:]
+                    return [
+                        RecentTurn(
+                            role=row.role,
+                            content=row.content,
+                            answer_source_json=row.answer_source_json,
+                        )
+                        for row in recent
+                    ], summary.summary_json
+            recent = records[-10:]
+            return [
+                RecentTurn(
+                    role=row.role, content=row.content, answer_source_json=row.answer_source_json
+                )
+                for row in recent
+            ], ""
+
     def append_turn_pair(
         self,
         concept_id: UUID,
         user_query: str,
         answer: str,
         answer_source: AnswerSourceDTO | None = None,
+        operation_key: str | None = None,
     ) -> None:
-        with self.session_factory() as session:
+        with self._session() as session:
             if session.get(ConceptRecord, str(concept_id)) is None:
                 raise _not_found("Concept not found.")
+            if operation_key is not None and session.scalar(
+                select(TurnRecord.id).where(
+                    TurnRecord.concept_id == str(concept_id),
+                    TurnRecord.operation_key == operation_key,
+                )
+            ) is not None:
+                return
             session.add_all(
                 [
-                    TurnRecord(concept_id=str(concept_id), role="user", content=user_query),
+                    TurnRecord(
+                        concept_id=str(concept_id),
+                        role="user",
+                        content=user_query,
+                        operation_key=operation_key,
+                    ),
                     TurnRecord(
                         concept_id=str(concept_id),
                         role="assistant",
                         content=answer,
+                        operation_key=operation_key,
                         answer_source_json=(
                             answer_source.model_dump_json(by_alias=True)
                             if answer_source is not None
@@ -371,7 +599,7 @@ class PersistentConceptStore:
                     ),
                 ]
             )
-            session.commit()
+            self._commit(session)
 
     def replace_turn_pair_from_index(
         self,
@@ -380,10 +608,18 @@ class PersistentConceptStore:
         user_query: str,
         answer: str,
         answer_source: AnswerSourceDTO | None = None,
+        operation_key: str | None = None,
     ) -> None:
-        with self.session_factory() as session:
+        with self._session() as session:
             if session.get(ConceptRecord, str(concept_id)) is None:
                 raise _not_found("Concept not found.")
+            if operation_key is not None and session.scalar(
+                select(TurnRecord.id).where(
+                    TurnRecord.concept_id == str(concept_id),
+                    TurnRecord.operation_key == operation_key,
+                )
+            ) is not None:
+                return
             records = session.scalars(
                 select(TurnRecord)
                 .where(TurnRecord.concept_id == str(concept_id))
@@ -394,11 +630,17 @@ class PersistentConceptStore:
                 session.delete(record)
             session.add_all(
                 [
-                    TurnRecord(concept_id=str(concept_id), role="user", content=user_query),
+                    TurnRecord(
+                        concept_id=str(concept_id),
+                        role="user",
+                        content=user_query,
+                        operation_key=operation_key,
+                    ),
                     TurnRecord(
                         concept_id=str(concept_id),
                         role="assistant",
                         content=answer,
+                        operation_key=operation_key,
                         answer_source_json=(
                             answer_source.model_dump_json(by_alias=True)
                             if answer_source is not None
@@ -407,11 +649,11 @@ class PersistentConceptStore:
                     ),
                 ]
             )
-            session.commit()
+            self._commit(session)
 
     def list_turns(self, concept_id: UUID) -> list[RecentTurn]:
         self.get_concept(concept_id)
-        with self.session_factory() as session:
+        with self._session() as session:
             records = session.scalars(
                 select(TurnRecord)
                 .where(TurnRecord.concept_id == str(concept_id))
@@ -431,7 +673,7 @@ class PersistentConceptStore:
         owner_id: str,
         idempotency_key: str,
     ) -> CaptureAttemptDTO | None:
-        with self.session_factory() as session:
+        with self._session() as session:
             record = session.scalar(
                 select(CaptureAttemptRecord).where(
                     CaptureAttemptRecord.owner_id == owner_id,
@@ -448,7 +690,7 @@ class PersistentConceptStore:
         raw_capture: str,
         locale: str,
     ) -> CaptureAttemptDTO:
-        with self.session_factory() as session:
+        with self._session() as session:
             existing = session.scalar(
                 select(CaptureAttemptRecord).where(
                     CaptureAttemptRecord.owner_id == owner_id,
@@ -467,7 +709,7 @@ class PersistentConceptStore:
                 status="generating",
             )
             session.add(record)
-            session.commit()
+            self._commit(session)
             return _record_to_capture_attempt(record)
 
     def update_capture_attempt(
@@ -479,7 +721,7 @@ class PersistentConceptStore:
         failure_code: str | None = None,
         failure_message: str | None = None,
     ) -> CaptureAttemptDTO:
-        with self.session_factory() as session:
+        with self._session() as session:
             record = session.get(CaptureAttemptRecord, str(attempt_id))
             if record is None:
                 raise _not_found("Capture attempt not found.")
@@ -487,7 +729,7 @@ class PersistentConceptStore:
             record.concept_id = str(concept_id) if concept_id is not None else None
             record.failure_code = failure_code
             record.failure_message = failure_message
-            session.commit()
+            self._commit(session)
             return _record_to_capture_attempt(record)
 
     def get_idempotency_record(
@@ -496,7 +738,7 @@ class PersistentConceptStore:
         endpoint: str,
         idempotency_key: str,
     ) -> IdempotencyRecordDTO | None:
-        with self.session_factory() as session:
+        with self._session() as session:
             record = session.scalar(
                 select(IdempotencyRecord).where(
                     IdempotencyRecord.owner_id == owner_id,
@@ -514,7 +756,7 @@ class PersistentConceptStore:
         payload_hash: str,
         response_json: str,
     ) -> IdempotencyRecordDTO:
-        with self.session_factory() as session:
+        with self._session() as session:
             record = session.scalar(
                 select(IdempotencyRecord).where(
                     IdempotencyRecord.owner_id == owner_id,
@@ -535,7 +777,7 @@ class PersistentConceptStore:
             record.response_json = response_json
             record.payload_hash = payload_hash
             record.status = "succeeded"
-            session.commit()
+            self._commit(session)
             return _record_to_idempotency(record)
 
 
@@ -578,8 +820,7 @@ def _record_to_concept(record: ConceptRecord) -> ConceptDTO:
                 isUserLocked=block.is_user_locked,
                 revision=block.revision,
                 supportedClaimIds=[
-                    UUID(claim_id)
-                    for claim_id in _json_list(block.supported_claim_ids_json)
+                    UUID(claim_id) for claim_id in _json_list(block.supported_claim_ids_json)
                 ],
                 position=block.position,
             )
@@ -615,6 +856,8 @@ def _record_to_concept(record: ConceptRecord) -> ConceptDTO:
                 key=lambda entry: entry.created_at,
             ),
         ),
+        createdAt=_dt_to_iso(record.created_at),
+        updatedAt=_dt_to_iso(record.updated_at),
     )
 
 
@@ -649,6 +892,7 @@ def _snapshot_json(record: ConceptRecord) -> str:
     return json.dumps(
         {
             "conceptId": record.id,
+            "canonicalTitle": record.canonical_title,
             "displayTitle": record.display_title,
             "oneLineExplanation": record.one_line_explanation,
             "noteRevision": record.note_revision,
@@ -659,6 +903,9 @@ def _snapshot_json(record: ConceptRecord) -> str:
                     "content": block.content,
                     "source": block.source,
                     "isUserLocked": block.is_user_locked,
+                    "revision": block.revision,
+                    "supportedClaimIds": json.loads(block.supported_claim_ids_json),
+                    "position": block.position,
                 }
                 for block in record.blocks
             ],
@@ -675,6 +922,54 @@ def _record_to_proposal(record: UpdateProposalRecord) -> UpdateProposalDTO:
         rationale=record.rationale,
         confidence=record.confidence,
         status=ProposalStatus(record.status),
+        origin=record.origin,
+        sourceRunId=UUID(record.source_run_id) if record.source_run_id else None,
+    )
+
+
+def _revision_dto(record: NoteRevisionRecord, *, current_revision: int) -> NoteRevisionDTO:
+    snapshot = json.loads(record.snapshot_json)
+    blocks = [
+        NoteBlockDTO(
+            id=UUID(item["id"]),
+            blockType=item.get("blockType", "explanation"),
+            content=item.get("content", ""),
+            source=item.get("source", "ai"),
+            isUserLocked=item.get("isUserLocked", False),
+            revision=max(1, item.get("revision", 1)),
+            supportedClaimIds=item.get("supportedClaimIds", []),
+            position=item.get("position", position),
+        )
+        for position, item in enumerate(snapshot.get("blocks", []))
+    ]
+    display_title = snapshot.get("displayTitle", "")
+    return NoteRevisionDTO(
+        revision=record.revision,
+        source=record.merge_mode,
+        createdAt=_dt_to_iso(record.created_at),
+        isCurrent=record.revision == current_revision,
+        restoredFromRevision=record.restored_from_revision,
+        snapshotSchemaVersion=record.snapshot_schema_version or 1,
+        displayTitle=display_title,
+        canonicalTitle=snapshot.get("canonicalTitle", display_title),
+        oneLineExplanation=snapshot.get("oneLineExplanation", ""),
+        blocks=blocks,
+    )
+
+
+def _snapshot_block_to_record(
+    item: dict, concept_id: UUID, fallback_position: int
+) -> NoteBlockRecord:
+    return NoteBlockRecord(
+        id=item.get("id") or str(uuid4()),
+        concept_id=str(concept_id),
+        block_type=item.get("blockType", "explanation"),
+        content=item.get("content", ""),
+        source=item.get("source", "ai"),
+        is_user_locked=item.get("isUserLocked", False),
+        revision=max(1, item.get("revision", 1)),
+        supported_claim_ids_json=json.dumps(item.get("supportedClaimIds", [])),
+        position=item.get("position", fallback_position),
     )
 
 
@@ -687,9 +982,7 @@ def _attach_knowledge_records(session: Session, record: ConceptRecord) -> None:
         select(ClaimRecord).where(ClaimRecord.concept_id == concept_id)
     ).all()
     record._sift_learning_entries = session.scalars(
-        select(LearningStateEntryRecord).where(
-            LearningStateEntryRecord.concept_id == concept_id
-        )
+        select(LearningStateEntryRecord).where(LearningStateEntryRecord.concept_id == concept_id)
     ).all()
 
 
@@ -717,9 +1010,7 @@ def _claim_to_record(claim: ClaimDTO) -> ClaimRecord:
         source_ids_json=json.dumps([str(source_id) for source_id in claim.source_ids]),
         verified_at=_parse_dt(claim.verified_at),
         superseded_by_claim_id=(
-            str(claim.superseded_by_claim_id)
-            if claim.superseded_by_claim_id is not None
-            else None
+            str(claim.superseded_by_claim_id) if claim.superseded_by_claim_id is not None else None
         ),
     )
 
@@ -863,9 +1154,7 @@ def _replace_tag_assignments(
     session.flush()
     for name in _normalized_names(names):
         tag = _get_or_create_tag(session, name)
-        concept.tag_assignments.append(
-            ConceptTagRecord(tag=tag, confidence=1, source="user")
-        )
+        concept.tag_assignments.append(ConceptTagRecord(tag=tag, confidence=1, source="user"))
 
 
 def _replace_topic_assignments(
@@ -908,7 +1197,9 @@ def _parse_dt(value: str | None) -> datetime | None:
 def _dt_to_iso(value: datetime | None) -> str | None:
     if value is None:
         return None
-    return value.isoformat()
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _get_or_create_tag(session: Session, name: str) -> TagRecord:

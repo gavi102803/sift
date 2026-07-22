@@ -68,7 +68,6 @@ def build_concept_turn_context_pack(
             ),
         ]
     )
-
     context_payload = {
         "concept": {
             "id": str(concept.id),
@@ -183,6 +182,44 @@ def build_initial_concept_context_pack(raw_capture: str, locale: str) -> Context
         ),
         response_format=initial_concept_response_format(),
     )
+
+
+def continuity_summary_response_format() -> dict[str, Any]:
+    entry = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["content", "sourceTurnIds"],
+        "properties": {
+            "content": {"type": "string", "minLength": 1},
+            "sourceTurnIds": {
+                "type": "array",
+                "minItems": 1,
+                "items": {"type": "integer"},
+            },
+        },
+    }
+    fields = [
+        "priorAnswers",
+        "confirmedUnderstanding",
+        "userContext",
+        "recurringConfusions",
+        "openQuestions",
+    ]
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "concept_continuity_summary",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": fields,
+                "properties": {
+                    field: {"type": "array", "items": entry} for field in fields
+                },
+            },
+        },
+    }
 
 
 def initial_concept_response_format() -> dict[str, Any]:

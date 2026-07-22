@@ -1,15 +1,14 @@
+import asyncio
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
+from sift_backend.api.model_run_submission import submit_model_run
 from sift_backend.concepts.service import (
-    ConceptInitialStreamResult,
     ConceptService,
-    ConceptTurnStreamDelta,
-    ConceptTurnStreamResult,
     InMemoryConceptStore,
     SiftRuntimeConceptModelService,
 )
@@ -21,18 +20,24 @@ from sift_backend.runtime.managed_api import require_managed_provider_connection
 from sift_backend.runtime.providers import build_runtime_model_provider, resolve_runtime_model
 from sift_backend.runtime.research_stack import SiftReadabilityExtractProvider
 from sift_backend.runtime.tools import RuntimeWebProvider, build_web_provider_registry
+from sift_backend.schemas.common import ProposalStatus
 from sift_backend.schemas.concepts import (
+    BatchConceptRequest,
     ConceptDTO,
     ConceptHistoryTurnDTO,
     ConceptTurnRequest,
     ConceptTurnResponse,
     CreateConceptRelationRequest,
     CreateConceptRequest,
+    NoteRevisionDTO,
+    NoteRevisionSummaryDTO,
     UpdateConceptNoteRequest,
     UpdateConceptOrganizationRequest,
     UpdateConceptSummaryRequest,
     UpdateNoteBlockRequest,
+    UpdateProposalDTO,
 )
+from sift_backend.schemas.model_runs import ModelRunDTO, ModelRunKind, ModelRunStatus
 
 router = APIRouter(prefix="/v1", tags=["concepts"])
 
@@ -128,12 +133,41 @@ async def list_concepts(request: Request) -> list[ConceptDTO]:
     return get_concept_service(request).list_concepts()
 
 
+@router.patch(
+    "/concepts/archive",
+    response_model=list[ConceptDTO],
+    response_model_by_alias=True,
+)
+async def archive_concepts(
+    request: Request,
+    payload: BatchConceptRequest,
+) -> list[ConceptDTO]:
+    return get_concept_service(request).set_concepts_archived(
+        payload.concept_ids,
+        archived=True,
+    )
+
+
+@router.patch(
+    "/concepts/restore",
+    response_model=list[ConceptDTO],
+    response_model_by_alias=True,
+)
+async def restore_concepts(
+    request: Request,
+    payload: BatchConceptRequest,
+) -> list[ConceptDTO]:
+    return get_concept_service(request).set_concepts_archived(
+        payload.concept_ids,
+        archived=False,
+    )
+
+
 @router.post("/concepts", response_model=ConceptDTO, response_model_by_alias=True)
 async def create_concept(request: Request, payload: CreateConceptRequest) -> ConceptDTO:
-    return await get_concept_service(request, requires_runtime=True).create_concept_async(
-        payload,
-        idempotency_key=_idempotency_key(request),
-    )
+    run = _submit_initial_run(request, payload)
+    completed = await _wait_for_terminal_run(request, run)
+    return ConceptDTO.model_validate(_run_result(completed, "concept"))
 
 
 @router.post("/concepts/stream")
@@ -141,21 +175,28 @@ async def stream_create_concept(
     request: Request,
     payload: CreateConceptRequest,
 ) -> StreamingResponse:
-    service = get_concept_service(request, requires_runtime=True)
+    run = _submit_initial_run(request, payload)
+    should_reconstruct_delta = run.status in {ModelRunStatus.queued, ModelRunStatus.running}
 
     async def events():
-        idempotency_key = _idempotency_key(request)
         yield _stream_line(ConceptInitialStreamEvent(type="started"))
-        async for event in service.create_concept_stream(
-            payload,
-            idempotency_key=idempotency_key,
-        ):
-            if isinstance(event, ConceptTurnStreamDelta):
-                yield _stream_line(ConceptInitialStreamEvent(type="delta", delta=event.content))
-            if isinstance(event, ConceptInitialStreamResult):
+        emitted_delta = False
+        async for content in _bridge_model_run_deltas(request, run):
+            emitted_delta = True
+            yield _stream_line(ConceptInitialStreamEvent(type="delta", delta=content))
+        completed = request.app.state.model_run_repository.get(run.id, _owner(request))
+        if completed.status == ModelRunStatus.succeeded:
+            concept = ConceptDTO.model_validate(_run_result(completed, "concept"))
+            if should_reconstruct_delta and not emitted_delta:
                 yield _stream_line(
-                    ConceptInitialStreamEvent(type="completed", concept=event.concept)
+                    ConceptInitialStreamEvent(
+                        type="delta",
+                        delta=concept.initial_answer or concept.one_line_explanation,
+                    )
                 )
+            yield _stream_line(ConceptInitialStreamEvent(type="completed", concept=concept))
+        else:
+            yield _stream_failure_line(completed)
 
     return StreamingResponse(events(), media_type="application/x-ndjson")
 
@@ -260,11 +301,9 @@ async def submit_concept_turn(
     concept_id: UUID,
     payload: ConceptTurnRequest,
 ) -> ConceptTurnResponse:
-    return await get_concept_service(request, requires_runtime=True).submit_turn(
-        concept_id,
-        payload,
-        idempotency_key=_idempotency_key(request),
-    )
+    run = _submit_turn_run(request, concept_id, payload)
+    completed = await _wait_for_terminal_run(request, run)
+    return ConceptTurnResponse.model_validate(_run_result(completed, "response"))
 
 
 @router.post("/concepts/{concept_id}/turns/stream")
@@ -273,22 +312,23 @@ async def stream_concept_turn(
     concept_id: UUID,
     payload: ConceptTurnRequest,
 ) -> StreamingResponse:
-    service = get_concept_service(request, requires_runtime=True)
+    run = _submit_turn_run(request, concept_id, payload)
+    should_reconstruct_delta = run.status in {ModelRunStatus.queued, ModelRunStatus.running}
 
     async def events():
-        idempotency_key = _idempotency_key(request)
         yield _stream_line(ConceptTurnStreamEvent(type="started"))
-        async for event in service.submit_turn_stream(
-            concept_id,
-            payload,
-            idempotency_key=idempotency_key,
-        ):
-            if isinstance(event, ConceptTurnStreamDelta):
-                yield _stream_line(ConceptTurnStreamEvent(type="delta", delta=event.content))
-            if isinstance(event, ConceptTurnStreamResult):
-                yield _stream_line(
-                    ConceptTurnStreamEvent(type="completed", response=event.response)
-                )
+        emitted_delta = False
+        async for content in _bridge_model_run_deltas(request, run):
+            emitted_delta = True
+            yield _stream_line(ConceptTurnStreamEvent(type="delta", delta=content))
+        completed = request.app.state.model_run_repository.get(run.id, _owner(request))
+        if completed.status == ModelRunStatus.succeeded:
+            response = ConceptTurnResponse.model_validate(_run_result(completed, "response"))
+            if should_reconstruct_delta and not emitted_delta:
+                yield _stream_line(ConceptTurnStreamEvent(type="delta", delta=response.answer))
+            yield _stream_line(ConceptTurnStreamEvent(type="completed", response=response))
+        else:
+            yield _stream_failure_line(completed)
 
     return StreamingResponse(events(), media_type="application/x-ndjson")
 
@@ -299,39 +339,196 @@ async def stream_concept_turn(
     response_model_by_alias=True,
 )
 async def merge_update_proposal(request: Request, proposal_id: UUID) -> ConceptDTO:
-    return get_concept_service(request).merge_proposal(
+    service = get_concept_service(request)
+    concept = service.merge_proposal(
         proposal_id,
         idempotency_key=_idempotency_key(request),
     )
+    request.app.state.model_run_coordinator.reconsider_review(concept.id, service)
+    return concept
 
 
 @router.post("/update-proposals/{proposal_id}/dismiss", status_code=status.HTTP_204_NO_CONTENT)
 async def dismiss_update_proposal(request: Request, proposal_id: UUID) -> None:
-    get_concept_service(request).dismiss_proposal(proposal_id)
+    service = get_concept_service(request)
+    concept_id = service.store.get_proposal_concept_id(proposal_id)
+    service.dismiss_proposal(proposal_id)
+    request.app.state.model_run_coordinator.reconsider_review(concept_id, service)
+
+
+@router.get(
+    "/concepts/{concept_id}/proposals",
+    response_model=list[UpdateProposalDTO],
+    response_model_by_alias=True,
+)
+async def list_update_proposals(
+    request: Request, concept_id: UUID, status: ProposalStatus | None = None
+) -> list[UpdateProposalDTO]:
+    return get_concept_service(request).list_proposals(concept_id, status)
+
+
+@router.get(
+    "/concepts/{concept_id}/revisions",
+    response_model=list[NoteRevisionSummaryDTO],
+    response_model_by_alias=True,
+)
+async def list_note_revisions(request: Request, concept_id: UUID) -> list[NoteRevisionSummaryDTO]:
+    return get_concept_service(request).list_revisions(concept_id)
+
+
+@router.get(
+    "/concepts/{concept_id}/revisions/{revision}",
+    response_model=NoteRevisionDTO,
+    response_model_by_alias=True,
+)
+async def get_note_revision(request: Request, concept_id: UUID, revision: int) -> NoteRevisionDTO:
+    return get_concept_service(request).get_revision(concept_id, revision)
+
+
+@router.post(
+    "/concepts/{concept_id}/revisions/{revision}/restore",
+    response_model=ConceptDTO,
+    response_model_by_alias=True,
+)
+async def restore_note_revision(request: Request, concept_id: UUID, revision: int) -> ConceptDTO:
+    return get_concept_service(request).restore_revision(concept_id, revision)
 
 
 def _stream_line(event: ConceptTurnStreamEvent | ConceptInitialStreamEvent) -> str:
     response = getattr(event, "response", None)
     if response is not None:
-        return json.dumps(
-            {
-                "type": event.type,
-                "response": response.model_dump(mode="json", by_alias=True),
-            },
-            ensure_ascii=False,
-            separators=(",", ":"),
-        ) + "\n"
+        return (
+            json.dumps(
+                {
+                    "type": event.type,
+                    "response": response.model_dump(mode="json", by_alias=True),
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
     concept = getattr(event, "concept", None)
     if concept is not None:
-        return json.dumps(
+        return (
+            json.dumps(
+                {
+                    "type": event.type,
+                    "concept": concept.model_dump(mode="json", by_alias=True),
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
+    return event.model_dump_json(by_alias=True, exclude_none=True) + "\n"
+
+
+def _owner(request: Request) -> str:
+    return request.state.principal.user_id
+
+
+def _runtime_service_for_run(request: Request) -> tuple[ConceptService | None, bool]:
+    managed = request.app.state.settings.auth_mode == "managed"
+    has_credential = bool(request.headers.get("X-Sift-Provider-Key", "").strip())
+    if managed and not has_credential:
+        return None, True
+    return get_concept_service(request, requires_runtime=True), False
+
+
+def _submit_initial_run(request: Request, payload: CreateConceptRequest) -> ModelRunDTO:
+    service, waiting = _runtime_service_for_run(request)
+    return submit_model_run(
+        request,
+        kind=ModelRunKind.initial_concept,
+        payload={"capture": payload.model_dump(mode="json", by_alias=True)},
+        service=service,
+        idempotency_key=_idempotency_key(request),
+        waiting_for_credential=waiting,
+    )
+
+
+def _submit_turn_run(
+    request: Request,
+    concept_id: UUID,
+    payload: ConceptTurnRequest,
+) -> ModelRunDTO:
+    get_concept_service(request).get_concept(concept_id)
+    service, waiting = _runtime_service_for_run(request)
+    return submit_model_run(
+        request,
+        kind=ModelRunKind.follow_up,
+        payload={"turn": payload.model_dump(mode="json", by_alias=True)},
+        service=service,
+        idempotency_key=_idempotency_key(request),
+        concept_id=concept_id,
+        waiting_for_credential=waiting,
+    )
+
+
+async def _wait_for_terminal_run(request: Request, run: ModelRunDTO) -> ModelRunDTO:
+    current = run
+    while current.status in {ModelRunStatus.queued, ModelRunStatus.running}:
+        await asyncio.sleep(0.01)
+        current = request.app.state.model_run_repository.get(run.id, _owner(request))
+    if current.status == ModelRunStatus.waiting_for_credential:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "credential_required",
+                "message": "Reconnect with a provider credential to resume this model run.",
+                "runId": str(current.id),
+            },
+        )
+    if current.status != ModelRunStatus.succeeded:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": current.error_code or "model_run_failed",
+                "message": current.error_message or "The model run could not be completed.",
+                "runId": str(current.id),
+            },
+        )
+    return current
+
+
+async def _bridge_model_run_deltas(request: Request, run: ModelRunDTO):
+    current = run
+    after_sequence = 0
+    while current.status in {ModelRunStatus.queued, ModelRunStatus.running}:
+        for event in request.app.state.model_run_repository.events(
+            run.id, _owner(request), after_sequence
+        ):
+            after_sequence = max(after_sequence, event.sequence)
+            if event.type == "delta" and event.data and event.data.get("content"):
+                yield str(event.data["content"])
+        await asyncio.sleep(0.01)
+        current = request.app.state.model_run_repository.get(run.id, _owner(request))
+
+
+def _run_result(run: ModelRunDTO, key: str) -> object:
+    if run.result is None or key not in run.result:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"code": "model_run_incomplete", "message": "Model run result is missing."},
+        )
+    return run.result[key]
+
+
+def _stream_failure_line(run: ModelRunDTO) -> str:
+    return (
+        json.dumps(
             {
-                "type": event.type,
-                "concept": concept.model_dump(mode="json", by_alias=True),
+                "type": "failed",
+                "errorCode": run.error_code or "model_run_failed",
+                "errorMessage": run.error_message or "The model run could not be completed.",
+                "runId": str(run.id),
             },
             ensure_ascii=False,
             separators=(",", ":"),
-        ) + "\n"
-    return event.model_dump_json(by_alias=True, exclude_none=True) + "\n"
+        )
+        + "\n"
+    )
 
 
 def _idempotency_key(request: Request) -> str | None:

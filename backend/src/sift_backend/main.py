@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import timedelta
 
@@ -8,12 +9,14 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from sift_backend.api.concepts import build_concept_service
 from sift_backend.api.concepts import router as concepts_router
+from sift_backend.api.model_runs import router as model_runs_router
 from sift_backend.auth.principal import DevelopmentPrincipalProvider
-from sift_backend.concepts.service import ConceptService
+from sift_backend.concepts.service import ConceptService, InMemoryConceptStore
 from sift_backend.config import Settings, load_settings, write_provider_settings
 from sift_backend.identity_access.api import router as beta_router
 from sift_backend.identity_access.persistence import SqlAlchemyBetaAuthRepository
 from sift_backend.identity_access.service import BetaAuthError, BetaAuthService
+from sift_backend.model_runtime.model_runs import ModelRunCoordinator, ModelRunRepository
 from sift_backend.persistence.database import create_session_factory
 from sift_backend.runtime.capability_probe import probe_model_capabilities
 from sift_backend.runtime.managed_api import ManagedProviderError
@@ -55,17 +58,32 @@ def create_app(
     session_factory: sessionmaker[Session] | None = None,
 ) -> FastAPI:
     resolved_settings = settings or load_settings()
+
+    @asynccontextmanager
+    async def lifespan(application: FastAPI):
+        application.state.model_run_coordinator.start()
+        try:
+            yield
+        finally:
+            await application.state.model_run_coordinator.stop()
+
     app = FastAPI(
         title="Sift Backend",
         version="0.1.0",
         description="Backend API for Sift concept learning notes.",
+        lifespan=lifespan,
     )
     app.state.settings = resolved_settings
     app.state.concept_service = concept_service or build_concept_service(resolved_settings)
-    database_sessions = session_factory or create_session_factory(
-        resolved_settings.database_url,
-        initialize_schema=resolved_settings.env != "production",
-    )
+    if session_factory is not None:
+        database_sessions = session_factory
+    elif isinstance(app.state.concept_service.store, InMemoryConceptStore):
+        database_sessions = create_session_factory("sqlite://")
+    else:
+        database_sessions = create_session_factory(
+            resolved_settings.database_url,
+            initialize_schema=resolved_settings.env != "production",
+        )
     beta_repository = SqlAlchemyBetaAuthRepository(database_sessions)
     beta_auth_service = BetaAuthService(
         beta_repository,
@@ -75,6 +93,12 @@ def create_app(
     app.state.beta_auth_service = beta_auth_service
     app.state.managed_provider_connections = ManagedProviderConnectionRepository(
         database_sessions
+    )
+    app.state.model_run_repository = ModelRunRepository(database_sessions)
+    app.state.model_run_coordinator = ModelRunCoordinator(
+        app.state.model_run_repository,
+        app.state.concept_service,
+        managed=resolved_settings.auth_mode == "managed",
     )
 
     @app.exception_handler(BetaAuthError)
@@ -426,6 +450,7 @@ def create_app(
     app.include_router(beta_router)
     app.include_router(managed_runtime_router)
     app.include_router(concepts_router)
+    app.include_router(model_runs_router)
 
     return app
 

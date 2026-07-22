@@ -420,7 +420,12 @@ async def test_initial_structured_output_failure_does_not_write_concept() -> Non
                 content="not json",
                 provider="test",
                 model="test-model",
-            )
+            ),
+            RuntimeModelResponse(
+                content="still not json",
+                provider="test",
+                model="test-model",
+            ),
         ]
     )
     runtime = LightweightHermesRuntime(
@@ -455,7 +460,12 @@ async def test_turn_structured_output_failure_does_not_mutate_knowledge() -> Non
                 content="not json",
                 provider="test",
                 model="test-model",
-            )
+            ),
+            RuntimeModelResponse(
+                content="still not json",
+                provider="test",
+                model="test-model",
+            ),
         ]
     )
     runtime = LightweightHermesRuntime(

@@ -1,6 +1,7 @@
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -9,6 +10,7 @@ from sift_backend.persistence.concept_store import PersistentConceptStore
 from sift_backend.persistence.database import initialize_database
 from sift_backend.persistence.models import NoteRevisionRecord, UpdateEventRecord
 from sift_backend.schemas.common import (
+    CaptureStatus,
     ClaimType,
     EvidenceStatus,
     LearningStateField,
@@ -42,6 +44,36 @@ def test_persistent_store_survives_new_store_instance(tmp_path) -> None:
     assert persisted.blocks[0].content == "RAG is ready for a first explanation."
     assert persisted.answer_source is not None
     assert persisted.answer_source.source_type == "modelKnowledge"
+    assert persisted.created_at is not None
+    assert persisted.updated_at is not None
+    assert persisted.created_at.endswith("Z")
+    assert persisted.updated_at.endswith("Z")
+
+
+def test_persistent_batch_archive_restores_previous_status(tmp_path) -> None:
+    database_path = tmp_path / "sift.db"
+    session_factory = _session_factory(f"sqlite:///{database_path}")
+    store = PersistentConceptStore(session_factory)
+    service = ConceptService(store=store)
+    concept = service.create_concept(CreateConceptRequest(rawCapture="Recoverable draft"))
+    store.save_concept(
+        concept.model_copy(update={"capture_status": CaptureStatus.generation_failed}),
+        owner_id=service.owner_id,
+    )
+
+    service.set_concepts_archived([concept.id], archived=True)
+    assert service.get_concept(concept.id).capture_status == CaptureStatus.archived
+
+    service.set_concepts_archived([concept.id], archived=False)
+    assert service.get_concept(concept.id).capture_status == CaptureStatus.generation_failed
+
+    with pytest.raises(HTTPException) as error:
+        store.set_concepts_archived(
+            [concept.id],
+            archived=True,
+            owner_id="another-owner",
+        )
+    assert error.value.status_code == 404
 
 
 def test_persistent_store_round_trips_tags_and_topics(tmp_path) -> None:

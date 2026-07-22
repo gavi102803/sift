@@ -1,6 +1,7 @@
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any
 from uuid import UUID, uuid4
@@ -53,6 +54,8 @@ from sift_backend.schemas.concepts import (
     LearningStateEntryDTO,
     LearningStateUpdateDTO,
     NoteBlockDTO,
+    NoteRevisionDTO,
+    NoteRevisionSummaryDTO,
     SourceDTO,
     UpdateConceptNoteRequest,
     UpdateConceptOrganizationRequest,
@@ -65,6 +68,8 @@ from sift_backend.schemas.model_outputs import (
     CandidateUpdate,
     ConceptInitialResult,
     ConceptTurnResult,
+    ContinuitySummaryEntry,
+    ContinuitySummaryResult,
     MemoryPatch,
     ModelMeta,
     ModelUpdateProposal,
@@ -84,6 +89,13 @@ class ConceptTurnStreamDelta:
 @dataclass(frozen=True)
 class ConceptTurnStreamResult:
     response: ConceptTurnResponse
+
+
+@dataclass(frozen=True)
+class PreparedTurnResult:
+    base_note_revision: int
+    turn_result: ConceptTurnResult | None = None
+    regenerated_concept: ConceptDTO | None = None
 
 
 @dataclass(frozen=True)
@@ -131,12 +143,23 @@ class InMemoryConceptStore:
         self.proposals: dict[UUID, UpdateProposalDTO] = {}
         self.proposal_concept_ids: dict[UUID, UUID] = {}
         self.turns: dict[UUID, list[RecentTurn]] = {}
+        self.turn_operation_keys: set[tuple[UUID, str]] = set()
         self.concept_owner_ids: dict[UUID, str] = {}
+        self.archived_from_status: dict[UUID, CaptureStatus] = {}
         self.capture_attempts: dict[tuple[str, str], CaptureAttemptDTO] = {}
         self.idempotency_records: dict[tuple[str, str, str], IdempotencyRecordDTO] = {}
+        self.revisions: dict[UUID, list[tuple[ConceptDTO, str, int | None, str]]] = {}
 
     def save_concept(self, concept: ConceptDTO, owner_id: str | None = None) -> ConceptDTO:
-        self.concepts[concept.id] = concept.model_copy(update={"relations": []})
+        now = datetime.now(UTC).isoformat()
+        existing = self.concepts.get(concept.id)
+        self.concepts[concept.id] = concept.model_copy(
+            update={
+                "relations": [],
+                "created_at": concept.created_at or (existing.created_at if existing else now),
+                "updated_at": now,
+            }
+        )
         if owner_id is not None:
             self.concept_owner_ids[concept.id] = owner_id
         else:
@@ -212,6 +235,28 @@ class InMemoryConceptStore:
             )
         return self._concept_with_relations(concept)
 
+    def set_concepts_archived(
+        self,
+        concept_ids: list[UUID],
+        *,
+        archived: bool,
+        owner_id: str,
+    ) -> list[ConceptDTO]:
+        unique_ids = list(dict.fromkeys(concept_ids))
+        concepts = [self.get_concept(concept_id, owner_id=owner_id) for concept_id in unique_ids]
+        now = datetime.now(UTC).isoformat()
+        for concept in concepts:
+            if archived:
+                if concept.capture_status != CaptureStatus.archived:
+                    self.archived_from_status[concept.id] = concept.capture_status
+                status_value = CaptureStatus.archived
+            else:
+                status_value = self.archived_from_status.pop(concept.id, CaptureStatus.ready)
+            self.concepts[concept.id] = concept.model_copy(
+                update={"capture_status": status_value, "updated_at": now, "relations": []}
+            )
+        return [self.get_concept(concept_id, owner_id=owner_id) for concept_id in unique_ids]
+
     def add_relation(
         self,
         source_concept_id: UUID,
@@ -273,7 +318,12 @@ class InMemoryConceptStore:
         actor: str,
         proposal_id: UUID | None = None,
     ) -> None:
-        self.get_concept(concept_id)
+        concept = self.get_concept(concept_id)
+        rows = self.revisions.setdefault(concept_id, [])
+        if not any(snapshot.note_revision == concept.note_revision for snapshot, _, _, _ in rows):
+            rows.append(
+                (concept.model_copy(deep=True), event_type, None, datetime.now(UTC).isoformat())
+            )
 
     def save_proposal(
         self,
@@ -303,8 +353,82 @@ class InMemoryConceptStore:
                 detail="Update proposal concept mapping not found.",
             ) from error
 
+    def list_proposals(
+        self, concept_id: UUID, owner_id: str, proposal_status: ProposalStatus | None = None
+    ) -> list[UpdateProposalDTO]:
+        self.get_concept(concept_id, owner_id=owner_id)
+        return [
+            proposal
+            for proposal_id, proposal in self.proposals.items()
+            if self.proposal_concept_ids.get(proposal_id) == concept_id
+            and (proposal_status is None or proposal.status == proposal_status)
+        ]
+
+    def list_revisions(self, concept_id: UUID, owner_id: str) -> list[NoteRevisionSummaryDTO]:
+        current = self.get_concept(concept_id, owner_id=owner_id)
+        return [
+            NoteRevisionSummaryDTO(
+                revision=snapshot.note_revision,
+                source=source,
+                createdAt=created_at,
+                isCurrent=snapshot.note_revision == current.note_revision,
+                restoredFromRevision=restored,
+            )
+            for snapshot, source, restored, created_at in reversed(
+                self.revisions.get(concept_id, [])
+            )
+        ]
+
+    def get_revision(self, concept_id: UUID, revision: int, owner_id: str) -> NoteRevisionDTO:
+        current = self.get_concept(concept_id, owner_id=owner_id)
+        for snapshot, source, restored, created_at in self.revisions.get(concept_id, []):
+            if snapshot.note_revision == revision:
+                return NoteRevisionDTO(
+                    revision=revision,
+                    source=source,
+                    createdAt=created_at,
+                    isCurrent=revision == current.note_revision,
+                    restoredFromRevision=restored,
+                    snapshotSchemaVersion=2,
+                    displayTitle=snapshot.display_title,
+                    canonicalTitle=snapshot.canonical_title,
+                    oneLineExplanation=snapshot.one_line_explanation,
+                    blocks=snapshot.blocks,
+                )
+        raise HTTPException(status_code=404, detail="Note revision not found.")
+
+    def restore_revision(self, concept_id: UUID, revision: int, owner_id: str) -> ConceptDTO:
+        current = self.get_concept(concept_id, owner_id=owner_id)
+        source = self.get_revision(concept_id, revision, owner_id)
+        updated = current.model_copy(
+            update={
+                "canonical_title": source.canonical_title,
+                "display_title": source.display_title,
+                "one_line_explanation": source.one_line_explanation,
+                "blocks": source.blocks,
+                "note_revision": current.note_revision + 1,
+            }
+        )
+        self.save_concept(updated, owner_id=owner_id)
+        created_at = datetime.now(UTC).isoformat()
+        self.revisions.setdefault(concept_id, []).append(
+            (updated.model_copy(deep=True), "revisionRestore", revision, created_at)
+        )
+        for proposal_id, proposal in list(self.proposals.items()):
+            if (
+                self.proposal_concept_ids.get(proposal_id) == concept_id
+                and proposal.status == ProposalStatus.proposed
+            ):
+                self.proposals[proposal_id] = proposal.model_copy(
+                    update={"status": ProposalStatus.stale}
+                )
+        return self.get_concept(concept_id, owner_id=owner_id)
+
     def get_recent_turns(self, concept_id: UUID, limit: int = 10) -> list[RecentTurn]:
         return self.turns.get(concept_id, [])[-limit:]
+
+    def get_continuity_context(self, concept_id: UUID) -> tuple[list[RecentTurn], str]:
+        return self.get_recent_turns(concept_id, 10), ""
 
     def append_turn_pair(
         self,
@@ -312,7 +436,10 @@ class InMemoryConceptStore:
         user_query: str,
         answer: str,
         answer_source: AnswerSourceDTO | None = None,
+        operation_key: str | None = None,
     ) -> None:
+        if operation_key is not None and (concept_id, operation_key) in self.turn_operation_keys:
+            return
         concept_turns = self.turns.setdefault(concept_id, [])
         concept_turns.extend(
             [
@@ -328,6 +455,8 @@ class InMemoryConceptStore:
                 ),
             ]
         )
+        if operation_key is not None:
+            self.turn_operation_keys.add((concept_id, operation_key))
 
     def replace_turn_pair_from_index(
         self,
@@ -336,7 +465,10 @@ class InMemoryConceptStore:
         user_query: str,
         answer: str,
         answer_source: AnswerSourceDTO | None = None,
+        operation_key: str | None = None,
     ) -> None:
+        if operation_key is not None and (concept_id, operation_key) in self.turn_operation_keys:
+            return
         concept_turns = self.turns.setdefault(concept_id, [])
         _validate_replacement_turn(concept_turns, turn_index)
         del concept_turns[turn_index:]
@@ -345,6 +477,7 @@ class InMemoryConceptStore:
             user_query,
             answer,
             answer_source=answer_source,
+            operation_key=operation_key,
         )
 
     def list_turns(self, concept_id: UUID) -> list[RecentTurn]:
@@ -573,6 +706,40 @@ class MockConceptModelService:
             yield ConceptRuntimeDelta(chunk)
         yield ConceptRuntimeResult(result)
 
+    async def answer_maintenance_review(
+        self,
+        concept: ConceptDTO,
+        recent_turns: list[RecentTurn],
+        card_memory: str,
+    ) -> ConceptTurnResult:
+        return await self.answer_turn(
+            concept,
+            ConceptTurnRequest(
+                question=(
+                    "Review this card using only the supplied card and conversation. "
+                    "Return an append or replace proposal for unlocked blocks only when needed."
+                )
+            ),
+            recent_turns=recent_turns,
+            card_memory=card_memory,
+        )
+
+    async def summarize_continuity(
+        self,
+        concept: ConceptDTO,
+        source_turns: list[tuple[int, RecentTurn]],
+    ) -> ContinuitySummaryResult:
+        prior_answers: list[ContinuitySummaryEntry] = []
+        for index in range(0, len(source_turns), 2):
+            pair = source_turns[index : index + 2]
+            prior_answers.append(
+                ContinuitySummaryEntry(
+                    content="\n".join(f"{turn.role}: {turn.content}" for _, turn in pair),
+                    sourceTurnIds=[turn_id for turn_id, _ in pair],
+                )
+            )
+        return ContinuitySummaryResult(priorAnswers=prior_answers)
+
 
 class SiftRuntimeConceptModelService:
     """Concept model service backed by Sift's lightweight Hermes-style runtime."""
@@ -638,16 +805,53 @@ class SiftRuntimeConceptModelService:
         ):
             yield event
 
+    async def answer_maintenance_review(
+        self,
+        concept: ConceptDTO,
+        recent_turns: list[RecentTurn],
+        card_memory: str,
+    ) -> ConceptTurnResult:
+        maintenance_runtime = LightweightHermesRuntime(
+            model_provider=self.runtime.model_provider,
+            model=self.runtime.model,
+            web_search_tool=self.runtime.web_search_tool,
+            web_extract_tool=self.runtime.web_extract_tool,
+            web_search_enabled=False,
+        )
+        return await maintenance_runtime.answer_concept_turn(
+            concept=concept,
+            card_memory=card_memory,
+            recent_turns=recent_turns,
+            user_query=(
+                "Perform the scheduled knowledge review using only this card and these turns. "
+                "Propose append or replace operations for existing unlocked blocks only. "
+                "Return no proposal when no durable update is needed."
+            ),
+        )
+
+    async def summarize_continuity(
+        self,
+        concept: ConceptDTO,
+        source_turns: list[tuple[int, RecentTurn]],
+    ) -> ContinuitySummaryResult:
+        maintenance_runtime = LightweightHermesRuntime(
+            model_provider=self.runtime.model_provider,
+            model=self.runtime.model,
+            web_search_tool=None,
+            web_extract_tool=None,
+            web_search_enabled=False,
+        )
+        return await maintenance_runtime.summarize_concept_continuity(
+            concept,
+            source_turns,
+        )
+
 
 class ConceptService:
     def __init__(
         self,
         store: Any | None = None,
-        model_service: (
-            MockConceptModelService
-            | SiftRuntimeConceptModelService
-            | None
-        ) = None,
+        model_service: (MockConceptModelService | SiftRuntimeConceptModelService | None) = None,
         principal: CurrentPrincipal | None = None,
     ) -> None:
         self.store = store or InMemoryConceptStore()
@@ -803,11 +1007,96 @@ class ConceptService:
             )
         yield ConceptInitialStreamResult(saved)
 
+    async def prepare_initial_concept_stream(
+        self,
+        request: CreateConceptRequest,
+    ) -> AsyncIterator[ConceptTurnStreamDelta | ConceptDTO]:
+        """Run the fallible model call without mutating durable concept state."""
+        title = request.raw_capture.strip()
+        final_result: ConceptInitialResult | None = None
+        try:
+            async for event in self.model_service.stream_initial_concept(
+                title=title,
+                locale=request.locale,
+            ):
+                if isinstance(event, ConceptRuntimeDelta):
+                    yield ConceptTurnStreamDelta(event.content)
+                elif isinstance(event, ConceptInitialRuntimeResult):
+                    final_result = event.result
+        except SiftRuntimeError as error:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"code": error.code, "message": str(error)},
+            ) from error
+        if final_result is None:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"code": "stream_incomplete", "message": "Model stream ended early."},
+            )
+        yield _concept_from_initial_result(title, final_result)
+
+    def commit_prepared_initial_concept(
+        self,
+        request: CreateConceptRequest,
+        concept: ConceptDTO,
+        idempotency_key: str,
+    ) -> ConceptDTO:
+        """Idempotently commit a checkpointed initial model result."""
+        payload_hash = _idempotency_payload_hash(request)
+        attempt = self.store.get_capture_attempt(self.owner_id, idempotency_key)
+        if attempt is not None:
+            _raise_if_idempotency_payload_conflict(attempt.payload_hash, payload_hash)
+            if attempt.status == "succeeded" and attempt.concept_id is not None:
+                return self.store.get_concept(attempt.concept_id, owner_id=self.owner_id)
+            try:
+                already_saved = self.store.get_concept(concept.id, owner_id=self.owner_id)
+            except HTTPException as error:
+                if error.status_code != status.HTTP_404_NOT_FOUND:
+                    raise
+            else:
+                self._append_initial_turn(
+                    already_saved,
+                    request.raw_capture.strip(),
+                    operation_key=idempotency_key,
+                )
+                self.store.update_capture_attempt(
+                    attempt.id, status="succeeded", concept_id=already_saved.id
+                )
+                return already_saved
+        else:
+            attempt = self.store.create_capture_attempt(
+                self.owner_id,
+                idempotency_key,
+                payload_hash,
+                request.raw_capture.strip(),
+                request.locale,
+            )
+        saved = self._save_concept_with_audit(
+            concept,
+            event_type="initialGeneration",
+            actor="ai",
+        )
+        self._append_initial_turn(saved, request.raw_capture.strip(), operation_key=idempotency_key)
+        self.store.update_capture_attempt(attempt.id, status="succeeded", concept_id=saved.id)
+        return saved
+
     def list_concepts(self) -> list[ConceptDTO]:
         return self.store.list_concepts(owner_id=self.owner_id)
 
     def get_concept(self, concept_id: UUID) -> ConceptDTO:
         return self.store.get_concept(concept_id, owner_id=self.owner_id)
+
+    def set_concepts_archived(
+        self,
+        concept_ids: list[UUID],
+        *,
+        archived: bool,
+    ) -> list[ConceptDTO]:
+        return self.store.set_concepts_archived(
+            concept_ids,
+            archived=archived,
+            owner_id=self.owner_id,
+        )
 
     def update_concept_summary(
         self,
@@ -926,10 +1215,7 @@ class ConceptService:
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="Note block does not belong to this concept.",
                 )
-            changed = (
-                existing.content != content
-                or existing.block_type != block_request.block_type
-            )
+            changed = existing.content != content or existing.block_type != block_request.block_type
             if changed:
                 blocks.append(
                     existing.model_copy(
@@ -1039,12 +1325,13 @@ class ConceptService:
                     response.model_dump_json(by_alias=True),
                 )
             return response
-        recent_turns = self._recent_turns_before_replacement(concept.id, request)
+        recent_turns, card_memory = self._context_before_replacement(concept.id, request)
         try:
             result = await self.model_service.answer_turn(
                 concept,
                 request,
                 recent_turns=recent_turns,
+                card_memory=card_memory,
             )
         except SiftRuntimeError as error:
             raise HTTPException(
@@ -1089,13 +1376,14 @@ class ConceptService:
                     )
                 yield event
             return
-        recent_turns = self._recent_turns_before_replacement(concept.id, request)
+        recent_turns, card_memory = self._context_before_replacement(concept.id, request)
         final_result: ConceptTurnResult | None = None
         try:
             async for event in self.model_service.stream_turn_answer(
                 concept,
                 request,
                 recent_turns=recent_turns,
+                card_memory=card_memory,
             ):
                 if isinstance(event, ConceptRuntimeDelta):
                     yield ConceptTurnStreamDelta(event.content)
@@ -1123,6 +1411,134 @@ class ConceptService:
                 response.model_dump_json(by_alias=True),
             )
         yield ConceptTurnStreamResult(response)
+
+    async def prepare_turn_stream(
+        self,
+        concept_id: UUID,
+        request: ConceptTurnRequest,
+    ) -> AsyncIterator[ConceptTurnStreamDelta | PreparedTurnResult]:
+        """Run a follow-up model call without writing turns, proposals, or notes."""
+        concept = self.store.get_concept(concept_id, owner_id=self.owner_id)
+        if request.replacing_turn_index == 0:
+            final_result: ConceptInitialResult | None = None
+            try:
+                async for event in self.model_service.stream_initial_concept(
+                    title=request.question.strip(),
+                    locale="en",
+                ):
+                    if isinstance(event, ConceptRuntimeDelta):
+                        yield ConceptTurnStreamDelta(event.content)
+                    elif isinstance(event, ConceptInitialRuntimeResult):
+                        final_result = event.result
+            except SiftRuntimeError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail={"code": error.code, "message": str(error)},
+                ) from error
+            if final_result is None:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail={"code": "stream_incomplete", "message": "Model stream ended early."},
+                )
+            regenerated = _concept_from_initial_result(
+                request.question.strip(), final_result
+            ).model_copy(update={"id": concept.id, "note_revision": concept.note_revision + 1})
+            yield PreparedTurnResult(
+                base_note_revision=concept.note_revision,
+                regenerated_concept=regenerated,
+            )
+            return
+
+        recent_turns, card_memory = self._context_before_replacement(concept.id, request)
+        final_result: ConceptTurnResult | None = None
+        try:
+            async for event in self.model_service.stream_turn_answer(
+                concept,
+                request,
+                recent_turns=recent_turns,
+                card_memory=card_memory,
+            ):
+                if isinstance(event, ConceptRuntimeDelta):
+                    yield ConceptTurnStreamDelta(event.content)
+                elif isinstance(event, ConceptRuntimeResult):
+                    final_result = event.result
+        except SiftRuntimeError as error:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"code": error.code, "message": str(error)},
+            ) from error
+        if final_result is None:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={"code": "stream_incomplete", "message": "Model stream ended early."},
+            )
+        yield PreparedTurnResult(
+            base_note_revision=concept.note_revision,
+            turn_result=final_result,
+        )
+
+    def commit_prepared_turn(
+        self,
+        concept_id: UUID,
+        request: ConceptTurnRequest,
+        prepared: PreparedTurnResult,
+        idempotency_key: str,
+    ) -> ConceptTurnResponse:
+        """Idempotently apply a checkpointed follow-up result."""
+        endpoint = _turn_idempotency_scope(concept_id)
+        payload_hash = _idempotency_payload_hash(request)
+        existing = self._existing_turn_result(endpoint, idempotency_key, payload_hash)
+        if existing is not None:
+            return existing
+        concept = self.store.get_concept(concept_id, owner_id=self.owner_id)
+        if concept.note_revision != prepared.base_note_revision:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "concept_revision_changed",
+                    "message": "The card changed after model generation; start a new follow-up.",
+                },
+            )
+        if prepared.regenerated_concept is not None:
+            saved = self._save_concept_with_audit(
+                prepared.regenerated_concept,
+                event_type="retryGeneration",
+                actor="ai",
+            )
+            answer = (saved.initial_answer or saved.one_line_explanation).strip()
+            answer_source = saved.answer_source or _fallback_answer_source()
+            self.store.replace_turn_pair_from_index(
+                saved.id,
+                0,
+                request.question,
+                answer,
+                answer_source=answer_source,
+                operation_key=idempotency_key,
+            )
+            response = ConceptTurnResponse(
+                answer=answer,
+                answerSource=answer_source,
+                updateMode=UpdateMode.none,
+                concept=saved,
+                proposal=None,
+            )
+        else:
+            if prepared.turn_result is None:
+                raise ValueError("Prepared turn has no result.")
+            response = self._finalize_turn_response(
+                concept,
+                request,
+                prepared.turn_result,
+                operation_key=idempotency_key,
+            )
+        self.store.save_idempotency_record(
+            self.owner_id,
+            endpoint,
+            idempotency_key,
+            payload_hash,
+            response.model_dump_json(by_alias=True),
+        )
+        return response
 
     def merge_proposal(
         self,
@@ -1181,11 +1597,26 @@ class ConceptService:
         )
         self.store.save_proposal(proposal.model_copy(update={"status": ProposalStatus.dismissed}))
 
+    def list_proposals(
+        self, concept_id: UUID, proposal_status: ProposalStatus | None = None
+    ) -> list[UpdateProposalDTO]:
+        return self.store.list_proposals(concept_id, self.owner_id, proposal_status)
+
+    def list_revisions(self, concept_id: UUID) -> list[NoteRevisionSummaryDTO]:
+        return self.store.list_revisions(concept_id, self.owner_id)
+
+    def get_revision(self, concept_id: UUID, revision: int) -> NoteRevisionDTO:
+        return self.store.get_revision(concept_id, revision, self.owner_id)
+
+    def restore_revision(self, concept_id: UUID, revision: int) -> ConceptDTO:
+        return self.store.restore_revision(concept_id, revision, self.owner_id)
+
     def _finalize_turn_response(
         self,
         concept: ConceptDTO,
         request: ConceptTurnRequest,
         result: ConceptTurnResult,
+        operation_key: str | None = None,
     ) -> ConceptTurnResponse:
         self._persist_answer_sources(concept.id, result.answer_source)
         if request.replacing_turn_index is None:
@@ -1194,6 +1625,7 @@ class ConceptService:
                 request.question,
                 result.answer,
                 answer_source=result.answer_source,
+                operation_key=operation_key,
             )
         else:
             self.store.replace_turn_pair_from_index(
@@ -1202,6 +1634,7 @@ class ConceptService:
                 request.question,
                 result.answer,
                 answer_source=result.answer_source,
+                operation_key=operation_key,
             )
 
         return ConceptTurnResponse(
@@ -1222,6 +1655,15 @@ class ConceptService:
         turns = self.store.list_turns(concept_id)
         _validate_replacement_turn(turns, request.replacing_turn_index)
         return turns[: request.replacing_turn_index][-10:]
+
+    def _context_before_replacement(
+        self,
+        concept_id: UUID,
+        request: ConceptTurnRequest,
+    ) -> tuple[list[RecentTurn], str]:
+        if request.replacing_turn_index is None and hasattr(self.store, "get_continuity_context"):
+            return self.store.get_continuity_context(concept_id)
+        return self._recent_turns_before_replacement(concept_id, request), ""
 
     async def _regenerate_initial_concept(
         self,
@@ -1463,12 +1905,15 @@ class ConceptService:
         )
         return saved
 
-    def _append_initial_turn(self, concept: ConceptDTO, raw_capture: str) -> None:
+    def _append_initial_turn(
+        self, concept: ConceptDTO, raw_capture: str, operation_key: str | None = None
+    ) -> None:
         self.store.append_turn_pair(
             concept.id,
             raw_capture,
             (concept.initial_answer or concept.one_line_explanation).strip(),
             answer_source=concept.answer_source,
+            operation_key=operation_key,
         )
 
     def _existing_capture_result(
@@ -1654,15 +2099,10 @@ def _initial_result_from_concept(concept: ConceptDTO) -> ConceptInitialResult:
             }
             for block in concept.blocks
         ],
-        suggestedTags=[
-            {"name": tag, "confidence": 0.5}
-            for tag in concept.tags
-        ],
-        suggestedTopics=[
-            {"name": topic, "confidence": 0.5}
-            for topic in concept.topics
-        ],
-        answerSource=concept.answer_source or AnswerSourceDTO(
+        suggestedTags=[{"name": tag, "confidence": 0.5} for tag in concept.tags],
+        suggestedTopics=[{"name": topic, "confidence": 0.5} for topic in concept.topics],
+        answerSource=concept.answer_source
+        or AnswerSourceDTO(
             sourceType=AnswerSourceType.model_knowledge,
             confidence=0.5,
             uncertaintyNote=None,
@@ -1710,6 +2150,14 @@ def _learning_updates_from_memory_patch(memory_patch: MemoryPatch) -> list[Learn
             origin=LearningStateOrigin.assistant_inference,
         )
         for item in memory_patch.open_questions
+    )
+    updates.extend(
+        LearningStateUpdateDTO(
+            field=LearningStateField.user_context,
+            content=item,
+            origin=LearningStateOrigin.assistant_inference,
+        )
+        for item in memory_patch.user_preferences
     )
     return updates
 
@@ -1795,9 +2243,7 @@ def _claim_from_candidate(
     source_id_map: dict[str, UUID],
 ) -> ClaimDTO | None:
     source_ids = [
-        source_id_map[source_id]
-        for source_id in update.source_ids
-        if source_id in source_id_map
+        source_id_map[source_id] for source_id in update.source_ids if source_id in source_id_map
     ]
     if update.evidence_status == EvidenceStatus.source_backed and not source_ids:
         return None

@@ -2,8 +2,9 @@ import json
 
 import pytest
 
+from sift_backend.ai.context_pack import RecentTurn
 from sift_backend.api.concepts import build_concept_service
-from sift_backend.concepts.service import InMemoryConceptStore
+from sift_backend.concepts.service import ConceptService, InMemoryConceptStore
 from sift_backend.config import Settings
 from sift_backend.runtime.concept_runtime import LightweightHermesRuntime
 from sift_backend.runtime.providers import OpenAICompatibleRuntimeProvider
@@ -217,6 +218,36 @@ async def test_stream_initial_result_keeps_streamed_answer_as_authoritative() ->
     assert "".join(deltas) == streamed_answer
     assert completed is not None
     assert completed.answer == streamed_answer
+    assert len(runtime.model_provider.stream_requests) == 1
+    assert runtime.model_provider.stream_requests[0].response_format is None
+    assert len(runtime.model_provider.complete_requests) == 1
+    assert runtime.model_provider.complete_requests[0].response_format is not None
+
+
+@pytest.mark.asyncio
+async def test_stream_initial_retries_only_hidden_structured_completion() -> None:
+    provider = StreamingInitialProvider(
+        streamed_payload="Stable user-visible answer.",
+        completed_payload=_initial_concept_payload(answer="Structured answer."),
+        invalid_first_complete=True,
+    )
+    runtime = LightweightHermesRuntime(
+        model_provider=provider,
+        model="test-model",
+        web_search_tool=SearchOnlyProvider(),
+        web_search_enabled=False,
+    )
+
+    completed = None
+    async for event in runtime.stream_initial_concept("A2A protocol", "en"):
+        if not hasattr(event, "content"):
+            completed = event.result
+
+    assert completed is not None
+    assert completed.answer == "Stable user-visible answer."
+    assert len(provider.stream_requests) == 1
+    assert len(provider.complete_requests) == 2
+    assert "previous structured response" in provider.complete_requests[1].messages[-1].content
 
 
 @pytest.mark.asyncio
@@ -253,6 +284,75 @@ async def test_runtime_stable_definition_does_not_retrieve_by_default() -> None:
     assert result.answer_source.source_type == AnswerSourceType.model_knowledge
     assert result.answer_source.retrieval_used is False
     assert search_provider.queries == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_continuity_summary_is_structured_and_source_grounded() -> None:
+    provider = CapturingModelProvider(
+        json.dumps(
+            {
+                "priorAnswers": [
+                    {"content": "The earlier answer defined A2A.", "sourceTurnIds": [1, 2]}
+                ],
+                "confirmedUnderstanding": [],
+                "userContext": [
+                    {"content": "The user wants an example.", "sourceTurnIds": [1]}
+                ],
+                "recurringConfusions": [],
+                "openQuestions": [],
+            }
+        )
+    )
+    runtime = LightweightHermesRuntime(
+        model_provider=provider,
+        model="test-model",
+        web_search_tool=None,
+        web_search_enabled=False,
+    )
+    concept = ConceptService().create_concept(CreateConceptRequest(rawCapture="A2A"))
+
+    result = await runtime.summarize_concept_continuity(
+        concept,
+        [
+            (1, RecentTurn(role="user", content="Can you give an example?")),
+            (2, RecentTurn(role="assistant", content="Here is a concrete example.")),
+        ],
+    )
+
+    assert result.user_context[0].source_turn_ids == [1]
+    request = provider.requests[-1]
+    assert request.tools == ()
+    assert request.response_format["json_schema"]["name"] == "concept_continuity_summary"
+
+
+@pytest.mark.asyncio
+async def test_runtime_continuity_summary_rejects_unknown_source_turn() -> None:
+    provider = PayloadModelProvider(
+        json.dumps(
+            {
+                "priorAnswers": [],
+                "confirmedUnderstanding": [],
+                "userContext": [],
+                "recurringConfusions": [],
+                "openQuestions": [
+                    {"content": "Unsupported question", "sourceTurnIds": [999]}
+                ],
+            }
+        )
+    )
+    runtime = LightweightHermesRuntime(
+        model_provider=provider,
+        model="test-model",
+        web_search_tool=None,
+        web_search_enabled=False,
+    )
+    concept = ConceptService().create_concept(CreateConceptRequest(rawCapture="A2A"))
+
+    with pytest.raises(SiftRuntimeError, match="outside the supplied context"):
+        await runtime.summarize_concept_continuity(
+            concept,
+            [(1, RecentTurn(role="user", content="What remains open?"))],
+        )
 
 
 @pytest.mark.asyncio
@@ -545,11 +645,31 @@ class ToolCallingModelProvider(CapturingModelProvider):
 
 
 class StreamingInitialProvider(PayloadModelProvider):
-    def __init__(self, streamed_payload: str, completed_payload: str) -> None:
+    def __init__(
+        self,
+        streamed_payload: str,
+        completed_payload: str,
+        *,
+        invalid_first_complete: bool = False,
+    ) -> None:
         super().__init__(completed_payload)
         self.streamed_payload = streamed_payload
+        self.invalid_first_complete = invalid_first_complete
+        self.stream_requests: list[RuntimeModelRequest] = []
+        self.complete_requests: list[RuntimeModelRequest] = []
+
+    async def complete(self, request: RuntimeModelRequest) -> RuntimeModelResponse:
+        self.complete_requests.append(request)
+        if self.invalid_first_complete and len(self.complete_requests) == 1:
+            return RuntimeModelResponse(
+                content="not-json",
+                provider=self.provider_name,
+                model=request.model,
+            )
+        return await super().complete(request)
 
     async def stream(self, request: RuntimeModelRequest):
+        self.stream_requests.append(request)
         midpoint = len(self.streamed_payload) // 2
         yield RuntimeModelDelta(self.streamed_payload[:midpoint])
         yield RuntimeModelDelta(self.streamed_payload[midpoint:])

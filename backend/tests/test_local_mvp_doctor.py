@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -56,3 +57,28 @@ def test_provider_check_does_not_leak_credentials() -> None:
     assert "deepseek-secret" not in check.detail
     assert "tavily-secret" not in check.detail
     assert "apiKey=configured" in check.detail
+
+
+def test_migration_check_rejects_stale_sqlite_revision(tmp_path) -> None:
+    database = tmp_path / "stale.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
+        connection.execute("INSERT INTO alembic_version VALUES ('20260629_0010')")
+
+    check = doctor.migration_check(f"sqlite:///{database}")
+
+    assert check.ok is False
+    assert "revision=20260629_0010" in check.detail
+    assert "expected=20260721_0017" in check.detail
+
+
+def test_migration_check_accepts_current_sqlite_revision(tmp_path) -> None:
+    database = tmp_path / "current.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
+        connection.execute("INSERT INTO alembic_version VALUES ('20260721_0017')")
+
+    check = doctor.migration_check(f"sqlite:///{database}")
+
+    assert check.ok is True
+    assert check.detail == "database revision=20260721_0017"

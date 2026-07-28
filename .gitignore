@@ -5,3 +5,6 @@
 .data/
 __pycache__/
 *.py[cod]
+
+# Local launch-film sources, screenshots, renders, and promotional exports.
+/video/sift-launch-film/

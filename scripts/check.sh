@@ -10,6 +10,12 @@ else
   PYTHON="${PYTHON:-python3}"
 fi
 
+if [[ -x "$ROOT/cloudflare/.venv/bin/python" ]]; then
+  WORKER_PYTHON="$ROOT/cloudflare/.venv/bin/python"
+else
+  WORKER_PYTHON="${WORKER_PYTHON:-python3}"
+fi
+
 check_backend() {
   cd "$ROOT"
   "$PYTHON" -m ruff check backend/src backend/tests scripts/smoke-backend-mvp.py scripts/local_mvp_doctor.py scripts/check_managed_deployment.py scripts/revoke_beta_owner.py scripts/evaluate_continuity.py scripts/model_run_metrics.py scripts/recovery_dogfood.py
@@ -25,6 +31,12 @@ check_ios() {
     CODE_SIGNING_ALLOWED=NO
 }
 
+check_worker() {
+  cd "$ROOT/cloudflare"
+  "$WORKER_PYTHON" -m ruff check src tests verification
+  "$WORKER_PYTHON" -m pytest -q
+}
+
 case "$TARGET" in
   backend)
     check_backend
@@ -32,12 +44,16 @@ case "$TARGET" in
   ios)
     check_ios
     ;;
+  worker)
+    check_worker
+    ;;
   all)
     check_backend
+    check_worker
     check_ios
     ;;
   *)
-    echo "usage: scripts/check.sh [backend|ios|all]" >&2
+    echo "usage: scripts/check.sh [backend|worker|ios|all]" >&2
     exit 2
     ;;
 esac

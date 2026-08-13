@@ -1,0 +1,20 @@
+{
+  "name": "sift-cloudflare-worker-tools",
+  "private": true,
+  "scripts": {
+    "deploy:production": "node scripts/deploy.mjs",
+    "invite:issue": "node scripts/issue_invite.mjs",
+    "verify:production": "node scripts/verify_production.mjs",
+    "verify:provider-live": "PYTHONPATH=.:src python -m verification.live_conformance",
+    "verify:production-e2e": "PYTHONPATH=.:src python -m verification.production_e2e"
+  },
+  "devDependencies": {
+    "wrangler": "4.116.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "workerd"
+    ]
+  }
+}

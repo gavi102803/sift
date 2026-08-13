@@ -1,0 +1,17 @@
+"$schema" = "./node_modules/wrangler/config-schema.json"
+name = "sift-backend"
+main = "src/entry.py"
+compatibility_date = "2026-07-31"
+compatibility_flags = ["python_workers"]
+
+[vars]
+SIFT_ENV = "production"
+SIFT_AUTH_MODE = "managed"
+SIFT_BETA_TOKEN_TTL_DAYS = "30"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sift"
+# Production APAC D1 created by `pnpm run deploy:production`.
+database_id = "f1444fbf-08f1-4e0e-8cd3-b224e235199a"
+migrations_dir = "migrations"

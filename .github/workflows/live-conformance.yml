@@ -7,54 +7,62 @@ on:
 
 jobs:
   live-conformance:
-    name: Live model driver conformance
+    name: Production Worker provider conformance
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: backend
+        working-directory: cloudflare
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install backend
-        run: python -m pip install -e ".[dev]"
-      - name: Write provider settings
-        env:
-          SIFT_RUNTIME_PROVIDER: ${{ vars.SIFT_RUNTIME_PROVIDER }}
-          SIFT_RUNTIME_BASE_URL: ${{ vars.SIFT_RUNTIME_BASE_URL }}
-          SIFT_RUNTIME_MODEL: ${{ vars.SIFT_RUNTIME_MODEL }}
-          SIFT_RUNTIME_API_KEY: ${{ secrets.SIFT_RUNTIME_API_KEY }}
+      - name: Install Worker conformance dependencies
         run: |
-          mkdir -p "$RUNNER_TEMP/sift"
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          provider = os.environ.get("SIFT_RUNTIME_PROVIDER") or "mock"
-          settings = {
-              "runtime_provider": provider,
-              "runtime_provider_settings": {
-                  provider: {
-                      "base_url": os.environ.get("SIFT_RUNTIME_BASE_URL", ""),
-                      "model": os.environ.get("SIFT_RUNTIME_MODEL", ""),
-                      "api_key": os.environ.get("SIFT_RUNTIME_API_KEY", ""),
-                  }
-              },
-          }
-          Path(os.environ["RUNNER_TEMP"], "sift", "provider.json").write_text(
-              json.dumps(settings),
-              encoding="utf-8",
-          )
-          PY
-      - name: Run live conformance
+          python -m pip install -e .
+          python -m pip install httpx
+      - name: Run production Worker provider conformance
         env:
-          SIFT_ENV: test
-          SIFT_PROVIDER_SETTINGS_PATH: ${{ runner.temp }}/sift/provider.json
-          SIFT_CAPABILITY_PROBE_CACHE_PATH: ${{ runner.temp }}/sift/capability-probes.json
-        run: python scripts/run_live_conformance.py
+          SIFT_LIVE_PROVIDER: ${{ vars.SIFT_RUNTIME_PROVIDER }}
+          SIFT_LIVE_BASE_URL: ${{ vars.SIFT_RUNTIME_BASE_URL }}
+          SIFT_LIVE_MODEL: ${{ vars.SIFT_RUNTIME_MODEL }}
+          SIFT_LIVE_API_KEY: ${{ secrets.SIFT_RUNTIME_API_KEY }}
+        run: PYTHONPATH=.:src python -m verification.live_conformance
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: live-conformance
-          path: backend/.data/live-conformance.json
+          name: worker-live-conformance
+          path: cloudflare/.data/live-conformance.json
+
+  production-e2e:
+    name: Managed production Harness E2E
+    if: github.event_name == 'workflow_dispatch'
+    needs: live-conformance
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloudflare
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install production E2E dependencies
+        run: |
+          python -m pip install -e .
+          python -m pip install httpx
+      - name: Run Managed production Harness E2E
+        env:
+          SIFT_E2E_BASE_URL: ${{ vars.SIFT_PRODUCTION_BASE_URL }}
+          SIFT_E2E_INSTALLATION_ID: ${{ vars.SIFT_E2E_INSTALLATION_ID }}
+          SIFT_E2E_SESSION_TOKEN: ${{ secrets.SIFT_E2E_SESSION_TOKEN }}
+          SIFT_E2E_PROVIDER: ${{ vars.SIFT_RUNTIME_PROVIDER }}
+          SIFT_E2E_PROVIDER_BASE_URL: ${{ vars.SIFT_RUNTIME_BASE_URL }}
+          SIFT_E2E_MODEL: ${{ vars.SIFT_RUNTIME_MODEL }}
+          SIFT_E2E_PROVIDER_API_KEY: ${{ secrets.SIFT_RUNTIME_API_KEY }}
+        run: PYTHONPATH=.:src python -m verification.production_e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-harness-e2e
+          path: cloudflare/.data/production-e2e.json

@@ -1,0 +1,3 @@
+ALTER TABLE model_runs ADD COLUMN model_latency_ms INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE model_runs ADD COLUMN input_token_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE model_runs ADD COLUMN output_token_count INTEGER NOT NULL DEFAULT 0;

@@ -1,0 +1,3 @@
+SIFT_ENV=development
+SIFT_AUTH_MODE=managed
+SIFT_BETA_TOKEN_TTL_DAYS=30

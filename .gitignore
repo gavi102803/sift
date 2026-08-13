@@ -3,8 +3,16 @@
 .build/
 .xcodebuildmcp/
 .data/
+xcuserdata/
 __pycache__/
 *.py[cod]
+/cloudflare/.dev.vars
+/cloudflare/.venv/
+/cloudflare/.venv-workers/
+/cloudflare/.wrangler/
+/cloudflare/node_modules/
+/cloudflare/python_modules/
+/cloudflare/src/vendor/
 
 # Local launch-film sources, screenshots, renders, and promotional exports.
 /video/sift-launch-film/

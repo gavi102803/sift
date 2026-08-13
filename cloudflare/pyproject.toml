@@ -1,0 +1,32 @@
+[project]
+name = "sift-cloudflare-worker"
+version = "0.1.0"
+description = "Cloudflare Workers deployment target for the Sift backend."
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115",
+  "jinja2",
+  "markupsafe",
+  "pydantic>=2.8",
+]
+
+[dependency-groups]
+dev = [
+  "httpx>=0.27",
+  "pytest>=8.2",
+  "pytest-asyncio>=0.23",
+  "ruff>=0.6",
+  "workers-py",
+  "workers-runtime-sdk",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

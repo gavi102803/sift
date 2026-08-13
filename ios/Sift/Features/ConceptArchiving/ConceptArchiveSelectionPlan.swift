@@ -4,13 +4,28 @@ struct ConceptArchiveSelectionPlan {
     let remoteConceptIds: [UUID]
     let localDraftIds: [UUID]
 
-    init(concepts: [Concept]) {
+    init(concepts: [Concept], backendConceptIds: Set<UUID> = []) {
         remoteConceptIds = concepts
-            .filter { !ConceptStatusRules.isLocalOnly($0.captureStatus) }
+            .filter {
+                backendConceptIds.contains($0.id)
+                    || !ConceptStatusRules.isLocalOnly($0.captureStatus)
+            }
             .map(\.id)
         localDraftIds = concepts
-            .filter { ConceptStatusRules.isLocalOnly($0.captureStatus) }
+            .filter {
+                !backendConceptIds.contains($0.id)
+                    && ConceptStatusRules.isLocalOnly($0.captureStatus)
+            }
             .map(\.id)
+    }
+
+    static func requiresBackendRefresh(
+        concepts: [Concept],
+        backendConceptIds _: Set<UUID>
+    ) -> Bool {
+        concepts.contains {
+            $0.captureStatus == CaptureStatus.generationFailed.rawValue
+        }
     }
 
     var totalCount: Int {

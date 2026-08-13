@@ -37,6 +37,7 @@ struct ConceptLibraryView: View {
     @State private var isApplyingBatchAction = false
     @State private var undoArchivedIds: [UUID] = []
     @State private var undoTask: Task<Void, Never>?
+    @State private var backendConceptIds: Set<UUID> = []
 
     private var visibleConcepts: [Concept] {
         concepts.filter { concept in
@@ -73,7 +74,8 @@ struct ConceptLibraryView: View {
 
     private var archiveSelectionPlan: ConceptArchiveSelectionPlan {
         ConceptArchiveSelectionPlan(
-            concepts: concepts.filter { selectedConceptIds.contains($0.id) }
+            concepts: concepts.filter { selectedConceptIds.contains($0.id) },
+            backendConceptIds: backendConceptIds
         )
     }
 
@@ -436,6 +438,7 @@ struct ConceptLibraryView: View {
         errorMessage = nil
         do {
             let concepts = try await appServices.apiClient.listConcepts()
+            backendConceptIds = Set(concepts.map(\.id))
             let store = ConceptLocalStore(modelContext: modelContext)
             try store.upsertConcepts(from: concepts)
             try store.pruneLocalMirrorsMissingFromRemote(keeping: Set(concepts.map(\.id)))
@@ -604,7 +607,29 @@ struct ConceptLibraryView: View {
     @MainActor
     private func archiveSelection() async {
         let selected = concepts.filter { selectedConceptIds.contains($0.id) }
-        let plan = ConceptArchiveSelectionPlan(concepts: selected)
+        var authoritativeBackendIds = backendConceptIds
+        if ConceptArchiveSelectionPlan.requiresBackendRefresh(
+            concepts: selected,
+            backendConceptIds: authoritativeBackendIds
+        ) {
+            isApplyingBatchAction = true
+            do {
+                let remoteConcepts = try await appServices.apiClient.listConcepts()
+                authoritativeBackendIds = Set(remoteConcepts.map(\.id))
+                backendConceptIds = authoritativeBackendIds
+            } catch is CancellationError {
+                isApplyingBatchAction = false
+                return
+            } catch {
+                errorMessage = error.localizedDescription
+                isApplyingBatchAction = false
+                return
+            }
+        }
+        let plan = ConceptArchiveSelectionPlan(
+            concepts: selected,
+            backendConceptIds: authoritativeBackendIds
+        )
         guard plan.totalCount > 0 else { return }
         isApplyingBatchAction = true
         let previousStatuses = Dictionary(uniqueKeysWithValues: selected.map { ($0.id, $0.captureStatus) })

@@ -48,7 +48,7 @@ struct ConceptLocalStore {
             )
             for draft in drafts {
                 markCaptureGenerationCompleted(draft)
-                if draft.id != concept.id { modelContext.delete(draft) }
+                if draft.id != concept.id { deleteConcept(draft) }
             }
         }
         if let response = run.result?.response {
@@ -65,11 +65,29 @@ struct ConceptLocalStore {
         }
     }
 
-    func reconcileFailedModelRun(_ run: ModelRunDTO) throws {
+    func reconcileFailedModelRun(
+        _ run: ModelRunDTO,
+        remoteConcept: ConceptDTO? = nil
+    ) throws {
         guard run.kind == "initialConcept", run.status == "failed" else { return }
         let drafts = try modelContext.fetch(FetchDescriptor<Concept>()).filter {
             $0.id.uuidString.caseInsensitiveCompare(run.clientDraftId ?? "") == .orderedSame
                 || $0.captureGenerationIdempotencyKey == run.idempotencyKey
+        }
+        if let remoteConcept {
+            // The backend persists a failed initial run's concept under the run
+            // id (not the client draft id). Adopt that authoritative record so
+            // the Library shows exactly one "Needs retry" card whose id matches
+            // the backend; a later archive/delete won't 404 with an unknown id.
+            let adopted = try upsertConcept(from: remoteConcept)
+            adopted.captureStatus = CaptureStatus.generationFailed.rawValue
+            adopted.captureGenerationOperationStatus = LocalOperationStatus.failed.rawValue
+            adopted.captureGenerationIdempotencyKey = nil
+            adopted.updatedAt = .now
+            for draft in drafts where draft.id != adopted.id {
+                deleteConcept(draft)
+            }
+            return
         }
         for draft in drafts where ConceptStatusRules.isLocalOnly(draft.captureStatus) {
             markCaptureGenerationTerminalFailure(
@@ -164,6 +182,20 @@ struct ConceptLocalStore {
                 conversation: conversation
             )
         )
+    }
+
+    func clearInitialGenerationAnswer(concept: Concept) {
+        guard let conversation = concept.conversation else { return }
+        let messages = conversation.messages.filter {
+            $0.role == ConversationRole.assistant.rawValue
+                && $0.updateMode == initialCaptureUpdateMode
+        }
+        let messageIds = Set(messages.map(\.id))
+        conversation.messages.removeAll { messageIds.contains($0.id) }
+        for message in messages {
+            modelContext.delete(message)
+        }
+        conversation.updatedAt = .now
     }
 
     func replaceInitialGenerationAnswer(concept: Concept, question: String, answer: String) {
@@ -318,6 +350,7 @@ struct ConceptLocalStore {
         concept.captureGenerationOperationStatus = LocalOperationStatus.failed.rawValue
         concept.captureGenerationIdempotencyKey = nil
         concept.updatedAt = .now
+        clearInitialGenerationAnswer(concept: concept)
         recordInitialGenerationFailure(concept: concept, error: error)
     }
 
@@ -472,6 +505,16 @@ struct ConceptLocalStore {
     }
 
     func deleteConcept(_ concept: Concept) {
+        // SwiftData can otherwise retain an inserted-then-cascade-deleted
+        // ConversationMessage that points at a zeroed Conversation object.
+        // Delete this nested graph leaf-first when replacing a local draft in
+        // the same transaction in which its streamed messages were inserted.
+        if let conversation = concept.conversation {
+            for message in conversation.messages {
+                modelContext.delete(message)
+            }
+            modelContext.delete(conversation)
+        }
         modelContext.delete(concept)
     }
 

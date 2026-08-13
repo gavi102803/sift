@@ -11,12 +11,15 @@ struct ConceptMaintenanceObserver {
         for runId in runIds {
             var run = try await apiClient.getModelRun(id: runId)
             var lastSequence = 0
+            var activePollCount = 0
 
             while true {
                 try Task.checkCancellation()
-                if run.status == "waitingForCredential" {
+                if Self.activeStatuses.contains(run.status),
+                   run.status == "waitingForCredential" || activePollCount.isMultiple(of: 20) {
                     run = try await apiClient.resumeModelRun(id: run.id)
                 }
+                activePollCount += 1
 
                 let events = try await apiClient.listModelRunEvents(
                     id: run.id,

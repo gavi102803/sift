@@ -58,10 +58,14 @@ struct ModelRunDTO: Codable, Identifiable {
     var agentSpec: String?
     var agentSpecVersion: String?
     var promptVersion: String?
+    var toolContractHash: String?
     var budget: [String: Int]?
     var currentStep: String?
     var modelCallCount: Int?
     var toolCallCount: Int?
+    var modelLatencyMs: Int?
+    var inputTokenCount: Int?
+    var outputTokenCount: Int?
     var terminationReason: String?
     var dependencyRunId: UUID?
     var checkpoint: String?
@@ -81,6 +85,7 @@ struct ModelRunEventDTO: Codable, Identifiable {
         var label: String?
         var modelCalls: Int?
         var toolCalls: Int?
+        var citations: [CitationDTO]?
     }
 
     var sequence: Int
@@ -88,6 +93,17 @@ struct ModelRunEventDTO: Codable, Identifiable {
     var data: DataPayload? = nil
     var createdAt: Date
     var id: Int { sequence }
+}
+
+struct ModelRunExecutionStreamEventDTO: Codable {
+    var type: String
+    var delta: String? = nil
+    var progressLabel: String? = nil
+    var sequence: Int? = nil
+    var modelRun: ModelRunDTO? = nil
+    var errorCode: String? = nil
+    var errorMessage: String? = nil
+    var citations: [CitationDTO]? = nil
 }
 
 struct AppStatusDTO: Codable {
@@ -377,6 +393,7 @@ struct ConceptTurnStreamEvent: Codable {
     var modelRun: ModelRunDTO? = nil
     var sequence: Int? = nil
     var progressLabel: String? = nil
+    var citations: [CitationDTO]? = nil
 }
 
 struct ConceptInitialStreamEvent: Codable {
@@ -386,6 +403,7 @@ struct ConceptInitialStreamEvent: Codable {
     var modelRun: ModelRunDTO? = nil
     var sequence: Int? = nil
     var progressLabel: String? = nil
+    var citations: [CitationDTO]? = nil
 }
 
 struct UpdateProposalDTO: Codable, Identifiable {

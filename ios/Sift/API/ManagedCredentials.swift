@@ -15,6 +15,7 @@ protocol ManagedCredentialStore: AnyObject {
     var installationId: String { get }
     var betaSession: ManagedBetaSession? { get set }
     var providerKey: String? { get set }
+    var webProviderKey: String? { get set }
     func clearBetaSession()
 }
 
@@ -62,6 +63,17 @@ final class KeychainManagedCredentialStore: ManagedCredentialStore {
         }
     }
 
+    var webProviderKey: String? {
+        get { readString(account: "web-provider-key") }
+        set {
+            guard let newValue, !newValue.isEmpty else {
+                delete(account: "web-provider-key")
+                return
+            }
+            write(Data(newValue.utf8), account: "web-provider-key")
+        }
+    }
+
     func clearBetaSession() {
         betaSession = nil
     }
@@ -71,6 +83,7 @@ final class KeychainManagedCredentialStore: ManagedCredentialStore {
         delete(account: "installation-id")
         delete(account: "beta-session")
         delete(account: "provider-key")
+        delete(account: "web-provider-key")
     }
 #endif
 
@@ -122,15 +135,18 @@ final class InMemoryManagedCredentialStore: ManagedCredentialStore {
     let installationId: String
     var betaSession: ManagedBetaSession?
     var providerKey: String?
+    var webProviderKey: String?
 
     init(
         installationId: String = UUID().uuidString,
         betaSession: ManagedBetaSession? = nil,
-        providerKey: String? = nil
+        providerKey: String? = nil,
+        webProviderKey: String? = nil
     ) {
         self.installationId = installationId
         self.betaSession = betaSession
         self.providerKey = providerKey
+        self.webProviderKey = webProviderKey
     }
 
     func clearBetaSession() {

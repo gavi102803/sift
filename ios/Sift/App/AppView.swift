@@ -107,7 +107,11 @@ struct AppView: View {
                 try? store.reconcileSucceededModelRun(run)
                 replaceActiveDraftRoute(for: run)
             } else if run.status == "failed" {
-                try? store.reconcileFailedModelRun(run)
+                var remoteConcept: ConceptDTO?
+                if run.kind == "initialConcept", let conceptId = run.conceptId {
+                    remoteConcept = try? await appServices.apiClient.getConcept(id: conceptId)
+                }
+                try? store.reconcileFailedModelRun(run, remoteConcept: remoteConcept)
             } else if ["queued", "running", "waitingForCredential"].contains(run.status) {
                 Task { await observeModelRun(run) }
             }
@@ -117,17 +121,19 @@ struct AppView: View {
 
     private func observeModelRun(_ initial: ModelRunDTO) async {
         var run = initial
+        var activePollCount = 0
         let store = ConceptLocalStore(modelContext: modelContext)
         let mirror = try? store.upsertModelRun(run)
         var lastSequence = mirror?.lastSequence ?? 0
         do {
             while ["queued", "running", "waitingForCredential"].contains(run.status) {
-                if run.status == "waitingForCredential" {
+                if run.status == "waitingForCredential" || activePollCount.isMultiple(of: 20) {
                     run = try await appServices.apiClient.resumeModelRun(id: run.id)
                 } else {
                     try await Task.sleep(for: .milliseconds(250))
                     run = try await appServices.apiClient.getModelRun(id: run.id)
                 }
+                activePollCount += 1
                 let events = try await appServices.apiClient.listModelRunEvents(
                     id: run.id,
                     afterSequence: lastSequence

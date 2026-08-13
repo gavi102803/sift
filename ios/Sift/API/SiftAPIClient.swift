@@ -20,6 +20,9 @@ protocol SiftAPIClient {
         _ request: UpdateWebProviderSettingsRequest
     ) async throws -> WebProviderSettingsDTO
     func listProviderModels() async throws -> ProviderModelListDTO
+    func previewProviderModels(
+        _ request: UpdateModelProviderSettingsRequest
+    ) async throws -> ProviderModelListDTO
     func runModelDiagnostic() async throws -> ModelDiagnosticDTO
     func runWebSearchDiagnostic() async throws -> ModelDiagnosticDTO
     func listConcepts() async throws -> [ConceptDTO]
@@ -47,6 +50,7 @@ protocol SiftAPIClient {
     func getModelRun(id: UUID) async throws -> ModelRunDTO
     func listModelRunEvents(id: UUID, afterSequence: Int) async throws -> [ModelRunEventDTO]
     func resumeModelRun(id: UUID) async throws -> ModelRunDTO
+    func cancelModelRun(id: UUID) async throws -> ModelRunDTO
     func listProposals(conceptId: UUID, status: ProposalStatus?) async throws -> [UpdateProposalDTO]
     func listRevisions(conceptId: UUID) async throws -> [NoteRevisionSummaryDTO]
     func getRevision(conceptId: UUID, revision: Int) async throws -> NoteRevisionDTO
@@ -92,6 +96,13 @@ extension SiftAPIClient {
     func activateBeta(inviteCode: String) async throws {}
     func clearBetaSession() {}
 
+    func previewProviderModels(
+        _ request: UpdateModelProviderSettingsRequest
+    ) async throws -> ProviderModelListDTO {
+        _ = try await updateModelProviderSettings(request)
+        return try await listProviderModels()
+    }
+
     func createConcept(
         _ request: CreateConceptRequest,
         idempotencyKey: UUID?
@@ -125,9 +136,8 @@ extension SiftAPIClient {
                     let concept = try await createConcept(request, idempotencyKey: idempotencyKey)
                     continuation.yield(ConceptInitialStreamEvent(type: "started", delta: nil, concept: nil))
                     let answer = concept.initialAnswer ?? concept.oneLineExplanation
-                    for chunk in answer.siftChunks(maxLength: 16) {
-                        try await Task.sleep(nanoseconds: 45_000_000)
-                        continuation.yield(ConceptInitialStreamEvent(type: "delta", delta: chunk, concept: nil))
+                    if !answer.isEmpty {
+                        continuation.yield(ConceptInitialStreamEvent(type: "delta", delta: answer, concept: nil))
                     }
                     continuation.yield(ConceptInitialStreamEvent(type: "completed", delta: nil, concept: concept))
                     continuation.finish()
@@ -155,6 +165,7 @@ extension SiftAPIClient {
     func getModelRun(id: UUID) async throws -> ModelRunDTO { throw SiftAPIError.invalidResponse }
     func listModelRunEvents(id: UUID, afterSequence: Int) async throws -> [ModelRunEventDTO] { [] }
     func resumeModelRun(id: UUID) async throws -> ModelRunDTO { throw SiftAPIError.invalidResponse }
+    func cancelModelRun(id: UUID) async throws -> ModelRunDTO { try await getModelRun(id: id) }
     func listProposals(conceptId: UUID, status: ProposalStatus?) async throws -> [UpdateProposalDTO] { [] }
     func listRevisions(conceptId: UUID) async throws -> [NoteRevisionSummaryDTO] { [] }
     func getRevision(conceptId: UUID, revision: Int) async throws -> NoteRevisionDTO { throw SiftAPIError.invalidResponse }
@@ -272,9 +283,7 @@ struct HTTPSiftAPIClient: SiftAPIClient {
         _ request: UpdateModelProviderSettingsRequest
     ) async throws -> ModelProviderSettingsDTO {
         if requiresBetaActivation {
-            if let apiKey = request.apiKey, !apiKey.isEmpty {
-                credentialStore.providerKey = apiKey
-            }
+            let candidateProviderKey = request.apiKey.flatMap { $0.isEmpty ? nil : $0 }
             let managedRequest = ManagedProviderConnectionRequest(
                 providerId: request.providerType,
                 baseURL: request.baseURL,
@@ -283,41 +292,52 @@ struct HTTPSiftAPIClient: SiftAPIClient {
             let _: ManagedProviderTestDTO = try await post(
                 path: "/v1/providers/test",
                 body: managedRequest,
-                includesProviderKey: true
+                includesProviderKey: true,
+                providerKeyOverride: candidateProviderKey
             )
             let connection: ManagedProviderConnectionDTO = try await put(
                 path: "/v1/provider-connection",
                 body: managedRequest
             )
+            if let candidateProviderKey {
+                credentialStore.providerKey = candidateProviderKey
+            }
             return managedSettings(from: connection)
         }
         return try await put(path: "/v1/model-provider-settings", body: request)
     }
 
     func getWebProviderSettings() async throws -> WebProviderSettingsDTO {
-        if requiresBetaActivation {
-            return WebProviderSettingsDTO(
-                providerType: "ddgs",
-                apiKeyConfigured: false,
-                apiKeyPreview: nil,
-                webSearchEnabled: true
-            )
-        }
-        return try await get(path: "/v1/web-provider-settings")
+        let response: WebProviderSettingsDTO = try await get(path: "/v1/web-provider-settings")
+        guard requiresBetaActivation else { return response }
+        return WebProviderSettingsDTO(
+            providerType: response.providerType,
+            apiKeyConfigured: credentialStore.webProviderKey?.isEmpty == false,
+            apiKeyPreview: credentialStore.webProviderKey.map { "***\($0.suffix(4))" },
+            webSearchEnabled: response.webSearchEnabled
+        )
     }
 
     func updateWebProviderSettings(
         _ request: UpdateWebProviderSettingsRequest
     ) async throws -> WebProviderSettingsDTO {
         if requiresBetaActivation {
-            guard request.providerType == "ddgs", request.apiKey?.isEmpty != false else {
-                throw SiftAPIError.managedUnsupported
+            if let apiKey = request.apiKey, !apiKey.isEmpty {
+                credentialStore.webProviderKey = apiKey
             }
+            let response: WebProviderSettingsDTO = try await put(
+                path: "/v1/web-provider-settings",
+                body: UpdateWebProviderSettingsRequest(
+                    providerType: request.providerType,
+                    apiKey: nil,
+                    webSearchEnabled: request.webSearchEnabled
+                )
+            )
             return WebProviderSettingsDTO(
-                providerType: "ddgs",
-                apiKeyConfigured: false,
-                apiKeyPreview: nil,
-                webSearchEnabled: request.webSearchEnabled
+                providerType: response.providerType,
+                apiKeyConfigured: credentialStore.webProviderKey?.isEmpty == false,
+                apiKeyPreview: credentialStore.webProviderKey.map { "***\($0.suffix(4))" },
+                webSearchEnabled: response.webSearchEnabled
             )
         }
         return try await put(path: "/v1/web-provider-settings", body: request)
@@ -333,6 +353,26 @@ struct HTTPSiftAPIClient: SiftAPIClient {
             )
         }
         return try await get(path: "/v1/model-provider-settings/models")
+    }
+
+    func previewProviderModels(
+        _ request: UpdateModelProviderSettingsRequest
+    ) async throws -> ProviderModelListDTO {
+        guard requiresBetaActivation else {
+            _ = try await updateModelProviderSettings(request)
+            return try await listProviderModels()
+        }
+        let candidateProviderKey = request.apiKey.flatMap { $0.isEmpty ? nil : $0 }
+        return try await post(
+            path: "/v1/providers/models",
+            body: ManagedProviderConnectionRequest(
+                providerId: request.providerType,
+                baseURL: request.baseURL,
+                model: request.explainModel
+            ),
+            includesProviderKey: true,
+            providerKeyOverride: candidateProviderKey
+        )
     }
 
     func runModelDiagnostic() async throws -> ModelDiagnosticDTO {
@@ -362,17 +402,11 @@ struct HTTPSiftAPIClient: SiftAPIClient {
     }
 
     func runWebSearchDiagnostic() async throws -> ModelDiagnosticDTO {
-        if requiresBetaActivation {
-            return ModelDiagnosticDTO(
-                ok: true,
-                provider: "ddgs",
-                model: "managed",
-                message: "Managed beta web search is ready.",
-                webSearchUsed: false,
-                citationCount: 0
-            )
-        }
-        return try await post(path: "/v1/web-search-diagnostic", body: EmptyRequest())
+        try await post(
+            path: "/v1/web-search-diagnostic",
+            body: EmptyRequest(),
+            includesWebProviderKey: requiresBetaActivation
+        )
     }
 
     func listConcepts() async throws -> [ConceptDTO] {
@@ -448,7 +482,13 @@ struct HTTPSiftAPIClient: SiftAPIClient {
     }
 
     func resumeModelRun(id: UUID) async throws -> ModelRunDTO {
-        try await post(path: "/v1/model-runs/\(id.uuidString)/resume", body: EmptyRequest(), includesProviderKey: requiresBetaActivation)
+        try await post(
+            path: "/v1/model-runs/\(id.uuidString)/resume",
+            body: EmptyRequest(),
+            includesProviderKey: requiresBetaActivation,
+            includesWebProviderKey: requiresBetaActivation,
+            timeoutInterval: 120
+        )
     }
 
     func listProposals(
@@ -505,17 +545,18 @@ struct HTTPSiftAPIClient: SiftAPIClient {
             Task {
                 do {
                     do {
-                        let run: ModelRunDTO = try await post(
+                        let run = try await submitModelRunRecovering(
                             path: "/v1/concept-runs",
                             body: CreateConceptRunRequest(
                                 capture: request,
                                 clientDraftId: clientDraftId?.uuidString
                             ),
                             idempotencyKey: idempotencyKey,
-                            includesProviderKey: requiresBetaActivation
+                            includesProviderKey: false,
+                            includesWebProviderKey: false
                         )
                         continuation.yield(ConceptInitialStreamEvent(type: "started", delta: nil, concept: nil, modelRun: run))
-                        let completed = try await waitForModelRun(run) { event in
+                        let onEvent: (ModelRunEventDTO) -> Void = { event in
                             if event.type == "delta", let delta = event.data?.content {
                                 continuation.yield(
                                     ConceptInitialStreamEvent(
@@ -526,7 +567,31 @@ struct HTTPSiftAPIClient: SiftAPIClient {
                                         sequence: event.sequence
                                     )
                                 )
-                            } else if event.type == "stepStarted", let label = event.data?.label {
+                            } else if event.type == "deltaReset" {
+                                continuation.yield(
+                                    ConceptInitialStreamEvent(
+                                        type: "reset",
+                                        delta: nil,
+                                        concept: nil,
+                                        modelRun: run,
+                                        sequence: event.sequence
+                                    )
+                                )
+                            } else if event.type == "sourcesReady",
+                                      let citations = event.data?.citations,
+                                      !citations.isEmpty {
+                                continuation.yield(
+                                    ConceptInitialStreamEvent(
+                                        type: "sources",
+                                        delta: nil,
+                                        concept: nil,
+                                        modelRun: run,
+                                        sequence: event.sequence,
+                                        citations: citations
+                                    )
+                                )
+                            } else if ["stepStarted", "stepRestarted"].contains(event.type),
+                                      let label = event.data?.label {
                                 continuation.yield(
                                     ConceptInitialStreamEvent(
                                         type: "progress",
@@ -538,6 +603,12 @@ struct HTTPSiftAPIClient: SiftAPIClient {
                                     )
                                 )
                             }
+                        }
+                        let completed: ModelRunDTO
+                        if requiresBetaActivation {
+                            completed = try await waitForManagedModelRun(run, onEvent: onEvent)
+                        } else {
+                            completed = try await waitForModelRun(run, onEvent: onEvent)
                         }
                         guard let concept = completed.result?.concept else { throw SiftStreamingError.incomplete }
                         continuation.yield(ConceptInitialStreamEvent(type: "completed", delta: nil, concept: concept, modelRun: completed))
@@ -571,7 +642,8 @@ struct HTTPSiftAPIClient: SiftAPIClient {
             path: "/v1/concepts/\(conceptId.uuidString)/turns",
             body: request,
             idempotencyKey: idempotencyKey,
-            includesProviderKey: requiresBetaActivation
+            includesProviderKey: requiresBetaActivation,
+            includesWebProviderKey: requiresBetaActivation
         )
     }
 
@@ -591,14 +663,15 @@ struct HTTPSiftAPIClient: SiftAPIClient {
             let task = Task {
                 do {
                     do {
-                        let run: ModelRunDTO = try await post(
+                        let run = try await submitModelRunRecovering(
                             path: "/v1/concepts/\(conceptId.uuidString)/turn-runs",
                             body: CreateTurnRunRequest(turn: request),
                             idempotencyKey: idempotencyKey,
-                            includesProviderKey: requiresBetaActivation
+                            includesProviderKey: false,
+                            includesWebProviderKey: false
                         )
                         continuation.yield(ConceptTurnStreamEvent(type: "started", delta: nil, response: nil, modelRun: run))
-                        let completed = try await waitForModelRun(run) { event in
+                        let onEvent: (ModelRunEventDTO) -> Void = { event in
                             if event.type == "delta", let delta = event.data?.content {
                                 continuation.yield(
                                     ConceptTurnStreamEvent(
@@ -609,7 +682,31 @@ struct HTTPSiftAPIClient: SiftAPIClient {
                                         sequence: event.sequence
                                     )
                                 )
-                            } else if event.type == "stepStarted", let label = event.data?.label {
+                            } else if event.type == "deltaReset" {
+                                continuation.yield(
+                                    ConceptTurnStreamEvent(
+                                        type: "reset",
+                                        delta: nil,
+                                        response: nil,
+                                        modelRun: run,
+                                        sequence: event.sequence
+                                    )
+                                )
+                            } else if event.type == "sourcesReady",
+                                      let citations = event.data?.citations,
+                                      !citations.isEmpty {
+                                continuation.yield(
+                                    ConceptTurnStreamEvent(
+                                        type: "sources",
+                                        delta: nil,
+                                        response: nil,
+                                        modelRun: run,
+                                        sequence: event.sequence,
+                                        citations: citations
+                                    )
+                                )
+                            } else if ["stepStarted", "stepRestarted"].contains(event.type),
+                                      let label = event.data?.label {
                                 continuation.yield(
                                     ConceptTurnStreamEvent(
                                         type: "progress",
@@ -622,6 +719,12 @@ struct HTTPSiftAPIClient: SiftAPIClient {
                                 )
                             }
                         }
+                        let completed: ModelRunDTO
+                        if requiresBetaActivation {
+                            completed = try await waitForManagedModelRun(run, onEvent: onEvent)
+                        } else {
+                            completed = try await waitForModelRun(run, onEvent: onEvent)
+                        }
                         guard let response = completed.result?.response else { throw SiftStreamingError.incomplete }
                         continuation.yield(ConceptTurnStreamEvent(type: "completed", delta: nil, response: response, modelRun: completed))
                     } catch SiftAPIError.httpStatus(404, _) {
@@ -630,6 +733,7 @@ struct HTTPSiftAPIClient: SiftAPIClient {
                             body: request,
                             idempotencyKey: idempotencyKey,
                             includesProviderKey: requiresBetaActivation,
+                            includesWebProviderKey: requiresBetaActivation,
                             continuation: continuation
                         )
                     }
@@ -674,7 +778,10 @@ struct HTTPSiftAPIClient: SiftAPIClient {
             } else if ["queued", "running"].contains(run.status) {
                 run = try await getModelRun(id: run.id)
             }
-            let events = try await listModelRunEvents(id: run.id, afterSequence: lastSequence)
+            let events = (try? await listModelRunEvents(
+                id: run.id,
+                afterSequence: lastSequence
+            )) ?? []
             for event in events {
                 guard event.sequence > lastSequence else { continue }
                 lastSequence = event.sequence
@@ -689,6 +796,238 @@ struct HTTPSiftAPIClient: SiftAPIClient {
             throw SiftAPIError.modelRunFailed(code: run.errorCode ?? "model_run_failed")
         }
         return run
+    }
+
+    private func waitForManagedModelRun(
+        _ initial: ModelRunDTO,
+        onEvent: (ModelRunEventDTO) -> Void
+    ) async throws -> ModelRunDTO {
+        guard ["queued", "running", "waitingForCredential"].contains(initial.status) else {
+            return try await waitForModelRun(initial, onEvent: onEvent)
+        }
+        var receivedLiveDelta = false
+        do {
+            return try await streamResumeModelRun(id: initial.id) { event in
+                if event.type == "delta" {
+                    receivedLiveDelta = true
+                }
+                onEvent(event)
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let failure as SiftAPIError where failure.isHTTPStatus(404) {
+            return try await waitForManagedModelRunByPolling(
+                initial,
+                replayPersistedDeltas: true,
+                reconnectStream: false,
+                onEvent: onEvent
+            )
+        } catch {
+            guard isRecoverableManagedStreamFailure(error) else { throw error }
+            return try await waitForManagedModelRunByPolling(
+                initial,
+                replayPersistedDeltas: !receivedLiveDelta,
+                reconnectStream: true,
+                onEvent: onEvent
+            )
+        }
+    }
+
+    private func waitForManagedModelRunByPolling(
+        _ initial: ModelRunDTO,
+        replayPersistedDeltas: Bool,
+        reconnectStream: Bool,
+        onEvent: (ModelRunEventDTO) -> Void
+    ) async throws -> ModelRunDTO {
+        var run = initial
+        var lastSequence = 0
+        var shouldReconnectStream = reconnectStream
+        let deadline = Date().addingTimeInterval(125)
+
+        while true {
+            try Task.checkCancellation()
+            guard Date() < deadline else {
+                throw SiftAPIError.modelRunFailed(code: "model_run_timeout")
+            }
+            let events = (try? await listModelRunEvents(
+                id: run.id,
+                afterSequence: lastSequence
+            )) ?? []
+            for event in events {
+                guard event.sequence > lastSequence else { continue }
+                lastSequence = event.sequence
+                if replayPersistedDeltas || event.type != "delta" {
+                    onEvent(event)
+                }
+            }
+            guard ["queued", "running", "waitingForCredential"].contains(run.status) else {
+                break
+            }
+            if shouldReconnectStream {
+                do {
+                    return try await streamResumeModelRun(id: run.id, onEvent: onEvent)
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch let failure as SiftAPIError where failure.isHTTPStatus(404) {
+                    shouldReconnectStream = false
+                } catch {
+                    guard isRecoverableManagedStreamFailure(error) else { throw error }
+                }
+            }
+            try await Task.sleep(for: .milliseconds(500))
+            do {
+                run = try await getModelRun(id: run.id)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                guard isRecoverableManagedStreamFailure(error) else { throw error }
+            }
+        }
+        let terminalEvents = (try? await listModelRunEvents(
+            id: run.id,
+            afterSequence: lastSequence
+        )) ?? []
+        for event in terminalEvents {
+            guard event.sequence > lastSequence else { continue }
+            lastSequence = event.sequence
+            if replayPersistedDeltas || event.type != "delta" {
+                onEvent(event)
+            }
+        }
+        guard run.status == "succeeded" else {
+            throw SiftAPIError.modelRunFailed(code: run.errorCode ?? "model_run_failed")
+        }
+        return run
+    }
+
+    private func isRecoverableManagedStreamFailure(_ error: Error) -> Bool {
+        if error is URLError { return true }
+        if let failure = error as? SiftStreamingError {
+            if case .incomplete = failure { return true }
+            return false
+        }
+        guard let failure = error as? SiftAPIError else { return false }
+        switch failure {
+        case .invalidResponse:
+            return true
+        case .httpStatus(let status, _):
+            return [408, 409, 425, 429].contains(status) || (500...599).contains(status)
+        case .modelRunFailed, .betaActivationRequired, .providerKeyRequired, .managedUnsupported:
+            return false
+        }
+    }
+
+    private func streamResumeModelRun(
+        id: UUID,
+        onEvent: (ModelRunEventDTO) -> Void
+    ) async throws -> ModelRunDTO {
+        var urlRequest = URLRequest(
+            url: baseURL.appending(path: "/v1/model-runs/\(id.uuidString)/resume-stream")
+        )
+        urlRequest.httpMethod = "POST"
+        urlRequest.timeoutInterval = 125
+        urlRequest.setValue("application/x-ndjson", forHTTPHeaderField: "Accept")
+        try await authorize(
+            &urlRequest,
+            includesProviderKey: true,
+            includesWebProviderKey: true
+        )
+
+        let (bytes, response) = try await urlSession.bytes(for: urlRequest)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw SiftAPIError.invalidResponse
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            var data = Data()
+            for try await byte in bytes {
+                data.append(byte)
+            }
+            throw await responseError(status: httpResponse.statusCode, data: data)
+        }
+
+        var sequence = 0
+        for try await line in bytes.lines {
+            try Task.checkCancellation()
+            guard !line.isEmpty, let data = line.data(using: .utf8) else { continue }
+            let event = try jsonDecoder.decode(ModelRunExecutionStreamEventDTO.self, from: data)
+            switch event.type {
+            case "progress":
+                sequence = max(sequence + 1, event.sequence ?? 0)
+                onEvent(
+                    ModelRunEventDTO(
+                        sequence: sequence,
+                        type: "stepStarted",
+                        data: .init(label: event.progressLabel),
+                        createdAt: .now
+                    )
+                )
+            case "delta":
+                guard let delta = event.delta, !delta.isEmpty else { continue }
+                sequence += 1
+                onEvent(
+                    ModelRunEventDTO(
+                        sequence: sequence,
+                        type: "delta",
+                        data: .init(content: delta),
+                        createdAt: .now
+                    )
+                )
+            case "reset":
+                sequence = max(sequence + 1, event.sequence ?? 0)
+                onEvent(
+                    ModelRunEventDTO(
+                        sequence: sequence,
+                        type: "deltaReset",
+                        createdAt: .now
+                    )
+                )
+            case "sources":
+                guard let citations = event.citations, !citations.isEmpty else { continue }
+                sequence = max(sequence + 1, event.sequence ?? 0)
+                onEvent(
+                    ModelRunEventDTO(
+                        sequence: sequence,
+                        type: "sourcesReady",
+                        data: .init(citations: citations),
+                        createdAt: .now
+                    )
+                )
+            case "completed":
+                guard let completed = event.modelRun else {
+                    throw SiftStreamingError.incomplete
+                }
+                guard completed.status == "succeeded" else {
+                    if completed.status == "cancelled" {
+                        throw CancellationError()
+                    }
+                    if completed.status == "failed" {
+                        throw SiftAPIError.modelRunFailed(
+                            code: completed.errorCode ?? "model_run_failed"
+                        )
+                    }
+                    throw SiftStreamingError.incomplete
+                }
+                return completed
+            case "failed":
+                throw SiftAPIError.modelRunFailed(
+                    code: event.errorCode ?? "model_run_failed"
+                )
+            case "cancelled":
+                throw CancellationError()
+            case "detached":
+                throw SiftStreamingError.incomplete
+            default:
+                continue
+            }
+        }
+        throw SiftStreamingError.incomplete
+    }
+
+    func cancelModelRun(id: UUID) async throws -> ModelRunDTO {
+        try await post(
+            path: "/v1/model-runs/\(id.uuidString)/cancel",
+            body: EmptyRequest()
+        )
     }
 
     private func get<Response: Decodable>(path: String, queryItems: [URLQueryItem] = []) async throws -> Response {
@@ -711,16 +1050,27 @@ struct HTTPSiftAPIClient: SiftAPIClient {
         body: Request,
         idempotencyKey: UUID? = nil,
         authorized: Bool = true,
-        includesProviderKey: Bool = false
+        includesProviderKey: Bool = false,
+        providerKeyOverride: String? = nil,
+        includesWebProviderKey: Bool = false,
+        timeoutInterval: TimeInterval? = nil
     ) async throws -> Response {
         var urlRequest = URLRequest(url: baseURL.appending(path: path))
         urlRequest.httpMethod = "POST"
+        if let timeoutInterval {
+            urlRequest.timeoutInterval = timeoutInterval
+        }
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let idempotencyKey {
             urlRequest.setValue(idempotencyKey.uuidString, forHTTPHeaderField: "Idempotency-Key")
         }
         if authorized {
-            try await authorize(&urlRequest, includesProviderKey: includesProviderKey)
+            try await authorize(
+                &urlRequest,
+                includesProviderKey: includesProviderKey,
+                providerKeyOverride: providerKeyOverride,
+                includesWebProviderKey: includesWebProviderKey
+            )
         }
         urlRequest.httpBody = try jsonEncoder.encode(body)
 
@@ -737,11 +1087,72 @@ struct HTTPSiftAPIClient: SiftAPIClient {
         return try jsonDecoder.decode(Response.self, from: data)
     }
 
+    private func submitModelRunRecovering<Request: Encodable>(
+        path: String,
+        body: Request,
+        idempotencyKey: UUID?,
+        includesProviderKey: Bool = false,
+        includesWebProviderKey: Bool = false
+    ) async throws -> ModelRunDTO {
+        do {
+            return try await post(
+                path: path,
+                body: body,
+                idempotencyKey: idempotencyKey,
+                includesProviderKey: includesProviderKey,
+                includesWebProviderKey: includesWebProviderKey
+            )
+        } catch {
+            guard idempotencyKey != nil, isRecoverableIdempotentWriteFailure(error) else {
+                throw error
+            }
+            if let idempotencyKey,
+               let recovered = try? await recoverModelRun(idempotencyKey: idempotencyKey) {
+                return recovered
+            }
+            try await Task.sleep(for: .milliseconds(250))
+            do {
+                return try await post(
+                    path: path,
+                    body: body,
+                    idempotencyKey: idempotencyKey,
+                    includesProviderKey: includesProviderKey,
+                    includesWebProviderKey: includesWebProviderKey
+                )
+            } catch {
+                if let idempotencyKey,
+                   isRecoverableIdempotentWriteFailure(error),
+                   let recovered = try? await recoverModelRun(idempotencyKey: idempotencyKey) {
+                    return recovered
+                }
+                throw error
+            }
+        }
+    }
+
+    private func recoverModelRun(idempotencyKey: UUID) async throws -> ModelRunDTO? {
+        let runs: [ModelRunDTO] = try await get(
+            path: "/v1/model-runs",
+            queryItems: [URLQueryItem(name: "active", value: "false")]
+        )
+        return runs.first { UUID(uuidString: $0.idempotencyKey) == idempotencyKey }
+    }
+
+    private func isRecoverableIdempotentWriteFailure(_ error: Error) -> Bool {
+        if error is URLError { return true }
+        if case SiftAPIError.invalidResponse = error { return true }
+        if case SiftAPIError.httpStatus(let status, _) = error {
+            return (500...599).contains(status)
+        }
+        return false
+    }
+
     private func streamPost<Request: Encodable, Event: Decodable>(
         path: String,
         body: Request,
         idempotencyKey: UUID? = nil,
         includesProviderKey: Bool = false,
+        includesWebProviderKey: Bool = false,
         continuation: AsyncThrowingStream<Event, Error>.Continuation
     ) async throws {
         var urlRequest = URLRequest(url: baseURL.appending(path: path))
@@ -751,7 +1162,11 @@ struct HTTPSiftAPIClient: SiftAPIClient {
         if let idempotencyKey {
             urlRequest.setValue(idempotencyKey.uuidString, forHTTPHeaderField: "Idempotency-Key")
         }
-        try await authorize(&urlRequest, includesProviderKey: includesProviderKey)
+        try await authorize(
+            &urlRequest,
+            includesProviderKey: includesProviderKey,
+            includesWebProviderKey: includesWebProviderKey
+        )
         urlRequest.httpBody = try jsonEncoder.encode(body)
 
         let (bytes, response) = try await urlSession.bytes(for: urlRequest)
@@ -843,7 +1258,9 @@ struct HTTPSiftAPIClient: SiftAPIClient {
 
     private func authorize(
         _ request: inout URLRequest,
-        includesProviderKey: Bool = false
+        includesProviderKey: Bool = false,
+        providerKeyOverride: String? = nil,
+        includesWebProviderKey: Bool = false
     ) async throws {
         guard requiresBetaActivation else { return }
         let session = try await sessionController.sessionForRequest(
@@ -859,10 +1276,16 @@ struct HTTPSiftAPIClient: SiftAPIClient {
             forHTTPHeaderField: "X-Sift-Installation"
         )
         if includesProviderKey {
-            guard let providerKey = credentialStore.providerKey, !providerKey.isEmpty else {
+            guard let providerKey = providerKeyOverride ?? credentialStore.providerKey,
+                  !providerKey.isEmpty else {
                 throw SiftAPIError.providerKeyRequired
             }
             request.setValue(providerKey, forHTTPHeaderField: "X-Sift-Provider-Key")
+        }
+        if includesWebProviderKey,
+           let webProviderKey = credentialStore.webProviderKey,
+           !webProviderKey.isEmpty {
+            request.setValue(webProviderKey, forHTTPHeaderField: "X-Sift-Web-Provider-Key")
         }
     }
 
@@ -889,6 +1312,11 @@ enum SiftAPIError: LocalizedError {
     case providerKeyRequired
     case managedUnsupported
 
+    fileprivate func isHTTPStatus(_ expectedStatus: Int) -> Bool {
+        guard case .httpStatus(let status, _) = self else { return false }
+        return status == expectedStatus
+    }
+
     var errorDescription: String? {
         switch self {
         case .invalidResponse:
@@ -908,20 +1336,6 @@ enum SiftAPIError: LocalizedError {
         case .managedUnsupported:
             "This setting is not available in the managed beta."
         }
-    }
-}
-
-private extension String {
-    func siftChunks(maxLength: Int) -> [String] {
-        guard maxLength > 0, !isEmpty else { return [] }
-        var result: [String] = []
-        var index = startIndex
-        while index < endIndex {
-            let next = self.index(index, offsetBy: maxLength, limitedBy: endIndex) ?? endIndex
-            result.append(String(self[index..<next]))
-            index = next
-        }
-        return result
     }
 }
 

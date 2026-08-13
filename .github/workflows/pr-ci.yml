@@ -56,6 +56,27 @@ jobs:
       - name: Production Worker gate
         run: scripts/check.sh worker
 
+  ai-sdk-shadow:
+    name: AI SDK shadow contract and Worker bundle
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloudflare-ai-sdk-shadow
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: cloudflare-ai-sdk-shadow/pnpm-lock.yaml
+      - name: Install shadow dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Shadow contract and bundle gate
+        run: pnpm run check
+
   ios:
     name: iOS build and tests
     runs-on: macos-latest

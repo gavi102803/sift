@@ -1,0 +1,35 @@
+{
+  "name": "@sift/ai-sdk-shadow",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "bundle:check": "WRANGLER_SEND_METRICS=false WRANGLER_LOG_PATH=.wrangler/wrangler.log wrangler deploy --dry-run --outdir .wrangler-dist && node scripts/check-bundle-size.mjs",
+    "mock:benchmark": "node --experimental-transform-types scripts/run-mock-benchmark.mjs",
+    "check": "pnpm run typecheck && pnpm run test && pnpm run mock:benchmark && pnpm run bundle:check",
+    "dev": "WRANGLER_SEND_METRICS=false WRANGLER_LOG_PATH=.wrangler/wrangler.log wrangler dev",
+    "deploy:shadow": "WRANGLER_SEND_METRICS=false WRANGLER_LOG_PATH=.wrangler/wrangler.log wrangler deploy",
+    "live:eval": "node scripts/run-live-eval.mjs"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "4.0.38",
+    "@ai-sdk/google": "4.0.42",
+    "@ai-sdk/openai": "4.0.40",
+    "@ai-sdk/openai-compatible": "3.0.30",
+    "ai": "7.0.64",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260813.1",
+    "@types/node": "26.2.0",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10",
+    "wrangler": "4.122.0"
+  },
+  "packageManager": "pnpm@10.28.2"
+}

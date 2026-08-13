@@ -37,6 +37,11 @@ check_worker() {
   "$WORKER_PYTHON" -m pytest -q
 }
 
+check_shadow() {
+  cd "$ROOT/cloudflare-ai-sdk-shadow"
+  pnpm run check
+}
+
 case "$TARGET" in
   backend)
     check_backend
@@ -47,13 +52,17 @@ case "$TARGET" in
   worker)
     check_worker
     ;;
+  shadow)
+    check_shadow
+    ;;
   all)
     check_backend
     check_worker
+    check_shadow
     check_ios
     ;;
   *)
-    echo "usage: scripts/check.sh [backend|worker|ios|all]" >&2
+    echo "usage: scripts/check.sh [backend|worker|shadow|ios|all]" >&2
     exit 2
     ;;
 esac

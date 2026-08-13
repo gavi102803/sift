@@ -1,0 +1,10 @@
+"$schema" = "./node_modules/wrangler/config-schema.json"
+name = "sift-ai-sdk-shadow"
+main = "src/worker.ts"
+compatibility_date = "2026-08-13"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+preview_urls = true
+
+[observability]
+enabled = false

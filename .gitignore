@@ -13,6 +13,10 @@ __pycache__/
 /cloudflare/node_modules/
 /cloudflare/python_modules/
 /cloudflare/src/vendor/
+/cloudflare-ai-sdk-shadow/.dev.vars
+/cloudflare-ai-sdk-shadow/.wrangler/
+/cloudflare-ai-sdk-shadow/.wrangler-dist/
+/cloudflare-ai-sdk-shadow/node_modules/
 
 # Local launch-film sources, screenshots, renders, and promotional exports.
 /video/sift-launch-film/

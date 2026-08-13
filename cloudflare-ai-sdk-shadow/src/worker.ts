@@ -1,0 +1,192 @@
+import { AiSdkAgentEngine } from "./ai-sdk-engine.ts";
+import { evalRequestSchema, type EvalKind, type SiftAgentEvent } from "./contracts.ts";
+import { RequestError } from "./errors.ts";
+import {
+  createProviderModel,
+  readProviderRequest,
+  type ProviderEnvironment,
+} from "./providers.ts";
+
+export interface Env extends ProviderEnvironment {
+  SIFT_SHADOW_TOKEN: string;
+}
+
+const JSON_HEADERS = {
+  "cache-control": "no-store",
+  "content-type": "application/json; charset=utf-8",
+  "x-content-type-options": "nosniff",
+};
+
+const STREAM_HEADERS = {
+  "cache-control": "no-store, no-transform",
+  "content-type": "application/x-ndjson; charset=utf-8",
+  "x-content-type-options": "nosniff",
+};
+
+export async function handleRequest(request: Request, env: Env): Promise<Response> {
+  try {
+    assertConfigured(env);
+    assertAuthorized(request, env);
+    const url = new URL(request.url);
+
+    if (url.pathname === "/health") {
+      if (request.method !== "GET") return methodNotAllowed("GET");
+      return jsonResponse({
+        status: "ok",
+        service: "sift-ai-sdk-shadow",
+        production: false,
+        persistence: false,
+      });
+    }
+
+    const kind = evalKind(url.pathname);
+    if (!kind) return problem(404, "not_found", "Shadow endpoint not found.");
+    if (request.method !== "POST") return methodNotAllowed("POST");
+    requireJSON(request);
+
+    const providerRequest = readProviderRequest(request.headers);
+    const model = createProviderModel(providerRequest, env);
+    const input = evalRequestSchema.safeParse(await readJSON(request));
+    if (!input.success) {
+      return problem(400, "invalid_request", "Shadow evaluation request is invalid.", {
+        issues: input.error.issues.map((issue) => ({ path: issue.path, message: issue.message })),
+      });
+    }
+    if (kind === "initial" && input.data.budget.maxModelCalls < 2) {
+      return problem(
+        400,
+        "invalid_budget",
+        "Initial evaluation requires at least two model calls.",
+      );
+    }
+
+    const responseAbort = new AbortController();
+    const onRequestAbort = () => responseAbort.abort(request.signal.reason);
+    request.signal.addEventListener("abort", onRequestAbort, { once: true });
+    if (request.signal.aborted) responseAbort.abort(request.signal.reason);
+
+    const engine = new AiSdkAgentEngine();
+    const events = engine.execute({
+      kind,
+      request: input.data,
+      model,
+      abortSignal: responseAbort.signal,
+    });
+    return ndjsonResponse(events, responseAbort, () =>
+      request.signal.removeEventListener("abort", onRequestAbort),
+    );
+  } catch (error) {
+    if (error instanceof RequestError) {
+      return problem(error.status, error.code, error.message);
+    }
+    return problem(500, "internal_error", "The shadow Worker could not start the evaluation.");
+  }
+}
+
+export default {
+  fetch: handleRequest,
+} satisfies ExportedHandler<Env>;
+
+function evalKind(pathname: string): EvalKind | undefined {
+  if (pathname === "/v1/eval/initial") return "initial";
+  if (pathname === "/v1/eval/follow-up") return "follow-up";
+  return undefined;
+}
+
+function assertConfigured(env: Env): void {
+  if (!env.SIFT_SHADOW_TOKEN || env.SIFT_SHADOW_TOKEN.length < 24) {
+    throw new RequestError(503, "shadow_not_configured", "Shadow authentication is unavailable.");
+  }
+}
+
+function assertAuthorized(request: Request, env: Env): void {
+  const authorization = request.headers.get("authorization") ?? "";
+  const expected = `Bearer ${env.SIFT_SHADOW_TOKEN}`;
+  if (!constantTimeEqual(authorization, expected)) {
+    throw new RequestError(401, "unauthorized", "Shadow authorization failed.");
+  }
+}
+
+function constantTimeEqual(left: string, right: string): boolean {
+  const length = Math.max(left.length, right.length);
+  let difference = left.length ^ right.length;
+  for (let index = 0; index < length; index += 1) {
+    difference |= (left.charCodeAt(index) || 0) ^ (right.charCodeAt(index) || 0);
+  }
+  return difference === 0;
+}
+
+function requireJSON(request: Request): void {
+  if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
+    throw new RequestError(415, "unsupported_media_type", "Content-Type must be application/json.");
+  }
+}
+
+async function readJSON(request: Request): Promise<unknown> {
+  const declaredLength = Number(request.headers.get("content-length") ?? "0");
+  if (declaredLength > 1_048_576) {
+    throw new RequestError(413, "request_too_large", "Shadow request exceeds 1 MiB.");
+  }
+  const body = await request.text();
+  if (new TextEncoder().encode(body).byteLength > 1_048_576) {
+    throw new RequestError(413, "request_too_large", "Shadow request exceeds 1 MiB.");
+  }
+  try {
+    return JSON.parse(body) as unknown;
+  } catch {
+    throw new RequestError(400, "invalid_json", "Request body is not valid JSON.");
+  }
+}
+
+function ndjsonResponse(
+  events: AsyncIterable<SiftAgentEvent>,
+  abortController: AbortController,
+  dispose: () => void,
+): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        for await (const event of events) {
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        }
+        controller.close();
+      } catch {
+        controller.error(new Error("shadow_stream_failed"));
+      } finally {
+        dispose();
+      }
+    },
+    cancel() {
+      abortController.abort("shadow-client-disconnected");
+      dispose();
+    },
+  });
+  return new Response(stream, { status: 200, headers: STREAM_HEADERS });
+}
+
+function methodNotAllowed(allow: string): Response {
+  return problem(405, "method_not_allowed", "Method is not allowed.", undefined, {
+    allow,
+  });
+}
+
+function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
+  return new Response(JSON.stringify(body), {
+    ...init,
+    headers: { ...JSON_HEADERS, ...init.headers },
+  });
+}
+
+function problem(
+  status: number,
+  code: string,
+  message: string,
+  details?: unknown,
+  headers?: HeadersInit,
+): Response {
+  return jsonResponse(
+    { error: { code, message, ...(details === undefined ? {} : { details }) } },
+    { status, headers },
+  );
+}

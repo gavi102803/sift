@@ -14,33 +14,19 @@ struct RecordView: View {
     @StateObject private var speechCapture = SpeechCaptureService()
 
     var body: some View {
-        GeometryReader { geometry in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    captureHero(
-                        minHeight: max(
-                            460,
-                            geometry.size.height - SiftLayout.tabBarClearance - 48
-                        )
-                    )
-                    if let errorMessage {
-                        InlineErrorView(message: errorMessage) {
-                            Task {
-                                await refreshConcepts()
-                            }
-                        }
+        VStack(alignment: .leading, spacing: 24) {
+            captureHero
+            if let errorMessage {
+                InlineErrorView(message: errorMessage) {
+                    Task {
+                        await refreshConcepts()
                     }
                 }
-                .padding(.horizontal, 24)
-                .padding(.bottom, SiftLayout.tabBarClearance + 84)
             }
-            .scrollContentBackground(.hidden)
-            .refreshable {
-                await refreshConcepts()
-            }
-            .safeAreaInset(edge: .bottom) {
-                captureComposer
-            }
+        }
+        .padding(.horizontal, 24)
+        .safeAreaInset(edge: .bottom) {
+            captureComposer
         }
         .siftScreenBackground()
         .navigationBarHidden(true)
@@ -49,7 +35,7 @@ struct RecordView: View {
         }
     }
 
-    private func captureHero(minHeight: CGFloat) -> some View {
+    private var captureHero: some View {
         VStack(spacing: 18) {
             Spacer(minLength: 0)
             SiftSymbol(size: 98)
@@ -69,7 +55,7 @@ struct RecordView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity)
-        .frame(minHeight: minHeight)
+        .frame(maxHeight: .infinity)
     }
 
     private var captureComposer: some View {
@@ -108,9 +94,7 @@ struct RecordView: View {
             )
 
             Button {
-                Task {
-                    await captureConcept()
-                }
+                submitCapture()
             } label: {
                 Group {
                     if isSubmitting {
@@ -152,7 +136,17 @@ struct RecordView: View {
         !captureText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private func captureConcept() async {
+    private func submitCapture() {
+        guard !isSubmitting else { return }
+        let rawCapture = captureText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawCapture.isEmpty else { return }
+        isSubmitting = true
+        Task {
+            await captureConcept(rawCapture: rawCapture)
+        }
+    }
+
+    private func captureConcept(rawCapture: String) async {
         speechCapture.stop()
         let service = CaptureFlowService(
             localStore: ConceptLocalStore(modelContext: modelContext),
@@ -160,22 +154,19 @@ struct RecordView: View {
         )
         let draft: Concept
 
-        isSubmitting = true
+        defer { isSubmitting = false }
         errorMessage = nil
         do {
-            switch try service.resolveCapture(rawCapture: captureText) {
+            switch try service.resolveCapture(rawCapture: rawCapture) {
             case .empty:
-                isSubmitting = false
                 return
             case .existing(let concept):
                 captureText = ""
                 onOpenConcept(concept.id, .followUp)
-                isSubmitting = false
                 return
             case .needsDisambiguation(_, let matches):
                 errorMessage = "Possible matches found: \(matches.prefix(3).map(\.displayTitle).joined(separator: ", ")). Review this saved draft before generating."
                 captureText = ""
-                isSubmitting = false
                 return
             case .newDraft(let newDraft):
                 draft = newDraft
@@ -183,13 +174,11 @@ struct RecordView: View {
         } catch {
             errorMessage = "Sift couldn’t start that capture. Try again."
             companion?.note(error)
-            isSubmitting = false
             return
         }
 
         captureText = ""
         onOpenConcept(draft.id, .followUp)
-        isSubmitting = false
         onGenerateConcept(draft)
     }
 

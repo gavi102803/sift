@@ -4,6 +4,51 @@ import XCTest
 
 final class ProductLogicTests: XCTestCase {
 
+    @MainActor
+    func testStreamingTextSmootherRevealsNetworkChunksInSmallOrderedFragments() async throws {
+        var fragments: [String] = []
+        let smoother = StreamingTextSmoother(
+            charactersPerTick: 4,
+            tickInterval: .zero,
+            sleeper: { _ in },
+            onFragment: { fragments.append($0) }
+        )
+
+        smoother.append("abcdefgh")
+        smoother.append("中文流式输出")
+        try await smoother.finish()
+
+        XCTAssertEqual(fragments, ["abcd", "efgh", "中文流式", "输出"])
+        XCTAssertEqual(fragments.joined(), "abcdefgh中文流式输出")
+    }
+
+    @MainActor
+    func testStreamingTextSmootherAcceptsMoreNetworkDataWhilePresentationIsSleeping() async throws {
+        let sleepStarted = expectation(description: "presentation sleep started")
+        sleepStarted.assertForOverFulfill = false
+        let releaseSleep = AsyncStream<Void>.makeStream()
+        var fragments: [String] = []
+        let smoother = StreamingTextSmoother(
+            charactersPerTick: 4,
+            tickInterval: .milliseconds(24),
+            sleeper: { _ in
+                sleepStarted.fulfill()
+                for await _ in releaseSleep.stream.prefix(1) {}
+            },
+            onFragment: { fragments.append($0) }
+        )
+
+        smoother.append("abcdefgh")
+        await fulfillment(of: [sleepStarted], timeout: 1)
+        smoother.append("ijkl")
+        releaseSleep.continuation.yield()
+        releaseSleep.continuation.yield()
+        releaseSleep.continuation.finish()
+        try await smoother.finish()
+
+        XCTAssertEqual(fragments.joined(), "abcdefghijkl")
+    }
+
     func testArchiveSelectionPlanSeparatesLocalDraftsFromBackendConcepts() {
         let ready = Concept(
             canonicalTitle: "Ready",
@@ -47,22 +92,71 @@ final class ProductLogicTests: XCTestCase {
         XCTAssertTrue(plan.confirmationMessage.contains("cannot be restored"))
     }
 
+    func testBackendFailedConceptIsArchivedRemotely() {
+        let failed = Concept(
+            canonicalTitle: "Failed remotely",
+            displayTitle: "Failed remotely",
+            captureStatus: CaptureStatus.generationFailed.rawValue
+        )
+
+        let plan = ConceptArchiveSelectionPlan(
+            concepts: [failed],
+            backendConceptIds: [failed.id]
+        )
+
+        XCTAssertEqual(plan.remoteConceptIds, [failed.id])
+        XCTAssertTrue(plan.localDraftIds.isEmpty)
+        XCTAssertEqual(plan.confirmationActionTitle, "Move to Recently Deleted")
+    }
+
+    func testUnknownFailedConceptRequiresBackendRefreshBeforeDeletion() {
+        let failed = Concept(
+            canonicalTitle: "Failed remotely",
+            displayTitle: "Failed remotely",
+            captureStatus: CaptureStatus.generationFailed.rawValue
+        )
+        let review = Concept(
+            canonicalTitle: "Local review",
+            displayTitle: "Local review",
+            captureStatus: CaptureStatus.needsDisambiguation.rawValue
+        )
+
+        XCTAssertTrue(
+            ConceptArchiveSelectionPlan.requiresBackendRefresh(
+                concepts: [failed],
+                backendConceptIds: []
+            )
+        )
+        XCTAssertTrue(
+            ConceptArchiveSelectionPlan.requiresBackendRefresh(
+                concepts: [failed],
+                backendConceptIds: [failed.id]
+            )
+        )
+        XCTAssertFalse(
+            ConceptArchiveSelectionPlan.requiresBackendRefresh(
+                concepts: [review],
+                backendConceptIds: []
+            )
+        )
+    }
+
     func testCitationMarkupReplacesRetrievalPositionsWithSourceTitles() {
         let citations = [
             CitationDTO(
-                sourceId: "src_003",
+                sourceId: "3f2ab7e0-0000-4xxx-yyyy-000000000001",
                 title: "Agent Client Protocol",
                 url: "https://example.com/acp"
             ),
             CitationDTO(
-                sourceId: "src_005",
+                sourceId: "3f2ab7e0-0000-4xxx-yyyy-000000000002",
                 title: "ACP Documentation",
                 url: "https://example.com/docs"
             )
         ]
 
         let blocks = CitationMarkup.blocks(
-            in: "ACP standardizes agent communication [3][5].",
+            in: "ACP standardizes agent communication [1][2].",
             citations: citations
         )
 
@@ -73,12 +167,12 @@ final class ProductLogicTests: XCTestCase {
 
     func testCitationMarkupRemovesUnknownNumericReferences() {
         let citation = CitationDTO(
-            sourceId: "src_003",
+            sourceId: "3f2ab7e0-0000-4xxx-yyyy-000000000001",
             title: "Agent Client Protocol",
             url: "https://example.com/acp"
         )
 
-        let blocks = CitationMarkup.blocks(in: "Known [3], stale [9].", citations: [citation])
+        let blocks = CitationMarkup.blocks(in: "Known [1], stale [9].", citations: [citation])
 
         XCTAssertEqual(blocks[0].text, "Known, stale.")
         XCTAssertEqual(blocks[0].citations.map(\.title), ["Agent Client Protocol"])
@@ -328,6 +422,28 @@ final class ProductLogicTests: XCTestCase {
         XCTAssertNotEqual(CompanionCopy.hint(for: .unreachable), CompanionCopy.hint(for: .companionError))
     }
 
+    func testCredentialPlaceholderUsesSavedPreviewWhenCatalogHasNone() {
+        let preview = CredentialFieldPresentation.preview(
+            selectedProviderID: "deepseek",
+            savedProviderID: "deepseek",
+            savedPreview: "***1234",
+            catalogPreview: nil
+        )
+
+        XCTAssertEqual(
+            CredentialFieldPresentation.placeholder(preview: preview),
+            "•••••••••••• ***1234"
+        )
+        XCTAssertNil(
+            CredentialFieldPresentation.preview(
+                selectedProviderID: "openai",
+                savedProviderID: "deepseek",
+                savedPreview: "***1234",
+                catalogPreview: nil
+            )
+        )
+    }
+
     /// Mock and unavailable are never the same surface.
     func testMockAndUnavailableAreDistinguishable() {
         XCTAssertNotEqual(CompanionStatus.mock.developerLabel, CompanionStatus.unavailable.developerLabel)
@@ -354,11 +470,62 @@ final class ProductLogicTests: XCTestCase {
             ConversationTimeline.resolvedAssistantContent(streamed: "", finalAnswer: "The full answer."),
             "The full answer."
         )
-        // Streamed text is kept only if the final answer is somehow empty.
+        // Once visible deltas exist, keep that exact string at the terminal
+        // boundary so SwiftUI does not replace the whole rendered answer.
         XCTAssertEqual(
-            ConversationTimeline.resolvedAssistantContent(streamed: "partial", finalAnswer: ""),
-            "partial"
+            ConversationTimeline.resolvedAssistantContent(
+                streamed: "The streamed answer.",
+                finalAnswer: "A differently normalized terminal answer."
+            ),
+            "The streamed answer."
         )
+    }
+
+    func testTerminalStatusChangeDoesNotTriggerAnotherScroll() {
+        let id = UUID()
+        let streaming = ConceptHistoryTurnDTO(
+            id: id,
+            role: "assistant",
+            content: "The streamed answer.",
+            status: "streaming"
+        )
+        let completed = ConceptHistoryTurnDTO(
+            id: id,
+            role: "assistant",
+            content: "The streamed answer.",
+            status: "completed"
+        )
+        let longer = ConceptHistoryTurnDTO(
+            id: id,
+            role: "assistant",
+            content: "The streamed answer. More.",
+            status: "streaming"
+        )
+
+        XCTAssertEqual(
+            ConversationTimeline.scrollSignature(for: streaming),
+            ConversationTimeline.scrollSignature(for: completed)
+        )
+        XCTAssertNotEqual(
+            ConversationTimeline.scrollSignature(for: streaming),
+            ConversationTimeline.scrollSignature(for: longer)
+        )
+    }
+
+    func testStreamingMarkdownUsesTheFinalMarkdownSourceWithOnlyACaretAdded() {
+        let markdown = "## Current changes\n\n- **Tracing** is live\n- Use `wrangler dev`"
+
+        XCTAssertEqual(
+            MarkdownNormalizer.renderedMarkdown(markdown, streaming: true),
+            "\(markdown) ▌"
+        )
+        XCTAssertEqual(MarkdownNormalizer.renderedMarkdown(markdown, streaming: false), markdown)
+    }
+
+    func testMarkdownNormalizerDoesNotBreakBoldLeadInSentence() {
+        let markdown = "### Runtime update\n\n**Why it matters:** Python runs inside workerd."
+
+        XCTAssertEqual(MarkdownNormalizer.normalize(markdown), markdown)
     }
 
     /// A failed capture keeps the user's original question visible (as the

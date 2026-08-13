@@ -48,9 +48,8 @@ struct ConceptFollowUpView: View {
             }
 
             if isSubmitting,
-               hasStreamingAssistantTurn,
                let progressLabel,
-               turns.last?.content.isEmpty == true {
+               !hasStreamingAssistantTurn || turns.last?.content.isEmpty == true {
                 Text(progressLabel)
                     .font(SiftFont.sans(12, .medium))
                     .foregroundStyle(SiftColor.textMuted)

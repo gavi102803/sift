@@ -107,6 +107,13 @@ enum ProposalCopy {
 /// the local pair is only prepended (as a whole) if the remote somehow lacks
 /// the original question.
 enum ConversationTimeline {
+    /// Auto-scroll follows visible text growth. Status-only changes at the
+    /// terminal boundary must not start another animated scroll.
+    static func scrollSignature(for turn: ConceptHistoryTurnDTO?) -> String {
+        guard let turn else { return "empty" }
+        return "\(turn.id.uuidString)-\(turn.content.count)"
+    }
+
     /// The optimistic initial exchange from locally stored messages: the capture
     /// question and its first answer, tagged `initialCapture`. The `failed`
     /// marker is excluded — a generation failure is surfaced as a retry card,
@@ -162,12 +169,13 @@ enum ConversationTimeline {
     }
 
     /// The assistant content to show once a streamed turn completes. The final
-    /// answer is authoritative and covers terminal-only streams — a retry that
-    /// returns the completed result with no replayed deltas — so an empty
-    /// streamed bubble is never left behind. Streamed text is used only if the
-    /// final answer is empty.
+    /// result covers terminal-only streams — a retry that returns the completed
+    /// result with no replayed deltas. Once deltas are visible, keep their exact
+    /// string across the terminal boundary to avoid replacing the rendered view.
     static func resolvedAssistantContent(streamed: String, finalAnswer: String) -> String {
-        finalAnswer.isEmpty ? streamed : finalAnswer
+        streamed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? finalAnswer
+            : streamed
     }
 
     private static func remoteContainsQuestion(_ remote: [ConceptHistoryTurnDTO], question: String) -> Bool {
@@ -201,23 +209,31 @@ enum MarkdownNormalizer {
     ]
 
     static func normalize(_ text: String) -> String {
-        var normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        for heading in headings {
-            normalized = normalized.replacingOccurrences(
-                of: "**\(heading)**",
-                with: "\n\n**\(heading)**\n\n"
-            )
-            normalized = normalized.replacingOccurrences(
-                of: "\(heading)",
-                with: "\n\n**\(heading)**\n\n"
-            )
-            normalized = normalized.replacingOccurrences(of: "**\n\n**", with: "")
-            normalized = normalized.replacingOccurrences(of: "\n\n\n\n", with: "\n\n")
+        let source = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var lines: [String] = []
+        for line in source.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard let heading = headings.first(where: {
+                trimmed == $0 || trimmed == "**\($0)**"
+            }) else {
+                lines.append(line)
+                continue
+            }
+            lines.append("")
+            lines.append("**\(heading)**")
+            lines.append("")
         }
+        var normalized = lines.joined(separator: "\n")
         while normalized.contains("\n\n\n") {
             normalized = normalized.replacingOccurrences(of: "\n\n\n", with: "\n\n")
         }
         return normalized.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func renderedMarkdown(_ text: String, streaming: Bool) -> String {
+        let normalized = normalize(text)
+        guard streaming else { return normalized }
+        return normalized.isEmpty ? "▌" : "\(normalized) ▌"
     }
 }
 
@@ -345,12 +361,14 @@ struct AssistantMessage: View {
                     .foregroundStyle(SiftColor.textPrimary)
             }
 
-            if isStreaming {
-                MarkdownText(text, streamingCaret: true)
-            } else if let citations = source?.citations, !citations.isEmpty {
-                CitedMarkdownText(text, citations: citations)
+            if let citations = source?.citations, !citations.isEmpty {
+                CitedMarkdownText(
+                    text,
+                    citations: citations,
+                    streamingCaret: isStreaming
+                )
             } else {
-                MarkdownText(text)
+                MarkdownText(text, streamingCaret: isStreaming)
             }
 
             if let source, source.citations?.isEmpty == false {

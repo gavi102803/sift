@@ -6,53 +6,46 @@ import SwiftUI
 /// colors — proper headings, bullet / numbered lists, fenced code blocks,
 /// blockquotes, tables, and thematic breaks, instead of a collapsed `Text`.
 ///
-/// During streaming, render one inline caret outside MarkdownUI. Appending the
-/// caret to the Markdown source can make an incomplete document interpret and
-/// redraw it in more than one block while deltas arrive.
+/// Streaming and completed answers deliberately use the same MarkdownUI
+/// renderer so headings, lists, and paragraph spacing do not jump when the
+/// terminal event arrives.
 struct MarkdownText: View {
     private let content: String
-    private let streamingCaret: Bool
 
     init(_ text: String, streamingCaret: Bool = false) {
-        self.content = MarkdownNormalizer.normalize(text)
-        self.streamingCaret = streamingCaret
+        self.content = MarkdownNormalizer.renderedMarkdown(
+            text,
+            streaming: streamingCaret
+        )
     }
 
-    @ViewBuilder
     var body: some View {
-        if streamingCaret {
-            (Text(streamingText) + Text(" ▌").foregroundColor(SiftColor.accent))
-                .font(SiftFont.body)
-                .foregroundStyle(SiftColor.textSecondary)
-                .lineSpacing(3)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            Markdown(content)
-                .markdownTheme(.sift)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
+        Markdown(content)
+            .markdownTheme(.sift)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var streamingText: AttributedString {
-        (try? AttributedString(markdown: content)) ?? AttributedString(content)
-    }
 }
 
 /// Replaces model-facing numeric citation markers with user-facing source
 /// pills while preserving Markdown rendering for the answer itself.
 struct CitedMarkdownText: View {
     private let blocks: [CitationTextBlock]
+    private let streamingCaret: Bool
 
-    init(_ text: String, citations: [CitationDTO]) {
+    init(_ text: String, citations: [CitationDTO], streamingCaret: Bool = false) {
         blocks = CitationMarkup.blocks(in: text, citations: citations)
+        self.streamingCaret = streamingCaret
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             ForEach(blocks) { block in
-                MarkdownText(block.text)
+                MarkdownText(
+                    block.text,
+                    streamingCaret: streamingCaret && block.id == blocks.last?.id
+                )
 
                 if !block.citations.isEmpty {
                     ScrollView(.horizontal) {
@@ -79,7 +72,6 @@ struct CitationTextBlock: Identifiable {
 
 enum CitationMarkup {
     private static let markerPattern = try! NSRegularExpression(pattern: #"[ \t]?\[(\d+)\]"#)
-    private static let trailingDigitsPattern = try! NSRegularExpression(pattern: #"(\d+)$"#)
 
     static func removingMarkers(from text: String) -> String {
         let range = NSRange(text.startIndex..., in: text)
@@ -93,7 +85,10 @@ enum CitationMarkup {
     static func blocks(in text: String, citations: [CitationDTO]) -> [CitationTextBlock] {
         var citationsByReference: [Int: CitationDTO] = [:]
         for (index, citation) in citations.enumerated() {
-            let reference = referenceNumber(for: citation, fallback: index + 1)
+            // The backend instructs the model to cite by each evidence item's
+            // 1-based position (`[1]`, `[2]`, ...), while `sourceId` is an
+            // opaque id. Map citations by position so those markers resolve.
+            let reference = index + 1
             if citationsByReference[reference] == nil {
                 citationsByReference[reference] = citation
             }
@@ -118,18 +113,6 @@ enum CitationMarkup {
             return CitationTextBlock(id: index, text: cleaned, citations: cited)
         }
         .filter { !$0.text.isEmpty || !$0.citations.isEmpty }
-    }
-
-    private static func referenceNumber(for citation: CitationDTO, fallback: Int) -> Int {
-        guard let sourceId = citation.sourceId else { return fallback }
-        let range = NSRange(sourceId.startIndex..., in: sourceId)
-        guard let match = trailingDigitsPattern.firstMatch(in: sourceId, range: range),
-              let digitsRange = Range(match.range(at: 1), in: sourceId),
-              let number = Int(sourceId[digitsRange])
-        else {
-            return fallback
-        }
-        return number
     }
 }
 

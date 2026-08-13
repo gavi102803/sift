@@ -20,7 +20,6 @@ struct ConceptDetailView: View {
     @Query private var proposals: [ConceptUpdateProposal]
     @Query private var relations: [ConceptRelation]
     @State private var followUpText = ""
-    @State private var lastAnswerSource: AnswerSourceDTO?
     @State private var turns: [ConceptHistoryTurnDTO] = []
     @State private var conceptTagNames: [String] = []
     @State private var conceptTopicNames: [String] = []
@@ -80,8 +79,7 @@ struct ConceptDetailView: View {
     }
 
     private var lastTurnSignature: String {
-        guard let last = turns.last else { return "empty" }
-        return "\(last.id.uuidString)-\(last.content.count)-\(last.status ?? "")"
+        ConversationTimeline.scrollSignature(for: turns.last)
     }
 
     private var localConversationSignature: String {
@@ -172,7 +170,10 @@ struct ConceptDetailView: View {
                         scrollToConversationBottom(proxy)
                     }
                     .onChange(of: lastTurnSignature) { _, _ in
-                        scrollToConversationBottom(proxy)
+                        scrollToConversationBottom(
+                            proxy,
+                            streaming: turns.last?.status == "streaming"
+                        )
                     }
                 }
                 .safeAreaInset(edge: .bottom) {
@@ -316,9 +317,14 @@ struct ConceptDetailView: View {
 
     private func scrollToConversationBottom(
         _ proxy: ScrollViewProxy,
-        aggressively: Bool = false
+        aggressively: Bool = false,
+        streaming: Bool = false
     ) {
         guard detailMode == .followUp else { return }
+        if streaming {
+            proxy.scrollTo("conversation-bottom", anchor: .bottom)
+            return
+        }
         withAnimation(aggressively ? nil : .easeOut(duration: 0.22)) {
             proxy.scrollTo("conversation-bottom", anchor: .bottom)
         }
@@ -443,6 +449,7 @@ struct ConceptDetailView: View {
     // MARK: - Follow-up submission
 
     private func submitFollowUp(for concept: Concept, question overrideQuestion: String? = nil) async {
+        guard !isSubmittingFollowUp else { return }
         speechCapture.stop()
         let question = (overrideQuestion ?? followUpText).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty else { return }
@@ -481,9 +488,15 @@ struct ConceptDetailView: View {
         // double-write; a terminal failure releases it (see catch).
         let store = ConceptLocalStore(modelContext: modelContext)
         let operationKey = store.reserveFollowUpOperation(concept: concept, question: question)
+        var activeRunID: UUID?
         do {
+            try modelContext.save()
             var finalResponse: ConceptTurnResponse?
             var completedRun: ModelRunDTO?
+            var textSmoother = StreamingTextSmoother { fragment in
+                appendAssistantDelta(fragment, turnId: assistantTurnId)
+            }
+            defer { textSmoother.cancel() }
             for try await event in appServices.apiClient.streamTurn(
                 conceptId: concept.id,
                 request: ConceptTurnRequest(
@@ -493,21 +506,43 @@ struct ConceptDetailView: View {
                 idempotencyKey: operationKey
             ) {
                 if let run = event.modelRun {
+                    activeRunID = run.id
                     try store.upsertModelRun(run, lastSequence: event.sequence)
                     if run.status == "succeeded" {
                         completedRun = run
                     }
                 }
+                if event.type == "reset" {
+                    textSmoother.cancel()
+                    resetAssistantStream(turnId: assistantTurnId)
+                    textSmoother = StreamingTextSmoother { fragment in
+                        appendAssistantDelta(fragment, turnId: assistantTurnId)
+                    }
+                }
                 if let delta = event.delta, !delta.isEmpty {
-                    appendAssistantDelta(delta, turnId: assistantTurnId)
+                    textSmoother.append(delta)
+                }
+                if let citations = event.citations, !citations.isEmpty {
+                    updateAssistantSources(citations, turnId: assistantTurnId)
                 }
                 if let progressLabel = event.progressLabel {
                     followUpProgressLabel = progressLabel
+                    // After the answer text has started flowing, later progress
+                    // steps ("Checking card update", "Saving answer") mean the
+                    // streamed answer is finished. Flip it out of the streaming
+                    // state now so the message doesn't appear frozen while the
+                    // backend runs its structured-generation step.
+                    if let index = turns.firstIndex(where: { $0.id == assistantTurnId }),
+                       turns[index].status == "streaming",
+                       !turns[index].content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        turns[index].status = "completed"
+                    }
                 }
                 if let response = event.response {
                     finalResponse = response
                 }
             }
+            try await textSmoother.finish()
             try Task.checkCancellation()
             guard let response = finalResponse else {
                 throw SiftStreamingError.incomplete
@@ -526,14 +561,20 @@ struct ConceptDetailView: View {
             }
             store.clearFailedFollowUpDrafts(for: concept, matching: question)
             store.clearFollowUpOperation(concept: concept, key: operationKey)
-            lastAnswerSource = response.answerSource
             // Terminal-only streams (e.g. an idempotent retry) carry no deltas;
             // fall back to the authoritative final answer so no blank bubble remains.
             let streamed = turns.first(where: { $0.id == assistantTurnId })?.content ?? ""
+            let streamedSource = turns.first(where: { $0.id == assistantTurnId })?.answerSource
+            var finalAnswerSource = response.answerSource
+            if finalAnswerSource.citations?.isEmpty != false,
+               let streamedSource,
+               streamedSource.citations?.isEmpty == false {
+                finalAnswerSource.citations = streamedSource.citations
+            }
             replaceAssistantAnswer(
                 ConversationTimeline.resolvedAssistantContent(streamed: streamed, finalAnswer: response.answer),
                 turnId: assistantTurnId,
-                answerSource: response.answerSource
+                answerSource: finalAnswerSource
             )
             followUpProgressLabel = nil
             if replacementIndex == 0 {
@@ -549,6 +590,11 @@ struct ConceptDetailView: View {
             isReadingOffline = false
             maintenanceRunIds = completedRun?.childRunIds ?? []
         } catch is CancellationError {
+            if let activeRunID {
+                _ = await Task {
+                    try? await appServices.apiClient.cancelModelRun(id: activeRunID)
+                }.value
+            }
             if let replacementIndex {
                 turns.removeAll { $0.id == assistantTurnId || $0.id == userTurnId }
                 turns.insert(contentsOf: replacedTail, at: min(replacementIndex, turns.count))
@@ -646,13 +692,32 @@ struct ConceptDetailView: View {
         turns[index].content += delta
     }
 
+    private func resetAssistantStream(turnId: UUID) {
+        guard let index = turns.firstIndex(where: { $0.id == turnId }) else { return }
+        turns[index].content = ""
+        turns[index].status = "streaming"
+    }
+
+    private func updateAssistantSources(_ citations: [CitationDTO], turnId: UUID) {
+        guard let index = turns.firstIndex(where: { $0.id == turnId }) else { return }
+        turns[index].answerSource = AnswerSourceDTO(
+            sourceType: AnswerSourceType.searchDiscovered.rawValue,
+            confidence: 1,
+            uncertaintyNote: nil,
+            retrievalUsed: true,
+            citations: citations
+        )
+    }
+
     private func replaceAssistantAnswer(
         _ answer: String,
         turnId: UUID,
         answerSource: AnswerSourceDTO? = nil
     ) {
         guard let index = turns.firstIndex(where: { $0.id == turnId }) else { return }
-        turns[index].content = answer
+        if turns[index].content != answer {
+            turns[index].content = answer
+        }
         turns[index].status = "completed"
         if let answerSource {
             turns[index].answerSource = answerSource

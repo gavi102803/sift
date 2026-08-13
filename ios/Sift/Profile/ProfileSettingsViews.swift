@@ -1,5 +1,23 @@
 import SwiftUI
 
+enum CredentialFieldPresentation {
+    static func preview(
+        selectedProviderID: String,
+        savedProviderID: String?,
+        savedPreview: String?,
+        catalogPreview: String?
+    ) -> String? {
+        if selectedProviderID == savedProviderID, let savedPreview {
+            return savedPreview
+        }
+        return catalogPreview
+    }
+
+    static func placeholder(preview: String?) -> String {
+        preview.map { "•••••••••••• \($0)" } ?? "API Key"
+    }
+}
+
 // MARK: - Active Model (standard providers)
 
 struct ModelProviderSettingsView: View {
@@ -158,13 +176,14 @@ struct ModelProviderSettingsView: View {
     }
 
     private var apiKeyPlaceholder: String {
-        // Only reflect the *selected* provider's saved key. A provider with no
-        // configured key shows an empty "API Key" placeholder — never the
-        // previously-active provider's masked key.
-        if let preview = selectedProvider?.apiKeyPreview {
-            return "•••••••••••• \(preview)"
-        }
-        return "API Key"
+        CredentialFieldPresentation.placeholder(
+            preview: CredentialFieldPresentation.preview(
+                selectedProviderID: providerType,
+                savedProviderID: settings?.providerType,
+                savedPreview: settings?.apiKeyPreview,
+                catalogPreview: selectedProvider?.apiKeyPreview
+            )
+        )
     }
 
     private var canSave: Bool {
@@ -211,8 +230,15 @@ struct ModelProviderSettingsView: View {
         defer { isLoadingModels = false }
         errorMessage = nil
         do {
-            _ = try await save(silent: true)
-            providerModels = try await appServices.apiClient.listProviderModels().models
+            providerModels = try await appServices.apiClient.previewProviderModels(
+                UpdateModelProviderSettingsRequest(
+                    providerType: providerType,
+                    baseURL: baseURL.trimmingCharacters(in: .whitespacesAndNewlines),
+                    apiKey: apiKey.isEmpty ? nil : apiKey,
+                    explainModel: model.trimmingCharacters(in: .whitespacesAndNewlines),
+                    webSearchEnabled: settings?.webSearchEnabled ?? true
+                )
+            ).models
         } catch is CancellationError {
             return
         } catch {
@@ -322,7 +348,7 @@ struct WebSearchSettingsView: View {
                 ) {
                     Task { await save() }
                 }
-                .disabled(isSaving || selectedProvider?.status == "comingSoon")
+                .disabled(isSaving || selectedProvider?.status == "comingSoon" || !canSave)
                 .padding(.top, 6)
 
                 if let errorMessage {
@@ -358,13 +384,20 @@ struct WebSearchSettingsView: View {
     }
 
     private var apiKeyPlaceholder: String {
-        // Only reflect the *selected* provider's saved key. A provider with no
-        // configured key shows an empty "API Key" placeholder — never the
-        // previously-active provider's masked key.
-        if let preview = selectedProvider?.apiKeyPreview {
-            return "•••••••••••• \(preview)"
-        }
-        return "API Key"
+        CredentialFieldPresentation.placeholder(
+            preview: CredentialFieldPresentation.preview(
+                selectedProviderID: providerType,
+                savedProviderID: settings?.providerType,
+                savedPreview: settings?.apiKeyPreview,
+                catalogPreview: selectedProvider?.apiKeyPreview
+            )
+        )
+    }
+
+    private var canSave: Bool {
+        guard selectedProvider?.requiresApiKey == true else { return true }
+        return !apiKey.isEmpty
+            || (providerType == settings?.providerType && settings?.apiKeyConfigured == true)
     }
 
     private func load() async {

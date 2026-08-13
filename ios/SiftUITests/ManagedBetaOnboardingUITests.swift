@@ -48,6 +48,22 @@ final class ManagedBetaOnboardingUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["UI Test Concept"].waitForExistence(timeout: 10))
     }
 
+    func testCaptureScreenDoesNotScrollVertically() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["SIFT_BACKEND_BASE_URL"] = "http://127.0.0.1:\(server.port)"
+        app.launchEnvironment["SIFT_UI_TEST_IN_MEMORY"] = "1"
+        app.launch()
+
+        let heading = app.staticTexts["What new concept did you hear?"]
+        XCTAssertTrue(heading.waitForExistence(timeout: 5))
+        let initialY = heading.frame.minY
+
+        app.swipeUp()
+        XCTAssertEqual(heading.frame.minY, initialY, accuracy: 1)
+        app.swipeDown()
+        XCTAssertEqual(heading.frame.minY, initialY, accuracy: 1)
+    }
+
     func testInitialModelRunCompletesAfterAppTerminationAndReconcilesOnRelaunch() throws {
         server.setRunCompleted(false)
         let app = XCUIApplication()
@@ -502,7 +518,7 @@ private final class LocalHTTPServer: @unchecked Sendable {
                 .first { $0.lowercased().hasPrefix("idempotency-key:") }
                 .map { String($0.split(separator: ":", maxSplits: 1)[1]).trimmingCharacters(in: .whitespaces) }
         }
-        if method == "POST", path.hasSuffix("/resume") {
+        if method == "POST", path.hasSuffix("/resume") || path.hasSuffix("/resume-stream") {
             let providerKey = request
                 .components(separatedBy: "\r\n")
                 .first { $0.lowercased().hasPrefix("x-sift-provider-key:") }
@@ -577,8 +593,26 @@ private final class LocalHTTPServer: @unchecked Sendable {
         if method == "GET", path.hasPrefix("/v1/model-runs/") {
             return .json(modelRunJSON)
         }
+        if method == "POST", isPeriodicReview,
+           path.contains("00000000-0000-0000-0000-000000000303"),
+           path.hasSuffix("/resume") {
+            return .json(periodicReviewRunJSON)
+        }
         if method == "POST", path.hasPrefix("/v1/model-runs/"), path.hasSuffix("/resume") {
             return .json(modelRunJSON)
+        }
+        if method == "POST", path.hasPrefix("/v1/model-runs/"), path.hasSuffix("/resume-stream") {
+            let body = [
+                "{\"type\":\"progress\",\"progressLabel\":\"Writing first answer\",\"sequence\":2}",
+                "{\"type\":\"delta\",\"delta\":\"A durable \"}",
+                "{\"type\":\"delta\",\"delta\":\"UI test answer.\"}",
+                "{\"type\":\"completed\",\"modelRun\":\(modelRunJSON)}",
+            ].joined(separator: "\n") + "\n"
+            return HTTPResponse(
+                status: "200 OK",
+                contentType: "application/x-ndjson",
+                body: body
+            )
         }
         if method == "POST", path == "/v1/concepts/stream" {
             let body = [

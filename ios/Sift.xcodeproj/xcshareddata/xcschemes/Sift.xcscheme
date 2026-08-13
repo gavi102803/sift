@@ -101,13 +101,6 @@
             ReferencedContainer = "container:Sift.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
-      <EnvironmentVariables>
-         <EnvironmentVariable
-            key = "SIFT_BACKEND_BASE_URL"
-            value = "http://127.0.0.1:8000"
-            isEnabled = "YES">
-         </EnvironmentVariable>
-      </EnvironmentVariables>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"

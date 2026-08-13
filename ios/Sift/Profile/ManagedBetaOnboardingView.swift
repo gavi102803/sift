@@ -99,6 +99,16 @@ struct ManagedBetaOnboardingView: View {
 
                 SiftGroupDivider()
 
+                if providerId == "custom" {
+                    onboardingField("BASE URL") {
+                        TextField("https://…", text: $baseURL)
+                            .keyboardType(.URL)
+                            .accessibilityIdentifier("managed.providerBaseURL")
+                    }
+
+                    SiftGroupDivider()
+                }
+
                 onboardingField("MODEL") {
                     TextField("Model", text: $model)
                 }

@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
 	<key>SIFTBackendBaseURL</key>
-	<string>https://beta.sift.example</string>
+	<string>https://sift-backend.sift-cloudflare-worker-tools.workers.dev</string>
 </dict>
 </plist>

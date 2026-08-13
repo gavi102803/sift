@@ -40,7 +40,10 @@ Backend configuration:
 - Debug builds default to `http://127.0.0.1:8000` for Simulator-friendly local MVP runs.
 - Set the `SIFT_BACKEND_BASE_URL` environment variable in the Xcode scheme to override the backend.
 - For iOS Simulator, use the Mac host URL, for example `http://127.0.0.1:8000`.
-- For a physical device, use the Mac's LAN address, for example `http://192.168.1.10:8000`.
+- For a physical device, publish the Mac loopback service with Tailscale Serve
+  and save its `https://<mac-machine>.<tailnet>.ts.net` URL in Profile >
+  Developer. Do not set a scheme environment override for this path because it
+  takes precedence over the saved Personal URL.
 - Alternatively add an Info.plist string key named `SIFTBackendBaseURL`.
 - SwiftUI previews still use `MockSiftAPIClient` for local UI work.
 
@@ -49,5 +52,7 @@ Validation:
 - Run the shared `Sift` scheme tests in Xcode, or use XcodeBuildMCP `test_sim`.
 - `SiftTests` currently covers capture failure/retry persistence, manual summary and note edit audit records, failed follow-up recovery drafts, local failed captures surviving remote refresh pruning, organization de-duplication, proposals, relation lifecycle, and Library search matching.
 - The Record flow saves a local draft and navigates to its detail immediately; backend generation then updates the card when the model response completes.
-- Follow-up answers use the backend streaming endpoint, so the Conversation answer bubble fills as tokens arrive and the final validated response still updates local concept state.
+- Conversation answers fill incrementally and the final validated response updates
+  local concept state. Personal mode reads the backend stream; Managed mode polls
+  durable ModelRun events while the request-local BYOK resume executes.
 - The Record input supports voice capture through iOS Speech recognition. Simulator microphone behavior can vary; validate dictation on a real device before release.

@@ -20,8 +20,10 @@ From the repository root:
 scripts/check.sh all
 ```
 
-CI calls the same script with `backend` and `ios` targets. A release candidate is not valid unless
-both targets pass from a clean checkout.
+CI calls the same script with `backend`, `worker`, and `ios` targets. The `backend` target is the
+Personal/Local Companion compatibility gate; the `worker` target is the Managed production
+backend gate. A release candidate is not valid unless all applicable targets pass from a clean
+checkout.
 
 CI installs the Python 3.12 dependency set from `backend/requirements.lock`, then installs the
 backend package without resolving a second dependency graph. Regenerate the lock only when
@@ -52,7 +54,8 @@ The authoritative contract is `docs/contracts/managed-byok-beta.md`.
 
 ## Baseline Gates
 
-- Backend lint, tests, and Alembic upgrade pass through `scripts/check.sh backend`.
+- Personal Companion lint, tests, and Alembic upgrade pass through `scripts/check.sh backend`.
+- Managed Worker lint, tests, and D1 migration coverage pass through `scripts/check.sh worker`.
 - iOS build and unit tests pass through `scripts/check.sh ios`.
 - Personal and Managed behavior remain separate build/runtime modes.
 - Planned Managed gates are never represented as completed until their contract tests pass.

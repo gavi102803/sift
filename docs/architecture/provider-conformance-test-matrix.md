@@ -21,14 +21,17 @@ Stable target set:
 
 Executable harness:
 
-- `backend/src/sift_backend/runtime/conformance.py`
-- `backend/src/sift_backend/runtime/live_conformance.py`
-- `backend/tests/test_provider_conformance.py`
-- `backend/tests/test_live_conformance.py`
+- `cloudflare/verification/live_conformance.py`
+- `cloudflare/src/sift_worker/runtime.py`
+- `cloudflare/tests/test_live_conformance.py`
+- `cloudflare/tests/test_runtime.py`
 
-Current automated coverage includes plain completion, streaming, structured-output
-strategy probing, parameter-policy resolution, and model-list verification. Product
-flows remain covered by Sift E2E smoke tests.
+The Cloudflare Worker is the production runtime authority. Current automated coverage includes
+plain completion, provider-native incremental streaming, structured-card validation, autonomous
+tool selection, native tool-call/tool-result round trips, model-call latency/token observation,
+forced tool-capability probing, and model-list verification. The older
+`backend/` conformance runner remains a Personal/Local Companion compatibility check and must not
+be used as evidence that the production Worker passed.
 
 | Case | Requirement |
 | --- | --- |
@@ -37,6 +40,8 @@ flows remain covered by Sift E2E smoke tests.
 | Structured output | Resolved strategy works: `jsonSchema`, `jsonObject`, or `promptAndValidate`. |
 | Parameter policy | Disallowed params are omitted; fixed params are fixed; token field is correct. |
 | Model list | Provider model listing returns the configured model or a deliberate no-listing policy. |
+| Tool result round trip | Tool observations use the provider-native result message and stay bounded and untrusted. |
+| Call telemetry | Every attempted model call records lifecycle and latency; token counts are recorded only when reported by the provider. |
 | Initial capture | Capture creates one Concept and one visible user Turn. |
 | Follow-up continuity | Follow-up sees the concept memory and prior turns. |
 | Candidate update | Candidate updates validate and persist as pending/confirmed according to mutation policy. |
@@ -59,16 +64,20 @@ flows remain covered by Sift E2E smoke tests.
 
 Model Driver Conformance must not depend on DDGS, page extraction, or public web reliability.
 
-Live runner:
+Production Worker live runner:
 
 ```bash
-python -m sift_backend.runtime.live_conformance --provider deepseek
+cd cloudflare
+SIFT_LIVE_PROVIDER=deepseek \
+SIFT_LIVE_MODEL=deepseek-chat \
+SIFT_LIVE_API_KEY=... \
+PYTHONPATH=.:src python -m verification.live_conformance
 ```
 
-The live runner only reads explicit `SIFT_TEST_*` variables, writes probe cache to
-`SIFT_CAPABILITY_PROBE_CACHE_PATH` or `/tmp/sift-live-conformance-probes.json`,
-and never reads or mutates Sift Profile settings. If every selected provider is
-skipped because credentials are missing, the command exits non-zero.
+The live runner only reads explicit `SIFT_LIVE_*` variables, writes a redacted result to
+`cloudflare/.data/live-conformance.json`, and never reads or mutates Sift Profile settings. It
+exits non-zero when credentials are missing, streaming collapses into one terminal chunk, the
+structured card fails, or a tool-capable model does not autonomously request Web Search.
 
 ## B. Research Stack Conformance
 
@@ -89,6 +98,27 @@ Run against one or two Stable providers after Model Driver and Research Stack co
 - Follow-up -> proposal -> retry idempotency.
 - Capture failure -> original query visible -> retry uses same Concept/Turn.
 
+The executable Managed production gate is `cloudflare/verification/production_e2e.py`. It uses
+the same durable `concept-runs -> resume-stream` path as iOS and fails unless it observes at least
+two live deltas, the current AgentSpec and tool-contract hash, a `web.search` event, persisted
+citations, one new run, one new card, exactly one user/assistant turn pair, and idempotent replay.
+Use a dedicated one-time invite or dedicated beta session; the verifier intentionally leaves the
+created card durable as product evidence and never writes credentials into its artifact.
+The manually dispatched `live-conformance.yml` workflow runs this gate after provider conformance
+using a dedicated `SIFT_E2E_SESSION_TOKEN`; missing session or provider credentials fail the job
+instead of skipping it.
+
+```bash
+cd cloudflare
+SIFT_E2E_BASE_URL=https://sift-backend.example.workers.dev \
+SIFT_E2E_INSTALLATION_ID=dedicated-e2e-installation \
+SIFT_E2E_INVITE_CODE=... \
+SIFT_E2E_PROVIDER=deepseek \
+SIFT_E2E_MODEL=deepseek-chat \
+SIFT_E2E_PROVIDER_API_KEY=... \
+PYTHONPATH=.:src python -m verification.production_e2e
+```
+
 ## Test Isolation Rules
 
 - Unit tests use temp settings paths.
@@ -103,20 +133,9 @@ Run against one or two Stable providers after Model Driver and Research Stack co
 
 ## Live Credential Names
 
-Suggested live test variables:
-
-- `SIFT_TEST_OPENAI_API_KEY`
-- `SIFT_TEST_ANTHROPIC_API_KEY`
-- `SIFT_TEST_GEMINI_API_KEY`
-- `SIFT_TEST_DEEPSEEK_API_KEY`
-- `SIFT_TEST_OPENROUTER_API_KEY`
-- `SIFT_TEST_KIMI_API_KEY`
-- `SIFT_TEST_NOUS_API_KEY`
-- `SIFT_TEST_CUSTOM_BASE_URL`
-- `SIFT_TEST_CUSTOM_API_KEY`
-- `SIFT_TEST_TAVILY_API_KEY`
-- `SIFT_TEST_EXA_API_KEY`
-- `SIFT_TEST_FIRECRAWL_API_KEY`
+The production Worker runner uses only `SIFT_LIVE_PROVIDER`, `SIFT_LIVE_BASE_URL`,
+`SIFT_LIVE_MODEL`, and `SIFT_LIVE_API_KEY`. `SIFT_TEST_*` variables belong to the legacy
+Personal/Local Companion runner and are not production evidence.
 
 ## Research Stack Tests
 

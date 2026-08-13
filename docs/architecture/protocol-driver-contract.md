@@ -2,6 +2,12 @@
 
 Date: 2026-06-27
 
+Authority: this document is a target protocol design plus a record of the older Personal backend
+drivers. The Managed production subset is implemented only by
+`cloudflare/src/sift_worker/runtime.py` and `tool_contracts.py`. Backend driver paths named below
+are compatibility/reference implementations and cannot be used as production conformance
+evidence.
+
 Sift maintains drivers by protocol, not by provider. Provider presets resolve to a driver plus capability policy.
 
 ```text

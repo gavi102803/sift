@@ -8,21 +8,25 @@ Pinned upstream:
 - Commit: `bb6a4d2a57f3f239a2a6d74cb2dec9534a20e607`
 - Commit date: 2026-06-26T17:17:43Z
 
-This manifest is the pinned source of truth for Sift's provider preset registry. It does not mean Sift vendors Hermes runtime code.
+This manifest is a pinned upstream reference catalog, not the executable Sift registry. It does
+not mean Sift vendors Hermes runtime code. For Managed production, the only executable provider
+registry is `cloudflare/src/sift_worker/runtime.py::PROVIDER_PROFILES`, and only Worker tests and
+Worker live/app conformance can promote a provider. The older `backend/` registry remains a
+Personal/Local Companion compatibility surface.
 
 Current decision: Sift is Hermes-informed, not Hermes-integrated. Every row currently has `Sift current upstream reuse = No`. Any provider-specific behavior Sift adopts must be implemented as a ported behavior with an upstream path, pinned commit, Sift implementation path, and parity test as defined in [Hermes Reuse Decision Record](/Users/jerry/sift/docs/architecture/hermes-reuse-decision-record.md).
 
 ## Exposure Tiers
 
 - Planned Stable: intended for normal Sift Profile exposure, but not yet fully cleared by live conformance and app E2E.
-- Stable: passed live provider conformance and app E2E for the configured default model.
+- Stable: passed production Worker live provider conformance and Managed app E2E for the configured default model.
 - Advanced: available behind advanced provider configuration.
 - Hidden: present only for internal/test/migration use.
 - Deferred: not exposed in current Sift Profile.
 
 ## Model Providers
 
-| Provider | Hermes upstream path at pinned SHA | Hermes `api_mode` | Native protocol adapter in Hermes | Auth | Suitable for Sift backend | Sift current upstream reuse | Sift driver mapping | User exposure |
+| Provider | Hermes upstream path at pinned SHA | Hermes `api_mode` | Native protocol adapter in Hermes | Auth | Suitable for Sift backend | Sift current upstream reuse | Intended protocol mapping; Worker support still requires conformance | User exposure |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | OpenAI | No plugin under `plugins/model-providers`; Sift preset uses Hermes base `ProviderProfile` contract | `chat_completions` for current Sift preset | Standard OpenAI-compatible transport, not provider plugin | API key | Yes | No | `ChatCompletionsDriver`; later `ResponsesDriver` for OpenAI Responses preset | Planned Stable |
 | Anthropic | `plugins/model-providers/anthropic/__init__.py` | `anthropic_messages` | Yes, native Messages protocol | API key; Hermes profile also lists Anthropic token aliases | Yes | No | `AnthropicMessagesDriver` | Planned Stable |

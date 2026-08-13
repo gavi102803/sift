@@ -2,6 +2,11 @@
 
 Date: 2026-06-27
 
+Scope: historical Personal/Local Companion backend hardening record. Managed production now uses
+the Cloudflare Worker Harness in `cloudflare/src/sift_worker/`; this document is not evidence of
+Managed implementation or release readiness. In particular, the Known Gaps section records the
+older backend state at this document's date.
+
 This phase keeps Sift Hermes-informed, not Hermes-vendored. Sift owns runtime policy,
 knowledge mutation policy, persistence, credentials, and product semantics.
 

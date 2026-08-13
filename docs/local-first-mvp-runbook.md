@@ -23,11 +23,18 @@ The iOS Simulator should use:
 http://127.0.0.1:8000
 ```
 
-For iPhone + Tailscale personal dogfood, bind the backend to all local
-interfaces on the Mac:
+For iPhone + Tailscale personal dogfood, keep the backend on Mac loopback and
+publish it privately through Tailscale Serve:
 
 ```bash
-scripts/run_local_companion.sh --tailnet
+scripts/run_local_companion.sh
+```
+
+In another terminal:
+
+```bash
+tailscale serve --bg http://127.0.0.1:8000
+tailscale serve status
 ```
 
 Then configure the Debug/Personal iOS build with your Tailscale HTTPS name:
@@ -86,6 +93,10 @@ iPhone + Mac
 → https://<mac-machine>.<tailnet>.ts.net
 → Sift backend running on the Mac
 ```
+
+The shared Debug scheme intentionally does not set `SIFT_BACKEND_BASE_URL`.
+Simulator builds therefore use the built-in localhost default, while a
+physical iPhone can use the Personal backend URL saved in Profile > Developer.
 
 Do not expose the local backend publicly for this MVP. See
 `docs/contracts/personal-tailnet-dogfood.md` for the Debug/Personal build

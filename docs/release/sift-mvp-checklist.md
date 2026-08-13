@@ -1,7 +1,12 @@
 # Sift MVP Release Checklist
 
 Date: 2026-06-24
-Status: Internal MVP validation
+Status: Historical Personal MVP validation; not a Managed production release checklist
+
+The localhost/FastAPI steps below apply only to Personal/Local Companion. Managed production uses
+the Cloudflare Worker and must pass `scripts/check.sh worker`, production health/auth probes, real
+provider streaming, autonomous Web Search with citations, one-query/one-run/one-card idempotency,
+and signed-device validation. Passing this historical checklist does not satisfy those gates.
 
 ## Required Local Setup
 

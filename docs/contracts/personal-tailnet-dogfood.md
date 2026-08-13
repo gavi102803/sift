@@ -66,24 +66,32 @@ Phase 0 keeps the local backend behavior:
 3. Run Sift backend on the Mac:
 
    ```bash
-   scripts/run_local_companion.sh --tailnet
+   scripts/run_local_companion.sh
    ```
 
-4. Confirm the Mac has a tailnet name such as:
+4. In another terminal, publish the loopback service to the private tailnet
+   with Tailscale Serve:
+
+   ```bash
+   tailscale serve --bg http://127.0.0.1:8000
+   tailscale serve status
+   ```
+
+5. Confirm Tailscale reports an HTTPS name such as:
 
    ```text
    https://<mac-machine>.<tailnet>.ts.net
    ```
 
-5. In a Debug/Personal iOS build, set Backend URL to that HTTPS address.
-6. Run Test Connection in the app, or run:
+6. In a Debug/Personal iOS build, set Backend URL to that HTTPS address.
+7. Run Test Connection in the app, or run:
 
    ```bash
    scripts/local_mvp_doctor.py --backend-url https://<mac-machine>.<tailnet>.ts.net
    ```
 
-7. Capture a concept and verify it is persisted in the Mac backend SQLite DB.
-8. After a dogfood session, print the privacy-safe reliability summary:
+8. Capture a concept and verify it is persisted in the Mac backend SQLite DB.
+9. After a dogfood session, print the privacy-safe reliability summary:
 
    ```bash
    backend/.venv/bin/python scripts/model_run_metrics.py
@@ -98,7 +106,7 @@ Phase 0 keeps the local backend behavior:
    report does not read or output captures, answers, deltas, Provider keys,
    owner IDs, or error messages.
 
-9. Before the recovery milestone is closed, run the resumable 20-turn protocol:
+10. Before the recovery milestone is closed, run the resumable 20-turn protocol:
 
    ```bash
    backend/.venv/bin/python scripts/recovery_dogfood.py

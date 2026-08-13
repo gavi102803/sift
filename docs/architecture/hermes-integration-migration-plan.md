@@ -2,6 +2,13 @@
 
 Date: 2026-06-27
 
+Status: historical Personal/Local Companion migration plan. It is not the Managed production
+Harness plan or a production completion record. Managed execution authority now lives in
+`cloudflare/src/sift_worker/`; current release gates are defined by
+`provider-conformance-test-matrix.md` and the Worker tests. Any "Implemented locally" statement
+below refers only to the older `backend/` compatibility implementation unless it names a Worker
+path explicitly.
+
 This plan starts after the manifest, driver contract, capability spec, and conformance matrix are accepted. It does not delete the current OpenAI-compatible adapter first. It folds it into a named `ChatCompletionsDriver`.
 
 ## Phase 0: Freeze Current Behavior

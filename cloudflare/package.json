@@ -3,7 +3,11 @@
   "private": true,
   "scripts": {
     "deploy:production": "node scripts/deploy.mjs",
+    "dev:ai-sdk-staging-proxy": "node scripts/run_ai_sdk_staging_proxy.mjs",
     "invite:issue": "node scripts/issue_invite.mjs",
+    "invite:issue:ai-sdk-staging": "node scripts/issue_invite.mjs sift-ai-sdk-staging wrangler.ai-sdk-staging.toml",
+    "invite:issue:ai-sdk-staging:local": "node scripts/issue_invite.mjs sift-ai-sdk-staging wrangler.ai-sdk-staging.toml --local",
+    "secrets:provision:ai-sdk-staging": "node scripts/provision_ai_sdk_staging_token.mjs",
     "verify:production": "node scripts/verify_production.mjs",
     "verify:provider-live": "PYTHONPATH=.:src python -m verification.live_conformance",
     "verify:production-e2e": "PYTHONPATH=.:src python -m verification.production_e2e"

@@ -2,13 +2,23 @@ import { AiSdkAgentEngine } from "./ai-sdk-engine.ts";
 import { evalRequestSchema, type EvalKind, type SiftAgentEvent } from "./contracts.ts";
 import { RequestError } from "./errors.ts";
 import {
+  generateInternal,
+  internalErrorCode,
+  internalGenerateRequestSchema,
+  internalToolCallRequestSchema,
+  requestInternalToolCalls,
+  streamInternal,
+  type InternalStreamEvent,
+} from "./internal-engine.ts";
+import {
   createProviderModel,
   readProviderRequest,
   type ProviderEnvironment,
 } from "./providers.ts";
 
 export interface Env extends ProviderEnvironment {
-  SIFT_SHADOW_TOKEN: string;
+  SIFT_SHADOW_TOKEN?: string;
+  SIFT_ENGINE_TOKEN?: string;
 }
 
 const JSON_HEADERS = {
@@ -25,9 +35,14 @@ const STREAM_HEADERS = {
 
 export async function handleRequest(request: Request, env: Env): Promise<Response> {
   try {
+    const url = new URL(request.url);
+
+    if (url.pathname.startsWith("/internal/v1/")) {
+      return await handleInternalRequest(request, env, url.pathname);
+    }
+
     assertConfigured(env);
     assertAuthorized(request, env);
-    const url = new URL(request.url);
 
     if (url.pathname === "/health") {
       if (request.method !== "GET") return methodNotAllowed("GET");
@@ -83,6 +98,50 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   }
 }
 
+async function handleInternalRequest(
+  request: Request,
+  env: Env,
+  pathname: string,
+): Promise<Response> {
+  assertEngineAuthorized(request, env);
+  if (request.method !== "POST") return methodNotAllowed("POST");
+  requireJSON(request);
+
+  const providerRequest = readProviderRequest(request.headers);
+  const model = createProviderModel(providerRequest, env);
+  const body = await readJSON(request);
+  const abort = createRequestAbort(request.signal, 45_000);
+  try {
+    if (pathname === "/internal/v1/generate") {
+      const input = internalGenerateRequestSchema.safeParse(body);
+      if (!input.success) return problem(400, "invalid_request", "Engine request is invalid.");
+      return jsonResponse(await generateInternal(input.data, model, abort.signal));
+    }
+    if (pathname === "/internal/v1/tool-calls") {
+      const input = internalToolCallRequestSchema.safeParse(body);
+      if (!input.success) return problem(400, "invalid_request", "Engine request is invalid.");
+      return jsonResponse(await requestInternalToolCalls(input.data, model, abort.signal));
+    }
+    if (pathname === "/internal/v1/stream") {
+      const input = internalGenerateRequestSchema.safeParse(body);
+      if (!input.success) return problem(400, "invalid_request", "Engine request is invalid.");
+      return internalNdjsonResponse(streamInternal(input.data, model, abort.signal), abort);
+    }
+    return problem(404, "not_found", "Engine endpoint not found.");
+  } catch (error) {
+    const code = internalErrorCode(error, abort.signal);
+    if (code === "invalid_provider_key") {
+      return problem(401, code, "Check the provider API key.");
+    }
+    if (code === "provider_quota_exhausted") {
+      return problem(429, code, "The provider quota is exhausted.");
+    }
+    return problem(502, code, "The model provider request failed.");
+  } finally {
+    if (pathname !== "/internal/v1/stream") abort.dispose();
+  }
+}
+
 export default {
   fetch: handleRequest,
 } satisfies ExportedHandler<Env>;
@@ -105,6 +164,59 @@ function assertAuthorized(request: Request, env: Env): void {
   if (!constantTimeEqual(authorization, expected)) {
     throw new RequestError(401, "unauthorized", "Shadow authorization failed.");
   }
+}
+
+function assertEngineAuthorized(request: Request, env: Env): void {
+  const supplied = request.headers.get("x-sift-engine-token") ?? "";
+  const expected = env.SIFT_ENGINE_TOKEN ?? "";
+  if (expected.length < 24 || !constantTimeEqual(supplied, expected)) {
+    throw new RequestError(503, "engine_unavailable", "Engine authorization failed.");
+  }
+}
+
+interface RequestAbort {
+  signal: AbortSignal;
+  dispose(): void;
+}
+
+function createRequestAbort(parent: AbortSignal, timeoutMs: number): RequestAbort {
+  const controller = new AbortController();
+  const onAbort = () => controller.abort(parent.reason);
+  parent.addEventListener("abort", onAbort, { once: true });
+  if (parent.aborted) controller.abort(parent.reason);
+  const timer = setTimeout(() => controller.abort("sift-engine-timeout"), timeoutMs);
+  return {
+    signal: controller.signal,
+    dispose() {
+      clearTimeout(timer);
+      parent.removeEventListener("abort", onAbort);
+    },
+  };
+}
+
+function internalNdjsonResponse(
+  events: AsyncIterable<InternalStreamEvent>,
+  abort: RequestAbort,
+): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        for await (const event of events) {
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        }
+        controller.close();
+      } catch {
+        controller.error(new Error("engine_stream_failed"));
+      } finally {
+        abort.dispose();
+      }
+    },
+    cancel() {
+      abort.dispose();
+    },
+  });
+  return new Response(stream, { status: 200, headers: STREAM_HEADERS });
 }
 
 function constantTimeEqual(left: string, right: string): boolean {

@@ -4,6 +4,7 @@ import { handleRequest, type Env } from "../src/worker.ts";
 
 const env: Env = {
   SIFT_SHADOW_TOKEN: "shadow-test-token-with-enough-entropy",
+  SIFT_ENGINE_TOKEN: "engine-test-token-with-enough-entropy",
 };
 
 describe("shadow Worker boundary", () => {
@@ -81,5 +82,19 @@ describe("shadow Worker boundary", () => {
       SIFT_SHADOW_TOKEN: "short",
     });
     expect(response.status).toBe(503);
+  });
+
+  it("keeps internal engine endpoints inaccessible without the service token", async () => {
+    const response = await handleRequest(
+      new Request("https://shadow.test/internal/v1/generate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain(String(env.SIFT_ENGINE_TOKEN));
   });
 });

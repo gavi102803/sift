@@ -14,6 +14,7 @@
     "check": "pnpm run typecheck && pnpm run test && pnpm run mock:benchmark && pnpm run bundle:check",
     "dev": "WRANGLER_SEND_METRICS=false WRANGLER_LOG_PATH=.wrangler/wrangler.log wrangler dev",
     "deploy:shadow": "WRANGLER_SEND_METRICS=false WRANGLER_LOG_PATH=.wrangler/wrangler.log wrangler deploy",
+    "deploy:engine:staging": "WRANGLER_SEND_METRICS=false WRANGLER_LOG_PATH=.wrangler/wrangler-engine.log wrangler deploy --config wrangler.engine.toml",
     "live:eval": "node scripts/run-live-eval.mjs"
   },
   "dependencies": {

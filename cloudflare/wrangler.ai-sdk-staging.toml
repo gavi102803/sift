@@ -1,0 +1,26 @@
+"$schema" = "./node_modules/wrangler/config-schema.json"
+name = "sift-backend-ai-sdk-staging"
+main = "src/entry.py"
+compatibility_date = "2026-07-31"
+compatibility_flags = ["python_workers"]
+workers_dev = true
+preview_urls = false
+
+[vars]
+SIFT_ENV = "staging"
+SIFT_AUTH_MODE = "managed"
+SIFT_BETA_TOKEN_TTL_DAYS = "30"
+SIFT_MODEL_ENGINE = "ai-sdk"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sift-ai-sdk-staging"
+database_id = "afb59e6e-cb30-4d4d-8b04-128431c16307"
+migrations_dir = "migrations"
+
+[[services]]
+binding = "AI_SDK_ENGINE"
+service = "sift-ai-sdk-engine-staging"
+
+[observability]
+enabled = false

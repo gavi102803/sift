@@ -6,10 +6,13 @@ from uuid import UUID, uuid4
 import asgi
 from workers import WorkerEntrypoint
 
-from sift_worker.app import app
+from sift_worker.ai_sdk_client import configured_provider_client_factory
+from sift_worker.app import create_app
 from sift_worker.d1 import D1WorkerStore
 from sift_worker.errors import PublicError
 from sift_worker.services import AuthService, ModelRunService
+
+app = create_app(provider_client_factory=configured_provider_client_factory)
 
 
 class Default(WorkerEntrypoint):
@@ -110,6 +113,7 @@ class Default(WorkerEntrypoint):
                         run_id,
                         principal,
                         provider_key,
+                        client_factory=configured_provider_client_factory,
                         **arguments,
                     )
                 else:
@@ -118,6 +122,7 @@ class Default(WorkerEntrypoint):
                         principal,
                         provider_key,
                         run_maintenance=False,
+                        client_factory=configured_provider_client_factory,
                         **arguments,
                     )
                 if completed.status == "succeeded":
@@ -145,6 +150,7 @@ class Default(WorkerEntrypoint):
                             run_id,
                             principal.owner_id,
                             provider_key,
+                            client_factory=configured_provider_client_factory,
                         )
                     except Exception:
                         # The parent terminal result is already durable and sent.

@@ -155,6 +155,50 @@ Current production resources:
 - D1 database: `sift` (`f1444fbf-08f1-4e0e-8cd3-b224e235199a`)
 - D1 primary region observed during verification: APAC / SIN
 
+## AI SDK staging handtest
+
+The AI SDK integration is isolated from production:
+
+- Python control-plane Worker: `sift-backend-ai-sdk-staging`;
+- internal TypeScript engine Worker: `sift-ai-sdk-engine-staging` (no public route);
+- D1: `sift-ai-sdk-staging` (`afb59e6e-cb30-4d4d-8b04-128431c16307`);
+- public staging URL:
+  `https://sift-backend-ai-sdk-staging.sift-cloudflare-worker-tools.workers.dev`.
+
+The Python Worker owns ModelRun persistence, idempotency, leases, checkpoints, recovery, budgets,
+tool execution, evidence, and final writes. The TypeScript Worker uses the unmodified, pinned
+Vercel AI SDK for provider calls, streaming, structured output, and normalized tool-call messages.
+Production continues to use the legacy runtime unless `SIFT_MODEL_ENGINE=ai-sdk` is explicitly set.
+
+On networks that can reach `workers.dev`, point Debug directly at the public staging URL. This Mac's
+current VPN/TLS path cannot, so the shared `Sift AI SDK Staging` scheme uses
+`http://127.0.0.1:8788`. Start the exact local Worker topology before launching the scheme:
+
+```bash
+cd cloudflare
+pnpm run dev:ai-sdk-staging-proxy
+```
+
+The command starts the Python Worker on port 8788 and the same TypeScript AI SDK Worker on port
+8789, connected through a local Service Binding. It uses the dedicated ignored local D1 state at
+`.wrangler/ai-sdk-staging-state`; it never reads production D1. The shared engine token is read
+from macOS Keychain and is never printed or written to the repository.
+
+For a fresh machine or reset staging environment:
+
+```bash
+pnpm run secrets:provision:ai-sdk-staging
+pnpm exec wrangler d1 migrations apply sift-ai-sdk-staging --local \
+  --config wrangler.ai-sdk-staging.toml \
+  --persist-to .wrangler/ai-sdk-staging-state
+pnpm run invite:issue:ai-sdk-staging:local
+```
+
+Select the `Sift AI SDK Staging` scheme, activate with the generated invite, and enter a device-local
+BYOK key. Handtest initial capture, inline citations, follow-up, cancellation, relaunch recovery,
+and duplicate submission. A full public deployed-path provider check still requires disabling the
+current `workers.dev` TLS interception or assigning a custom domain.
+
 Wrangler confirmed the deployment and route above. On 2026-08-11, Cloudflare
 Browser Run independently returned `200` with the production Workers identity
 from `/health` and the stable `authentication_required` response from

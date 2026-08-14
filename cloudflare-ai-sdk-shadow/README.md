@@ -9,9 +9,31 @@ writes.
 - Sift owns durable runs, idempotency, leases, checkpoints, total budgets, authorization,
   evidence provenance, and knowledge commits.
 - The upstream AI SDK owns provider transport, normalized streams, structured output, and the
-  bounded in-request tool loop.
+  shadow evaluator's bounded in-request tool loop.
 - `AiSdkAgentEngine` is a thin adapter. It does not implement a provider protocol, SSE parser, or
   independent agent loop.
+
+The staging product integration uses a stricter boundary: Sift's Python Worker retains the
+durable multi-round tool loop, while the AI SDK engine executes one bounded model call at a time.
+The Python Worker checkpoints each normalized tool call/result before requesting the next AI SDK
+call, so Worker interruption recovery does not depend on in-memory SDK state.
+
+## Internal staging engine
+
+`wrangler.engine.toml` deploys `sift-ai-sdk-engine-staging` without a public route. The staging
+Python Worker reaches it only through the `AI_SDK_ENGINE` Service Binding. Internal endpoints are
+authenticated with `SIFT_ENGINE_TOKEN` and accept the provider key only as a request header:
+
+- `POST /internal/v1/generate`;
+- `POST /internal/v1/tool-calls`;
+- `POST /internal/v1/stream`.
+
+The engine disables AI SDK retries and telemetry. It returns only normalized content, tool calls,
+usage, and stable error codes; provider error bodies and credentials are not relayed to Sift.
+
+AI SDK UI is not a native SwiftUI component library, and AG-UI is an event protocol rather than a
+drop-in iOS interface. Sift therefore keeps its native SwiftUI and maps stable Sift events to it.
+The SDK's provider-specific stream format must not become an iOS API contract.
 
 The built-in `web_search` and `extract_url` tools operate only on evidence included in the
 evaluation request. `extract_url` accepts a source id rather than an arbitrary URL, so the shadow

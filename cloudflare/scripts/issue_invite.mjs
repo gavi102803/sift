@@ -6,6 +6,15 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const projectDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const databaseName = process.argv[2] ?? "sift";
+const configFile = process.argv[3];
+const executionMode = process.argv[4] ?? "--remote";
+if (!/^[a-z0-9-]+$/.test(databaseName)) {
+  throw new Error("Database name is invalid.");
+}
+if (!["--local", "--remote"].includes(executionMode)) {
+  throw new Error("D1 execution mode must be --local or --remote.");
+}
 const inviteCode = randomBytes(18).toString("base64url");
 const codeHash = createHash("sha256").update(inviteCode).digest("hex");
 const statement =
@@ -18,8 +27,12 @@ const result = spawnSync(
     "wrangler",
     "d1",
     "execute",
-    "sift",
-    "--remote",
+    databaseName,
+    executionMode,
+    ...(configFile ? ["--config", configFile] : []),
+    ...(executionMode === "--local"
+      ? ["--persist-to", ".wrangler/ai-sdk-staging-state"]
+      : []),
     "--command",
     statement,
   ],

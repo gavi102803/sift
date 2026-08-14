@@ -16,6 +16,7 @@ const managedInfoPath = resolve(
 const requestTimeoutMs = 20_000;
 const browserRunRetryCount = 2;
 const browserRunDefaultRetryMs = 10_500;
+const expectedEnvironment = process.env.SIFT_EXPECTED_ENV?.trim() || "production";
 let directUnavailable = false;
 
 function managedBaseURL() {
@@ -216,12 +217,12 @@ async function main() {
   requireCondition(health.status === 200, `/health returned ${health.status}.`);
   requireCondition(
     health.payload?.status === "ok" &&
-      health.payload?.env === "production" &&
+      health.payload?.env === expectedEnvironment &&
       health.payload?.runtime === "cloudflare-workers",
-    "/health did not identify the production Cloudflare Workers runtime.",
+    `/health did not identify the ${expectedEnvironment} Cloudflare Workers runtime.`,
   );
   process.stdout.write(
-    `OK ${health.transport} GET /health -> 200 production/cloudflare-workers\n`,
+    `OK ${health.transport} GET /health -> 200 ${expectedEnvironment}/cloudflare-workers\n`,
   );
 
   const appStatus = await productionProbe(`${baseURL}/v1/app-status`);

@@ -12,9 +12,11 @@ struct ConceptReadingView: View {
     var relatedDisplayFallback: String?
     var addRelationDisabled: Bool
     var removeRelationDisabled: Bool
+    var isRetryingGeneration: Bool = false
     var onAddRelation: (Concept) -> Void
     var onRemoveRelation: (ConceptRelation) -> Void
     var onEditBlock: (NoteBlock) -> Void
+    var onRetryGeneration: () -> Void = {}
 
     private var contentBlocks: [NoteBlock] {
         ReadingContent.orderedBlocks(concept.note?.blocks ?? [])
@@ -87,10 +89,30 @@ struct ConceptReadingView: View {
     }
 
     private var emptyContent: some View {
-        Text(emptyContentText)
-            .font(SiftFont.body)
-            .foregroundStyle(SiftColor.textMuted)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 10) {
+            Text(emptyContentText)
+                .font(SiftFont.body)
+                .foregroundStyle(SiftColor.textMuted)
+            if CaptureStatus(rawValue: concept.captureStatus) == .generationFailed {
+                Button(action: onRetryGeneration) {
+                    HStack(spacing: 6) {
+                        if isRetryingGeneration {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Try again")
+                                .font(SiftFont.sans(13, .semibold))
+                        }
+                    }
+                    .foregroundStyle(SiftColor.accent)
+                }
+                .buttonStyle(.plain)
+                .disabled(isRetryingGeneration)
+                .accessibilityIdentifier("concept.generation.retry")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var emptyContentText: String {
@@ -98,7 +120,7 @@ struct ConceptReadingView: View {
         case .draft, .pendingGeneration, .generating:
             return "Sift is preparing the first card. You can stay here while it works."
         case .generationFailed:
-            return "Generation didn’t finish. Return to Capture to retry this concept."
+            return "Generation didn’t finish. Your original question is still here."
         default:
             return "This card is empty. Ask a follow-up to start growing it."
         }

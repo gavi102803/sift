@@ -206,7 +206,8 @@ final class ConceptLocalStoreTests: XCTestCase {
             XCTFail("Expected generation to fail")
         } catch SiftAPIError.modelRunFailed {
             XCTAssertEqual(draft.captureStatus, CaptureStatus.generationFailed.rawValue)
-            XCTAssertNil(draft.captureGenerationIdempotencyKey)
+            let failedKey = try XCTUnwrap(draft.captureGenerationIdempotencyKey)
+            XCTAssertEqual(store.beginCaptureGeneration(for: draft).uuidString, failedKey)
         }
     }
 
@@ -246,6 +247,33 @@ final class ConceptLocalStoreTests: XCTestCase {
         )
     }
 
+    func testInitialStreamSourcesAppearOnLocalAssistantTurn() throws {
+        let context = try makeModelContext()
+        let store = ConceptLocalStore(modelContext: context)
+        let draft = store.createDraft(rawCapture: "Current docs")
+        store.appendInitialGenerationAnswerDelta(
+            concept: draft,
+            question: draft.displayTitle,
+            delta: "See the official guide [1]."
+        )
+        store.recordInitialGenerationSources(
+            concept: draft,
+            citations: [
+                CitationDTO(
+                    sourceId: "source-1",
+                    title: "Official guide",
+                    url: "https://example.com/guide"
+                )
+            ]
+        )
+
+        let assistant = try XCTUnwrap(
+            store.localConversationTurns(for: draft).first(where: { $0.role == "assistant" })
+        )
+        XCTAssertEqual(assistant.answerSource?.citations?.first?.title, "Official guide")
+        XCTAssertEqual(assistant.status, "streaming")
+    }
+
     func testRelaunchReconcilesFailedInitialRunIntoRetryableDraft() throws {
         let context = try makeModelContext()
         let store = ConceptLocalStore(modelContext: context)
@@ -277,7 +305,57 @@ final class ConceptLocalStoreTests: XCTestCase {
             draft.captureGenerationOperationStatus,
             LocalOperationStatus.failed.rawValue
         )
-        XCTAssertNil(draft.captureGenerationIdempotencyKey)
+        XCTAssertEqual(draft.captureGenerationIdempotencyKey, key.uuidString)
+    }
+
+    func testAdoptedFailedConceptExposesRecoverableRunId() throws {
+        let context = try makeModelContext()
+        let store = ConceptLocalStore(modelContext: context)
+        let draft = store.createDraft(rawCapture: "Recovered failure")
+        let key = store.beginCaptureGeneration(for: draft)
+        let runId = UUID()
+        let run = ModelRunDTO(
+            id: runId,
+            kind: "initialConcept",
+            status: "failed",
+            conceptId: runId,
+            clientDraftId: draft.id.uuidString,
+            idempotencyKey: key.uuidString,
+            providerSnapshot: [:],
+            dependencyRunId: nil,
+            checkpoint: "answerCompleted",
+            result: nil,
+            resultRef: nil,
+            errorCode: "provider_unreachable",
+            errorMessage: nil,
+            childRunIds: [],
+            createdAt: .now,
+            updatedAt: .now
+        )
+        let remote = ConceptDTO(
+            id: runId,
+            canonicalTitle: "Recovered failure",
+            displayTitle: "Recovered failure",
+            oneLineExplanation: "",
+            maturity: ConceptMaturity.initial.rawValue,
+            captureStatus: CaptureStatus.generationFailed.rawValue,
+            noteRevision: 0,
+            blocks: [],
+            tags: [],
+            topics: [],
+            answerSource: nil,
+            relations: [],
+            createdAt: .now,
+            updatedAt: .now
+        )
+
+        _ = try store.upsertModelRun(run)
+        try store.reconcileFailedModelRun(run, remoteConcept: remote)
+
+        let adopted = try XCTUnwrap(
+            context.fetch(FetchDescriptor<Concept>()).first(where: { $0.id == runId })
+        )
+        XCTAssertEqual(store.recoverableCaptureRunId(for: adopted), runId)
     }
 
     func testCaptureGenerationKeySurvivesLocalReload() throws {
@@ -1712,6 +1790,95 @@ final class ManagedBetaClientTests: XCTestCase {
             URLProtocolRequestRecorder.requests().contains {
                 $0.url?.path == "/v1/model-runs/\(runId.uuidString)/events"
             }
+        )
+    }
+
+    func testManagedCaptureRetryResumesFailedRunWithoutReclaimingPayload() async throws {
+        let store = activeStore(providerKey: "provider-secret")
+        let operationKey = UUID()
+        let draftId = UUID()
+        let runId = UUID()
+        let concept = managedConceptDTO()
+        let failedRun = ModelRunDTO(
+            id: runId,
+            kind: "initialConcept",
+            status: "failed",
+            conceptId: runId,
+            clientDraftId: draftId.uuidString,
+            idempotencyKey: operationKey.uuidString,
+            dependencyRunId: nil,
+            checkpoint: "answerCompleted",
+            result: nil,
+            resultRef: nil,
+            errorCode: "provider_unreachable",
+            errorMessage: nil,
+            childRunIds: [],
+            createdAt: .now,
+            updatedAt: .now
+        )
+        let completedRun = ModelRunDTO(
+            id: runId,
+            kind: "initialConcept",
+            status: "succeeded",
+            conceptId: concept.id,
+            clientDraftId: draftId.uuidString,
+            idempotencyKey: operationKey.uuidString,
+            dependencyRunId: nil,
+            checkpoint: "modelCompleted",
+            result: ModelRunResultDTO(concept: concept, response: nil),
+            resultRef: concept.id.uuidString,
+            errorCode: nil,
+            errorMessage: nil,
+            childRunIds: [],
+            createdAt: .now,
+            updatedAt: .now
+        )
+        URLProtocolRequestRecorder.handler = { request in
+            let path = request.url?.path ?? ""
+            if path == "/v1/model-runs/\(runId.uuidString)" {
+                return HTTPURLProtocolResponse(
+                    statusCode: 200,
+                    contentType: "application/json",
+                    body: self.encoded(failedRun)
+                )
+            }
+            if path == "/v1/model-runs/\(runId.uuidString)/resume-stream" {
+                return HTTPURLProtocolResponse(
+                    statusCode: 200,
+                    contentType: "application/x-ndjson",
+                    body: [
+                        ModelRunExecutionStreamEventDTO(type: "delta", delta: "Recovered answer"),
+                        ModelRunExecutionStreamEventDTO(type: "completed", modelRun: completedRun),
+                    ].reduce(into: Data()) { body, event in
+                        body.append(self.encoded(event))
+                        body.append(Data("\n".utf8))
+                    }
+                )
+            }
+            return HTTPURLProtocolResponse(
+                statusCode: 404,
+                contentType: "application/json",
+                body: Data("{\"detail\":\"not found\"}".utf8)
+            )
+        }
+
+        var events: [ConceptInitialStreamEvent] = []
+        for try await event in makeManagedClient(store: store)
+            .streamResumeInitialConceptRun(id: runId) {
+            events.append(event)
+        }
+
+        XCTAssertEqual(events.map(\.type), ["started", "delta", "completed"])
+        XCTAssertFalse(
+            URLProtocolRequestRecorder.requests().contains {
+                $0.url?.path == "/v1/concept-runs"
+            }
+        )
+        XCTAssertEqual(
+            URLProtocolRequestRecorder.requests().filter {
+                $0.url?.path == "/v1/model-runs/\(runId.uuidString)/resume-stream"
+            }.count,
+            1
         )
     }
 

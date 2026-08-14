@@ -69,6 +69,9 @@ protocol SiftAPIClient {
         idempotencyKey: UUID?,
         clientDraftId: UUID?
     ) -> AsyncThrowingStream<ConceptInitialStreamEvent, Error>
+    func streamResumeInitialConceptRun(
+        id: UUID
+    ) -> AsyncThrowingStream<ConceptInitialStreamEvent, Error>
     func submitTurn(conceptId: UUID, request: ConceptTurnRequest) async throws -> ConceptTurnResponse
     func submitTurn(
         conceptId: UUID,
@@ -155,6 +158,31 @@ extension SiftAPIClient {
         clientDraftId: UUID?
     ) -> AsyncThrowingStream<ConceptInitialStreamEvent, Error> {
         streamCreateConcept(request, idempotencyKey: idempotencyKey)
+    }
+
+    func streamResumeInitialConceptRun(
+        id: UUID
+    ) -> AsyncThrowingStream<ConceptInitialStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let run = try await resumeModelRun(id: id)
+                    continuation.yield(
+                        ConceptInitialStreamEvent(type: "started", delta: nil, concept: nil, modelRun: run)
+                    )
+                    guard run.status == "succeeded", let concept = run.result?.concept else {
+                        throw SiftAPIError.modelRunFailed(code: run.errorCode ?? "model_run_failed")
+                    }
+                    continuation.yield(
+                        ConceptInitialStreamEvent(type: "completed", delta: nil, concept: concept, modelRun: run)
+                    )
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { @Sendable _ in task.cancel() }
+        }
     }
 
     func mergeProposal(id: UUID, idempotencyKey: UUID?) async throws -> ConceptDTO {
@@ -629,6 +657,48 @@ struct HTTPSiftAPIClient: SiftAPIClient {
         }
     }
 
+    func streamResumeInitialConceptRun(
+        id: UUID
+    ) -> AsyncThrowingStream<ConceptInitialStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let run = try await getModelRun(id: id)
+                    continuation.yield(
+                        ConceptInitialStreamEvent(type: "started", delta: nil, concept: nil, modelRun: run)
+                    )
+                    let onEvent: (ModelRunEventDTO) -> Void = { event in
+                        if let streamEvent = initialConceptStreamEvent(from: event, modelRun: run) {
+                            continuation.yield(streamEvent)
+                        }
+                    }
+                    let completed: ModelRunDTO
+                    if requiresBetaActivation {
+                        completed = try await waitForManagedModelRun(run, onEvent: onEvent)
+                    } else {
+                        let resumed = run.status == "failed" ? try await resumeModelRun(id: id) : run
+                        completed = try await waitForModelRun(resumed, onEvent: onEvent)
+                    }
+                    guard let concept = completed.result?.concept else {
+                        throw SiftStreamingError.incomplete
+                    }
+                    continuation.yield(
+                        ConceptInitialStreamEvent(
+                            type: "completed",
+                            delta: nil,
+                            concept: concept,
+                            modelRun: completed
+                        )
+                    )
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { @Sendable _ in task.cancel() }
+        }
+    }
+
     func submitTurn(conceptId: UUID, request: ConceptTurnRequest) async throws -> ConceptTurnResponse {
         try await submitTurn(conceptId: conceptId, request: request, idempotencyKey: nil)
     }
@@ -765,6 +835,54 @@ struct HTTPSiftAPIClient: SiftAPIClient {
         )
     }
 
+    private func initialConceptStreamEvent(
+        from event: ModelRunEventDTO,
+        modelRun: ModelRunDTO
+    ) -> ConceptInitialStreamEvent? {
+        if event.type == "delta", let delta = event.data?.content {
+            return ConceptInitialStreamEvent(
+                type: "delta",
+                delta: delta,
+                concept: nil,
+                modelRun: modelRun,
+                sequence: event.sequence
+            )
+        }
+        if event.type == "deltaReset" {
+            return ConceptInitialStreamEvent(
+                type: "reset",
+                delta: nil,
+                concept: nil,
+                modelRun: modelRun,
+                sequence: event.sequence
+            )
+        }
+        if event.type == "sourcesReady",
+           let citations = event.data?.citations,
+           !citations.isEmpty {
+            return ConceptInitialStreamEvent(
+                type: "sources",
+                delta: nil,
+                concept: nil,
+                modelRun: modelRun,
+                sequence: event.sequence,
+                citations: citations
+            )
+        }
+        if ["stepStarted", "stepRestarted"].contains(event.type),
+           let label = event.data?.label {
+            return ConceptInitialStreamEvent(
+                type: "progress",
+                delta: nil,
+                concept: nil,
+                modelRun: modelRun,
+                sequence: event.sequence,
+                progressLabel: label
+            )
+        }
+        return nil
+    }
+
     private func waitForModelRun(
         _ initial: ModelRunDTO,
         onEvent: (ModelRunEventDTO) -> Void
@@ -802,7 +920,7 @@ struct HTTPSiftAPIClient: SiftAPIClient {
         _ initial: ModelRunDTO,
         onEvent: (ModelRunEventDTO) -> Void
     ) async throws -> ModelRunDTO {
-        guard ["queued", "running", "waitingForCredential"].contains(initial.status) else {
+        guard ["queued", "running", "waitingForCredential", "failed"].contains(initial.status) else {
             return try await waitForModelRun(initial, onEvent: onEvent)
         }
         var receivedLiveDelta = false

@@ -82,7 +82,7 @@ struct ConceptLocalStore {
             let adopted = try upsertConcept(from: remoteConcept)
             adopted.captureStatus = CaptureStatus.generationFailed.rawValue
             adopted.captureGenerationOperationStatus = LocalOperationStatus.failed.rawValue
-            adopted.captureGenerationIdempotencyKey = nil
+            adopted.captureGenerationIdempotencyKey = run.idempotencyKey
             adopted.updatedAt = .now
             for draft in drafts where draft.id != adopted.id {
                 deleteConcept(draft)
@@ -90,9 +90,11 @@ struct ConceptLocalStore {
             return
         }
         for draft in drafts where ConceptStatusRules.isLocalOnly(draft.captureStatus) {
+            draft.captureGenerationIdempotencyKey = run.idempotencyKey
             markCaptureGenerationTerminalFailure(
                 draft,
-                error: SiftAPIError.modelRunFailed(code: run.errorCode ?? "model_run_failed")
+                error: SiftAPIError.modelRunFailed(code: run.errorCode ?? "model_run_failed"),
+                preserveIdempotencyKey: true
             )
         }
     }
@@ -271,6 +273,7 @@ struct ConceptLocalStore {
 
     func localConversationTurns(for concept: Concept) -> [ConceptHistoryTurnDTO] {
         guard let conversation = concept.conversation else { return [] }
+        let initialAnswerSource = decodeAnswerSource(concept.answerSourceJSON)
         return conversation.messages
             .sorted { $0.createdAt < $1.createdAt }
             .filter { message in
@@ -281,10 +284,31 @@ struct ConceptLocalStore {
                     id: message.id,
                     role: message.role,
                     content: message.content,
-                    answerSource: nil,
-                    status: "completed"
+                    answerSource: message.role == ConversationRole.assistant.rawValue
+                        && message.updateMode == initialCaptureUpdateMode
+                        ? initialAnswerSource
+                        : nil,
+                    status: message.operationStatus ?? "completed"
                 )
             }
+    }
+
+    func recordInitialGenerationSources(concept: Concept, citations: [CitationDTO]) {
+        guard !citations.isEmpty else { return }
+        concept.answerSourceJSON = encodeAnswerSource(
+            AnswerSourceDTO(
+                sourceType: AnswerSourceType.searchDiscovered.rawValue,
+                confidence: 1,
+                uncertaintyNote: nil,
+                citations: citations
+            )
+        )
+        concept.updatedAt = .now
+    }
+
+    func clearInitialGenerationSources(concept: Concept) {
+        concept.answerSourceJSON = nil
+        concept.updatedAt = .now
     }
 
     func findCaptureMatch(rawCapture: String) throws -> CaptureMatchResult {
@@ -323,7 +347,6 @@ struct ConceptLocalStore {
     func beginCaptureGeneration(for concept: Concept) -> UUID {
         if let existing = concept.captureGenerationIdempotencyKey,
            let uuid = UUID(uuidString: existing),
-           concept.captureGenerationOperationStatus != LocalOperationStatus.failed.rawValue,
            concept.captureGenerationOperationStatus != LocalOperationStatus.completed.rawValue {
             concept.captureStatus = CaptureStatus.generating.rawValue
             concept.captureGenerationOperationStatus = LocalOperationStatus.inFlight.rawValue
@@ -339,18 +362,36 @@ struct ConceptLocalStore {
         return key
     }
 
+    func recoverableCaptureRunId(for concept: Concept) -> UUID? {
+        guard let key = concept.captureGenerationIdempotencyKey,
+              let mirrors = try? modelContext.fetch(FetchDescriptor<ModelRunMirror>()),
+              let mirror = mirrors.first(where: {
+                  $0.kind == "initialConcept"
+                      && $0.idempotencyKey == key
+                      && ["queued", "running", "waitingForCredential", "failed"].contains($0.status)
+              }) else { return nil }
+        return mirror.runId
+    }
+
     func markCaptureGenerationUnknown(_ concept: Concept) {
         concept.captureStatus = CaptureStatus.pendingGeneration.rawValue
         concept.captureGenerationOperationStatus = LocalOperationStatus.pending.rawValue
         concept.updatedAt = .now
     }
 
-    func markCaptureGenerationTerminalFailure(_ concept: Concept, error: Error) {
+    func markCaptureGenerationTerminalFailure(
+        _ concept: Concept,
+        error: Error,
+        preserveIdempotencyKey: Bool = false
+    ) {
         concept.captureStatus = CaptureStatus.generationFailed.rawValue
         concept.captureGenerationOperationStatus = LocalOperationStatus.failed.rawValue
-        concept.captureGenerationIdempotencyKey = nil
+        if !preserveIdempotencyKey {
+            concept.captureGenerationIdempotencyKey = nil
+        }
         concept.updatedAt = .now
         clearInitialGenerationAnswer(concept: concept)
+        clearInitialGenerationSources(concept: concept)
         recordInitialGenerationFailure(concept: concept, error: error)
     }
 
@@ -790,6 +831,11 @@ struct ConceptLocalStore {
             return nil
         }
         return String(data: data, encoding: .utf8)
+    }
+
+    private func decodeAnswerSource(_ value: String?) -> AnswerSourceDTO? {
+        guard let value, let data = value.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(AnswerSourceDTO.self, from: data)
     }
 
     private func ensureConversation(for concept: Concept) -> Conversation {

@@ -266,6 +266,7 @@ struct ConceptDetailView: View {
             relatedDisplayFallback: relatedDisplayFallback(for: concept),
             addRelationDisabled: addingRelationTargetId != nil,
             removeRelationDisabled: resolvingRelationId != nil,
+            isRetryingGeneration: isRetryingGeneration,
             onAddRelation: { candidate in
                 Task { await addRelation(from: concept, to: candidate) }
             },
@@ -274,7 +275,8 @@ struct ConceptDetailView: View {
             },
             onEditBlock: { block in
                 beginNoteEdit()
-            }
+            },
+            onRetryGeneration: { Task { await retryGeneration(concept) } }
         )
     }
 
@@ -822,9 +824,9 @@ struct ConceptDetailView: View {
     }
 
     private func refreshTurns(_ conceptId: UUID) async {
-        let localInitial = ConversationTimeline.initialExchange(
-            from: concept?.conversation?.messages ?? []
-        )
+        let localInitial = concept.map {
+            ConceptLocalStore(modelContext: modelContext).localConversationTurns(for: $0)
+        } ?? []
         // Local-only concepts have never synced — show the optimistic exchange.
         if let concept, ConceptStatusRules.isLocalOnly(concept.captureStatus) {
             turns = localInitial
@@ -851,9 +853,8 @@ struct ConceptDetailView: View {
 
     private func syncLocalInitialTurnsIfNeeded() {
         guard let concept else { return }
-        let localInitial = ConversationTimeline.initialExchange(
-            from: concept.conversation?.messages ?? []
-        )
+        let localInitial = ConceptLocalStore(modelContext: modelContext)
+            .localConversationTurns(for: concept)
         guard !localInitial.isEmpty else { return }
         if ConceptStatusRules.isLocalOnly(concept.captureStatus) || turns.isEmpty {
             turns = localInitial

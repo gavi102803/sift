@@ -98,11 +98,13 @@ export async function generateInternal(
   model: LanguageModel,
   abortSignal?: AbortSignal,
 ): Promise<InternalGenerationResult> {
-  const messages = textMessages(input.messages);
+  const prompt = input.responseSchema
+    ? structuredPrompt(input.messages, input.responseSchema)
+    : textPrompt(input.messages);
   if (input.responseSchema) {
     const result = await generateText({
       model,
-      messages,
+      ...prompt,
       maxRetries: 0,
       maxOutputTokens: input.maxOutputTokens,
       abortSignal,
@@ -119,7 +121,7 @@ export async function generateInternal(
 
   const result = await generateText({
     model,
-    messages,
+    ...prompt,
     maxRetries: 0,
     maxOutputTokens: input.maxOutputTokens,
     abortSignal,
@@ -147,9 +149,11 @@ export async function requestInternalToolCalls(
       }),
     ]),
   ) satisfies ToolSet;
-  const messages = [...textMessages(input.messages), ...observationMessages(input.observations)];
+  const prompt = textPrompt(input.messages);
+  const messages = [...prompt.messages, ...observationMessages(input.observations)];
   const result = await generateText({
     model,
+    instructions: prompt.instructions,
     messages,
     tools,
     toolChoice: input.forcedToolName
@@ -179,9 +183,10 @@ export async function* streamInternal(
   abortSignal?: AbortSignal,
 ): AsyncIterable<InternalStreamEvent> {
   try {
+    const prompt = textPrompt(input.messages);
     const result = streamText({
       model,
-      messages: textMessages(input.messages),
+      ...prompt,
       maxRetries: 0,
       maxOutputTokens: input.maxOutputTokens,
       abortSignal,
@@ -262,8 +267,35 @@ function abortCode(abortSignal?: AbortSignal): "cancelled" | "timeout" {
   return abortSignal?.reason === "sift-engine-timeout" ? "timeout" : "cancelled";
 }
 
-function textMessages(messages: Array<z.infer<typeof messageSchema>>): ModelMessage[] {
-  return messages.map((message) => ({ role: message.role, content: message.content }));
+function textPrompt(messages: Array<z.infer<typeof messageSchema>>): {
+  instructions?: string;
+  messages: ModelMessage[];
+} {
+  const instructions = messages
+    .filter((message) => message.role === "system")
+    .map((message) => message.content)
+    .join("\n\n");
+  return {
+    instructions: instructions || undefined,
+    messages: messages
+      .filter((message) => message.role !== "system")
+      .map((message) => ({ role: message.role, content: message.content })),
+  };
+}
+
+function structuredPrompt(
+  messages: Array<z.infer<typeof messageSchema>>,
+  responseSchema: Record<string, unknown>,
+): { instructions: string; messages: ModelMessage[] } {
+  const prompt = textPrompt(messages);
+  const schemaInstruction =
+    "Return one JSON object only, without Markdown fences. It must match this " +
+    "JSON Schema exactly and include every required key:\n" +
+    JSON.stringify(responseSchema);
+  return {
+    instructions: [prompt.instructions, schemaInstruction].filter(Boolean).join("\n\n"),
+    messages: prompt.messages,
+  };
 }
 
 function observationMessages(

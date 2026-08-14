@@ -11,6 +11,89 @@ import {
 import { cardResult, mockModel, textStream } from "./fixtures.ts";
 
 describe("internal AI SDK engine contract", () => {
+  it("routes system messages through SDK instructions for every internal call", async () => {
+    const generateModel = mockModel({
+      streams: textStream("unused"),
+      cards: cardResult({ answer: "Structured answer" }),
+    });
+    await generateInternal(
+      {
+        messages: [
+          { role: "system", content: "Return a concise JSON answer." },
+          { role: "user", content: "Explain the concept." },
+        ],
+        maxOutputTokens: 1_024,
+        responseSchema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["answer"],
+          properties: { answer: { type: "string" } },
+        },
+      },
+      generateModel,
+    );
+
+    const toolModel = new MockLanguageModelV4({
+      provider: "sift-shadow-test",
+      modelId: "shadow-test-model",
+      doGenerate: toolCallResult("call-search", "web_search", { query: "Sift runtime" }),
+    });
+    await requestInternalToolCalls(
+      {
+        messages: [
+          { role: "system", content: "Decide whether research is needed." },
+          { role: "user", content: "Research Sift runtime." },
+        ],
+        maxOutputTokens: 512,
+        tools: [
+          {
+            providerName: "web_search",
+            description: "Search the public web.",
+            inputSchema: {
+              type: "object",
+              required: ["query"],
+              properties: { query: { type: "string" } },
+            },
+          },
+        ],
+        observations: [],
+      },
+      toolModel,
+    );
+
+    const streamModel = mockModel({ streams: textStream("Streaming answer") });
+    const streamEvents = [];
+    for await (const event of streamInternal(
+      {
+        messages: [
+          { role: "system", content: "Explain clearly." },
+          { role: "user", content: "Answer the question." },
+        ],
+        maxOutputTokens: 1_024,
+      },
+      streamModel,
+    )) {
+      streamEvents.push(event);
+    }
+
+    expect(generateModel.doGenerateCalls[0]?.prompt[0]?.role).toBe("system");
+    expect(String(generateModel.doGenerateCalls[0]?.prompt[0]?.content)).toContain(
+      "Return a concise JSON answer.",
+    );
+    expect(String(generateModel.doGenerateCalls[0]?.prompt[0]?.content)).toContain(
+      '"required":["answer"]',
+    );
+    expect(toolModel.doGenerateCalls[0]?.prompt[0]).toMatchObject({
+      role: "system",
+      content: "Decide whether research is needed.",
+    });
+    expect(streamModel.doStreamCalls[0]?.prompt[0]).toMatchObject({
+      role: "system",
+      content: "Explain clearly.",
+    });
+    expect(streamEvents.at(-1)?.type).toBe("completed");
+  });
+
   it("generates schema-validated JSON with SDK retries disabled", async () => {
     const model = mockModel({
       streams: textStream("unused"),

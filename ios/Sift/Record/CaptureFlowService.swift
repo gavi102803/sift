@@ -36,7 +36,9 @@ struct CaptureFlowService {
         draft.captureStatus = CaptureStatus.pendingGeneration.rawValue
         draft.updatedAt = .now
         let idempotencyKey = localStore.beginCaptureGeneration(for: draft)
+        let recoverableRunId = localStore.recoverableCaptureRunId(for: draft)
         localStore.clearInitialGenerationAnswer(concept: draft)
+        localStore.clearInitialGenerationSources(concept: draft)
         // The question and its idempotency key must be durable before any
         // fallible model/network work begins. This also gives SwiftData a
         // stable graph before streamed messages are later reconciled.
@@ -47,6 +49,7 @@ struct CaptureFlowService {
             let request = CreateConceptRequest(rawCapture: draft.displayTitle, locale: draft.language)
             var dto: ConceptDTO?
             var streamedAnswer = ""
+            var streamedCitations: [CitationDTO] = []
             var textSmoother = StreamingTextSmoother { fragment in
                 streamedAnswer += fragment
                 localStore.appendInitialGenerationAnswerDelta(
@@ -56,11 +59,17 @@ struct CaptureFlowService {
                 )
             }
             defer { textSmoother.cancel() }
-            for try await event in apiClient.streamCreateConcept(
-                request,
-                idempotencyKey: idempotencyKey,
-                clientDraftId: draft.id
-            ) {
+            let stream: AsyncThrowingStream<ConceptInitialStreamEvent, Error>
+            if let recoverableRunId {
+                stream = apiClient.streamResumeInitialConceptRun(id: recoverableRunId)
+            } else {
+                stream = apiClient.streamCreateConcept(
+                    request,
+                    idempotencyKey: idempotencyKey,
+                    clientDraftId: draft.id
+                )
+            }
+            for try await event in stream {
                 if let run = event.modelRun {
                     activeRunID = run.id
                     try localStore.upsertModelRun(run, lastSequence: event.sequence)
@@ -81,6 +90,13 @@ struct CaptureFlowService {
                 if let delta = event.delta, !delta.isEmpty {
                     textSmoother.append(delta)
                 }
+                if let citations = event.citations, !citations.isEmpty {
+                    streamedCitations = citations
+                    localStore.recordInitialGenerationSources(
+                        concept: draft,
+                        citations: citations
+                    )
+                }
                 if let concept = event.concept {
                     dto = concept
                 }
@@ -90,6 +106,12 @@ struct CaptureFlowService {
                 throw SiftStreamingError.incomplete
             }
             let concept = try localStore.upsertConcept(from: dto)
+            if dto.answerSource?.citations?.isEmpty != false, !streamedCitations.isEmpty {
+                localStore.recordInitialGenerationSources(
+                    concept: concept,
+                    citations: streamedCitations
+                )
+            }
             localStore.markCaptureGenerationCompleted(draft)
             let initialAnswer = dto.initialAnswer?.trimmingCharacters(in: .whitespacesAndNewlines)
             let conversationAnswer: String
@@ -121,7 +143,11 @@ struct CaptureFlowService {
             throw CancellationError()
         } catch {
             if isTerminalGenerationFailure(error) {
-                localStore.markCaptureGenerationTerminalFailure(draft, error: error)
+                localStore.markCaptureGenerationTerminalFailure(
+                    draft,
+                    error: error,
+                    preserveIdempotencyKey: isModelRunFailure(error)
+                )
             } else {
                 localStore.markCaptureGenerationUnknown(draft)
             }
@@ -143,6 +169,11 @@ struct CaptureFlowService {
         if error is URLError {
             return false
         }
+        return false
+    }
+
+    private func isModelRunFailure(_ error: Error) -> Bool {
+        if case SiftAPIError.modelRunFailed = error { return true }
         return false
     }
 

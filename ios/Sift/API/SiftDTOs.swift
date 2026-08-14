@@ -280,7 +280,11 @@ struct ConceptDTO: Codable, Identifiable {
 }
 
 struct BatchConceptRequest: Codable {
-    var conceptIds: [UUID]
+    var conceptIds: [String]
+
+    init(conceptIds: [UUID]) {
+        self.conceptIds = conceptIds.map { $0.uuidString.lowercased() }
+    }
 }
 
 struct ConceptRelationDTO: Codable, Identifiable {

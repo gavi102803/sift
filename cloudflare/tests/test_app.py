@@ -15,13 +15,17 @@ from sift_worker.agent_core import INITIAL_AGENT_SPEC, AgentControlError
 from sift_worker.app import create_app
 from sift_worker.errors import PublicError
 from sift_worker.models import (
+    AppendPatchOutput,
+    BatchConceptRequest,
     ContinuitySummaryResult,
+    CreateConceptRelationRequest,
     CreateConceptRunRequest,
     CreateTurnRunRequest,
     CurrentPrincipal,
     FollowUpResult,
     InitialConceptResult,
     KnowledgeReviewResult,
+    UpdateConceptNoteBlockRequest,
 )
 from sift_worker.runtime import RuntimeToolCall, validate_provider_connection
 from sift_worker.services import ModelRunService, _tool_evidence
@@ -73,6 +77,30 @@ def test_agent_user_inputs_are_bounded_before_persistence_or_model_calls() -> No
         )
     with pytest.raises(ValidationError):
         CreateTurnRunRequest.model_validate({"turn": {"question": oversized}})
+
+
+def test_uuid_body_fields_are_canonicalized_at_the_transport_boundary() -> None:
+    uppercase = "9987C5E5-A3EA-48A4-9391-CBCF32A5B6CB"
+    lowercase = uppercase.lower()
+
+    assert BatchConceptRequest.model_validate(
+        {"conceptIds": [uppercase]}
+    ).concept_ids == [lowercase]
+    assert CreateConceptRunRequest.model_validate(
+        {
+            "capture": {"rawCapture": "Canonical IDs", "locale": "en"},
+            "clientDraftId": uppercase,
+        }
+    ).client_draft_id == lowercase
+    assert CreateConceptRelationRequest.model_validate(
+        {"targetConceptId": uppercase, "relationType": "supports"}
+    ).target_concept_id == lowercase
+    assert UpdateConceptNoteBlockRequest.model_validate(
+        {"id": uppercase, "blockType": "example", "content": "Example"}
+    ).id == lowercase
+    assert AppendPatchOutput.model_validate(
+        {"operation": "append", "targetBlockId": uppercase, "content": "More"}
+    ).target_block_id == lowercase
 
 
 def test_managed_initial_run_resumes_with_ephemeral_key_and_is_idempotent() -> None:
@@ -3280,17 +3308,17 @@ def test_archive_restore_and_relations_match_ios_contract() -> None:
     archived = client.patch(
         "/v1/concepts/archive",
         headers=headers,
-        json={"conceptIds": [source_id, source_id]},
+        json={"conceptIds": [source_id.upper(), source_id.upper()]},
     )
     restored = client.patch(
         "/v1/concepts/restore",
         headers=headers,
-        json={"conceptIds": [source_id]},
+        json={"conceptIds": [source_id.upper()]},
     )
     related = client.post(
         f"/v1/concepts/{source_id}/relations",
         headers=headers,
-        json={"targetConceptId": target_id, "relationType": "supports"},
+        json={"targetConceptId": target_id.upper(), "relationType": "supports"},
     )
     relation = related.json()["relations"][0]
     target = client.get(f"/v1/concepts/{target_id}", headers=headers)

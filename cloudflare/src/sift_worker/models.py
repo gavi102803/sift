@@ -2,11 +2,24 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
 MAX_AGENT_INPUT_CHARS = 20_000
 MAX_LOCALE_CHARS = 64
+
+
+def normalize_uuid_string(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    try:
+        return str(UUID(value))
+    except ValueError:
+        return value
+
+
+CanonicalUUIDString = Annotated[str, BeforeValidator(normalize_uuid_string)]
 
 
 class SiftWorkerModel(BaseModel):
@@ -115,7 +128,10 @@ class CreateConceptRequest(SiftWorkerModel):
 
 class CreateConceptRunRequest(SiftWorkerModel):
     capture: CreateConceptRequest
-    client_draft_id: str | None = Field(default=None, alias="clientDraftId")
+    client_draft_id: CanonicalUUIDString | None = Field(
+        default=None,
+        alias="clientDraftId",
+    )
 
 
 class ConceptTurnRequest(SiftWorkerModel):
@@ -139,11 +155,11 @@ class CreateTurnRunRequest(SiftWorkerModel):
 
 
 class BatchConceptRequest(SiftWorkerModel):
-    concept_ids: list[str] = Field(min_length=1, alias="conceptIds")
+    concept_ids: list[CanonicalUUIDString] = Field(min_length=1, alias="conceptIds")
 
 
 class CreateConceptRelationRequest(SiftWorkerModel):
-    target_concept_id: str = Field(alias="targetConceptId")
+    target_concept_id: CanonicalUUIDString = Field(alias="targetConceptId")
     relation_type: str = Field(default="related", min_length=1, alias="relationType")
 
 
@@ -162,7 +178,7 @@ class UpdateConceptOrganizationRequest(SiftWorkerModel):
 
 
 class UpdateConceptNoteBlockRequest(SiftWorkerModel):
-    id: str | None = None
+    id: CanonicalUUIDString | None = None
     block_type: Literal[
         "whatItIs",
         "whyItMatters",
@@ -256,20 +272,20 @@ class ModelMetaOutput(SiftWorkerModel):
 
 class AppendPatchOutput(SiftWorkerModel):
     operation: Literal["append"]
-    target_block_id: str = Field(alias="targetBlockId")
+    target_block_id: CanonicalUUIDString = Field(alias="targetBlockId")
     content: str = Field(min_length=1)
 
 
 class ReplacePatchOutput(SiftWorkerModel):
     operation: Literal["replace"]
-    target_block_id: str = Field(alias="targetBlockId")
+    target_block_id: CanonicalUUIDString = Field(alias="targetBlockId")
     old_value_hash: str = Field(min_length=1, alias="oldValueHash")
     new_content: str = Field(min_length=1, alias="newContent")
 
 
 class AddRelationPatchOutput(SiftWorkerModel):
     operation: Literal["addRelation"]
-    target_concept_id: str = Field(alias="targetConceptId")
+    target_concept_id: CanonicalUUIDString = Field(alias="targetConceptId")
     relation_type: str = Field(min_length=1, alias="relationType")
 
 

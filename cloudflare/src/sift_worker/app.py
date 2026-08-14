@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from fastapi import FastAPI, Header, Request
 from fastapi.exceptions import RequestValidationError
@@ -43,6 +43,7 @@ from sift_worker.models import (
     WebProviderCatalogResponse,
     WebProviderOptionResponse,
     WebProviderSettingsResponse,
+    normalize_uuid_string,
 )
 from sift_worker.runtime import (
     PROVIDER_PROFILES,
@@ -824,13 +825,7 @@ def create_app(
 
 
 def _normalize_uuid_path(path: str) -> str:
-    segments: list[str] = []
-    for segment in path.split("/"):
-        try:
-            segments.append(str(UUID(segment)))
-        except ValueError:
-            segments.append(segment)
-    return "/".join(segments)
+    return "/".join(normalize_uuid_string(segment) for segment in path.split("/"))
 
 
 def _d1_store(request: Request) -> WorkerStore:

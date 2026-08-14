@@ -141,6 +141,15 @@ final class ProductLogicTests: XCTestCase {
         )
     }
 
+    func testBatchConceptRequestUsesCanonicalLowercaseUUIDStrings() throws {
+        let id = try XCTUnwrap(UUID(uuidString: "9987c5e5-a3ea-48a4-9391-cbcf32a5b6cb"))
+        let request = BatchConceptRequest(conceptIds: [id])
+        let data = try JSONEncoder().encode(request)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: [String]])
+
+        XCTAssertEqual(object["conceptIds"], ["9987c5e5-a3ea-48a4-9391-cbcf32a5b6cb"])
+    }
+
     func testCitationMarkupReplacesRetrievalPositionsWithSourceTitles() {
         let citations = [
             CitationDTO(

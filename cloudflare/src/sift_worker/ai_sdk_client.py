@@ -210,7 +210,9 @@ class AiSdkProviderClient(WorkerProviderClient):
         pathname: str,
         payload: dict[str, Any],
     ) -> dict[str, Any]:
-        return await _response_json(await self._fetch(pathname, payload))
+        response = await self._fetch(pathname, payload)
+        await _raise_for_internal_json_status(response)
+        return await _response_json(response)
 
     async def _fetch(self, pathname: str, payload: dict[str, Any]) -> Any:
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
@@ -305,18 +307,46 @@ def _raise_for_internal_status(response: Any) -> None:
     )
 
 
-def _raise_for_engine_code(raw_code: Any) -> None:
+async def _raise_for_internal_json_status(response: Any) -> None:
+    if 200 <= int(response.status) < 300:
+        return
+    code = ""
+    try:
+        data = await response.json()
+        converted = data.to_py() if hasattr(data, "to_py") else data
+        if isinstance(converted, dict):
+            error = converted.get("error")
+            if isinstance(error, dict):
+                code = str(error.get("code") or "")
+    except Exception:
+        pass
+    _raise_for_engine_code(code, status=int(response.status))
+
+
+def _raise_for_engine_code(raw_code: Any, *, status: int | None = None) -> None:
     code = str(raw_code or "")
-    if code == "invalid_provider_key":
+    if code == "invalid_provider_key" or status in {401, 403}:
         raise PublicError("invalid_provider_key", "Check your provider API key.", 401)
-    if code == "provider_quota_exhausted":
+    if code == "provider_quota_exhausted" or status in {402, 429}:
         raise PublicError(
             "provider_quota_exhausted",
             "Your provider quota is used up.",
-            429,
+            status if status in {402, 429} else 429,
         )
     if code == "cancelled":
         raise PublicError("agent_cancelled", "The model run was cancelled.", 409)
+    if code == "timeout":
+        raise PublicError(
+            "provider_timeout",
+            "The AI provider timed out while building the card.",
+            504,
+        )
+    if code == "schema_validation_failed":
+        raise PublicError(
+            "schema_validation_failed",
+            "The AI provider returned an invalid structured card.",
+            502,
+        )
     raise PublicError(
         "provider_unreachable",
         "The AI provider could not be reached.",

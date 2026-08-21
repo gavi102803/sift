@@ -6,6 +6,7 @@ enum ConceptStatusRules {
             CaptureStatus.draft.rawValue,
             CaptureStatus.pendingGeneration.rawValue,
             CaptureStatus.generating.rawValue,
+            CaptureStatus.buildingCard.rawValue,
             CaptureStatus.needsDisambiguation.rawValue,
             CaptureStatus.generationFailed.rawValue
         ].contains(captureStatus)

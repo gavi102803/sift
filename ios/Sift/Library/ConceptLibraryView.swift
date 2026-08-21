@@ -890,7 +890,7 @@ enum CaptureStatusBadge {
     /// Short badge label, or nil for ready/archived (a finished card needs none).
     static func label(for status: String) -> String? {
         switch CaptureStatus(rawValue: status) {
-        case .generating, .pendingGeneration: "Generating"
+        case .generating, .pendingGeneration, .buildingCard: "Generating"
         case .draft: "Draft"
         case .generationFailed: "Needs retry"
         case .needsDisambiguation: "Needs review"
@@ -902,6 +902,7 @@ enum CaptureStatusBadge {
     static func subtitle(for status: String) -> String {
         switch CaptureStatus(rawValue: status) {
         case .generating, .pendingGeneration: "Generating your card…"
+        case .buildingCard: "Building your card…"
         case .draft: "Saved draft."
         case .generationFailed: "Generation didn’t finish — open to retry."
         case .needsDisambiguation: "Review possible matches."
@@ -912,7 +913,7 @@ enum CaptureStatusBadge {
     static func color(for status: String) -> Color {
         switch CaptureStatus(rawValue: status) {
         case .generationFailed: SiftColor.danger
-        case .generating, .pendingGeneration: SiftColor.accent
+        case .generating, .pendingGeneration, .buildingCard: SiftColor.accent
         default: SiftColor.textFaint
         }
     }

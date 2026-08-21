@@ -4,6 +4,38 @@ import XCTest
 
 @MainActor
 final class ConceptLocalStoreTests: XCTestCase {
+    func testInitialAnswerStopsStreamingWhileCardIsStillBuilding() throws {
+        let context = try makeModelContext()
+        let store = ConceptLocalStore(modelContext: context)
+        let draft = store.createDraft(rawCapture: "What is MCP?")
+        store.appendInitialGenerationAnswerDelta(
+            concept: draft,
+            question: draft.displayTitle,
+            delta: "MCP is an open protocol."
+        )
+
+        store.markInitialGenerationBuildingCard(concept: draft)
+
+        let assistant = try XCTUnwrap(
+            ConversationTimeline.initialExchange(from: draft.conversation?.messages ?? [])
+                .last
+        )
+        XCTAssertEqual(assistant.content, "MCP is an open protocol.")
+        XCTAssertEqual(assistant.status, "completed")
+        XCTAssertEqual(draft.captureStatus, CaptureStatus.buildingCard.rawValue)
+
+        store.appendInitialGenerationAnswerDelta(
+            concept: draft,
+            question: draft.displayTitle,
+            delta: " More detail."
+        )
+        XCTAssertEqual(draft.captureStatus, CaptureStatus.generating.rawValue)
+        XCTAssertEqual(
+            ConversationTimeline.initialExchange(from: draft.conversation?.messages ?? []).last?.status,
+            "streaming"
+        )
+    }
+
     func testProposedProposalReconciliationIsIdempotentAndStalesMissingRemoteProposal() throws {
         let context = try makeModelContext()
         let store = ConceptLocalStore(modelContext: context)
@@ -211,6 +243,113 @@ final class ConceptLocalStoreTests: XCTestCase {
         }
     }
 
+    func testLiveModelRunFailureAdoptsRemoteConceptBeforeReturningError() async throws {
+        let context = try makeModelContext()
+        let store = ConceptLocalStore(modelContext: context)
+        let runId = UUID()
+        var draftId: UUID?
+        var operationKey: UUID?
+        let failedRun = { (draft: UUID, key: UUID) in
+            ModelRunDTO(
+                id: runId,
+                kind: "initialConcept",
+                status: "failed",
+                conceptId: runId,
+                clientDraftId: draft.uuidString,
+                idempotencyKey: key.uuidString,
+                providerSnapshot: [:],
+                dependencyRunId: nil,
+                checkpoint: "answerCompleted",
+                result: nil,
+                resultRef: nil,
+                errorCode: "schema_validation_failed",
+                errorMessage: nil,
+                childRunIds: [],
+                createdAt: .now,
+                updatedAt: .now
+            )
+        }
+        let remote = ConceptDTO(
+            id: runId,
+            canonicalTitle: "Recovered failure",
+            displayTitle: "Recovered failure",
+            oneLineExplanation: "",
+            maturity: ConceptMaturity.initial.rawValue,
+            captureStatus: CaptureStatus.generationFailed.rawValue,
+            noteRevision: 0,
+            blocks: [],
+            tags: [],
+            topics: [],
+            answerSource: nil,
+            relations: [],
+            createdAt: .now,
+            updatedAt: .now
+        )
+        let client = TestAPIClient(
+            createConceptResult: .failure(TestError.unimplemented),
+            getConceptHandler: { _ in remote },
+            getModelRunHandler: { _ in
+                failedRun(try XCTUnwrap(draftId), try XCTUnwrap(operationKey))
+            },
+            streamCreateConceptHandler: { _, key, clientDraftId in
+                let draft = try XCTUnwrap(clientDraftId)
+                let key = try XCTUnwrap(key)
+                draftId = draft
+                operationKey = key
+                let running = ModelRunDTO(
+                    id: runId,
+                    kind: "initialConcept",
+                    status: "running",
+                    conceptId: runId,
+                    clientDraftId: draft.uuidString,
+                    idempotencyKey: key.uuidString,
+                    providerSnapshot: [:],
+                    dependencyRunId: nil,
+                    checkpoint: "answerCompleted",
+                    result: nil,
+                    resultRef: nil,
+                    errorCode: nil,
+                    errorMessage: nil,
+                    childRunIds: [],
+                    createdAt: .now,
+                    updatedAt: .now
+                )
+                return AsyncThrowingStream { continuation in
+                    continuation.yield(
+                        ConceptInitialStreamEvent(
+                            type: "started",
+                            delta: nil,
+                            concept: nil,
+                            modelRun: running
+                        )
+                    )
+                    continuation.finish(
+                        throwing: SiftAPIError.modelRunFailed(
+                            code: "schema_validation_failed"
+                        )
+                    )
+                }
+            }
+        )
+        let service = CaptureFlowService(localStore: store, apiClient: client)
+        guard case .newDraft(let draft) = try service.resolveCapture(
+            rawCapture: "Recovered failure"
+        ) else {
+            return XCTFail("Expected a new local draft")
+        }
+
+        do {
+            _ = try await service.generateConcept(from: draft)
+            XCTFail("Expected generation to fail")
+        } catch let failure as ReconciledCaptureGenerationFailure {
+            XCTAssertEqual(failure.conceptId, runId)
+        }
+
+        let concepts = try context.fetch(FetchDescriptor<Concept>())
+        XCTAssertEqual(concepts.map(\.id), [runId])
+        XCTAssertEqual(concepts.first?.captureStatus, CaptureStatus.generationFailed.rawValue)
+    }
+
     func testTerminalInitialFailureRemovesPartialAnswerBeforeRetry() throws {
         let context = try makeModelContext()
         let store = ConceptLocalStore(modelContext: context)
@@ -356,6 +495,62 @@ final class ConceptLocalStoreTests: XCTestCase {
             context.fetch(FetchDescriptor<Concept>()).first(where: { $0.id == runId })
         )
         XCTAssertEqual(store.recoverableCaptureRunId(for: adopted), runId)
+    }
+
+    func testRemoteRefreshReplacesFailedDraftLinkedByModelRunMirror() throws {
+        let context = try makeModelContext()
+        let store = ConceptLocalStore(modelContext: context)
+        let draft = store.createDraft(rawCapture: "Recovered failure")
+        let key = store.beginCaptureGeneration(for: draft)
+        let runId = UUID()
+        _ = try store.upsertModelRun(
+            ModelRunDTO(
+                id: runId,
+                kind: "initialConcept",
+                status: "failed",
+                conceptId: runId,
+                clientDraftId: draft.id.uuidString,
+                idempotencyKey: key.uuidString,
+                providerSnapshot: [:],
+                dependencyRunId: nil,
+                checkpoint: "answerCompleted",
+                result: nil,
+                resultRef: nil,
+                errorCode: "provider_unreachable",
+                errorMessage: nil,
+                childRunIds: [],
+                createdAt: .now,
+                updatedAt: .now
+            )
+        )
+        store.markCaptureGenerationTerminalFailure(
+            draft,
+            error: SiftAPIError.modelRunFailed(code: "provider_unreachable"),
+            preserveIdempotencyKey: true
+        )
+        let remote = ConceptDTO(
+            id: runId,
+            canonicalTitle: "Recovered failure",
+            displayTitle: "Recovered failure",
+            oneLineExplanation: "",
+            maturity: ConceptMaturity.initial.rawValue,
+            captureStatus: CaptureStatus.generationFailed.rawValue,
+            noteRevision: 0,
+            blocks: [],
+            tags: [],
+            topics: [],
+            answerSource: nil,
+            relations: [],
+            createdAt: .now,
+            updatedAt: .now
+        )
+
+        try store.upsertConcepts(from: [remote])
+
+        let concepts = try context.fetch(FetchDescriptor<Concept>())
+        XCTAssertEqual(concepts.map(\.id), [runId])
+        XCTAssertEqual(concepts.first?.captureGenerationIdempotencyKey, key.uuidString)
+        XCTAssertEqual(store.recoverableCaptureRunId(for: try XCTUnwrap(concepts.first)), runId)
     }
 
     func testCaptureGenerationKeySurvivesLocalReload() throws {
@@ -587,6 +782,7 @@ final class ConceptLocalStoreTests: XCTestCase {
         XCTAssertTrue(ConceptStatusRules.isLocalOnly(CaptureStatus.draft.rawValue))
         XCTAssertTrue(ConceptStatusRules.isLocalOnly(CaptureStatus.pendingGeneration.rawValue))
         XCTAssertTrue(ConceptStatusRules.isLocalOnly(CaptureStatus.generating.rawValue))
+        XCTAssertTrue(ConceptStatusRules.isLocalOnly(CaptureStatus.buildingCard.rawValue))
         XCTAssertTrue(ConceptStatusRules.isLocalOnly(CaptureStatus.generationFailed.rawValue))
         XCTAssertFalse(ConceptStatusRules.isLocalOnly(CaptureStatus.ready.rawValue))
         XCTAssertFalse(ConceptStatusRules.canSubmitFollowUp(CaptureStatus.generating.rawValue))
@@ -2257,9 +2453,15 @@ private enum TestError: Error {
 private struct TestAPIClient: SiftAPIClient {
     var createConceptResult: Result<ConceptDTO, Error>
     var createConceptIdempotencyKey: UUID?
+    var getConceptHandler: ((UUID) async throws -> ConceptDTO)? = nil
     var getModelRunHandler: ((UUID) async throws -> ModelRunDTO)? = nil
     var listModelRunEventsHandler: ((UUID, Int) async throws -> [ModelRunEventDTO])? = nil
     var resumeModelRunHandler: ((UUID) async throws -> ModelRunDTO)? = nil
+    var streamCreateConceptHandler: ((
+        CreateConceptRequest,
+        UUID?,
+        UUID?
+    ) throws -> AsyncThrowingStream<ConceptInitialStreamEvent, Error>)? = nil
 
     var backendDescription: String {
         "test"
@@ -2314,7 +2516,8 @@ private struct TestAPIClient: SiftAPIClient {
     }
 
     func getConcept(id: UUID) async throws -> ConceptDTO {
-        throw TestError.unimplemented
+        guard let getConceptHandler else { throw TestError.unimplemented }
+        return try await getConceptHandler(id)
     }
 
     func archiveConcepts(ids: [UUID]) async throws -> [ConceptDTO] {
@@ -2391,6 +2594,42 @@ private struct TestAPIClient: SiftAPIClient {
             return dto
         case .failure(let error):
             throw error
+        }
+    }
+
+    func streamCreateConcept(
+        _ request: CreateConceptRequest,
+        idempotencyKey: UUID?,
+        clientDraftId: UUID?
+    ) -> AsyncThrowingStream<ConceptInitialStreamEvent, Error> {
+        if let streamCreateConceptHandler {
+            do {
+                return try streamCreateConceptHandler(request, idempotencyKey, clientDraftId)
+            } catch {
+                return AsyncThrowingStream { continuation in
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+        return AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    let concept = try await createConcept(
+                        request,
+                        idempotencyKey: idempotencyKey
+                    )
+                    continuation.yield(
+                        ConceptInitialStreamEvent(
+                            type: "completed",
+                            delta: nil,
+                            concept: concept
+                        )
+                    )
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
         }
     }
 

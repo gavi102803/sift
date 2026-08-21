@@ -2,7 +2,11 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogle } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import type { LanguageModel } from "ai";
+import {
+  extractJsonMiddleware,
+  wrapLanguageModel,
+  type LanguageModel,
+} from "ai";
 
 import { providerNameSchema, type ProviderName } from "./contracts.ts";
 import { RequestError } from "./errors.ts";
@@ -67,12 +71,19 @@ export function createProviderModel(
           "openai-compatible requires an allowlisted base URL",
         );
       }
-      return createOpenAICompatible({
-        name: "sift-shadow-compatible",
-        apiKey: request.apiKey,
-        baseURL,
-        includeUsage: true,
-      })(request.model);
+      return wrapLanguageModel({
+        model: createOpenAICompatible({
+          name: "sift-shadow-compatible",
+          apiKey: request.apiKey,
+          baseURL,
+          includeUsage: true,
+        })(request.model),
+        // OpenAI-compatible providers frequently wrap JSON in Markdown even
+        // when response_format=json_object is requested. This public AI SDK
+        // middleware keeps Output.object validation while removing only that
+        // transport formatting; retries remain disabled in generateInternal.
+        middleware: extractJsonMiddleware(),
+      });
     }
   }
 }

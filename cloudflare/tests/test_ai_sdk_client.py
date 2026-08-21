@@ -5,6 +5,7 @@ import json
 import pytest
 
 from sift_worker.ai_sdk_client import AiSdkProviderClient
+from sift_worker.errors import PublicError
 from sift_worker.runtime import validate_provider_connection
 
 
@@ -208,6 +209,39 @@ async def test_ai_sdk_adapter_relays_one_ndjson_stream_without_retry() -> None:
     assert deltas == ["Streaming ", "answer"]
     assert fetch_count == 1
     assert client.model_call_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("engine_code", "expected_code"),
+    [
+        ("schema_validation_failed", "schema_validation_failed"),
+        ("timeout", "provider_timeout"),
+        ("provider_error", "provider_unreachable"),
+    ],
+)
+async def test_ai_sdk_adapter_preserves_safe_engine_error_category(
+    engine_code: str,
+    expected_code: str,
+) -> None:
+    async def fetcher(_url: str, **_options):
+        return FakeResponse(
+            502,
+            {"error": {"code": engine_code, "message": "redacted"}},
+        )
+
+    client = AiSdkProviderClient(
+        validate_provider_connection("owner", "deepseek", None, "deepseek-chat"),
+        "request-only-secret",
+        engine_fetcher=fetcher,
+        engine_token="engine-test-token-with-enough-entropy",
+    )
+
+    with pytest.raises(PublicError) as captured:
+        await client.generate_initial_concept("Workers", "en")
+
+    assert captured.value.code == expected_code
+    assert "redacted" not in captured.value.message
 
 
 def _initial_result() -> dict:

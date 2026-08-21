@@ -15,9 +15,8 @@ struct ConceptDetailView: View {
     @Environment(\.appServices) private var appServices
     @Environment(\.modelContext) private var modelContext
     @Environment(CompanionMonitor.self) private var companion: CompanionMonitor?
-    @Query private var concepts: [Concept]
     @Query(sort: \Concept.displayTitle) private var allConcepts: [Concept]
-    @Query private var proposals: [ConceptUpdateProposal]
+    @Query(sort: \ConceptUpdateProposal.createdAt, order: .reverse) private var proposals: [ConceptUpdateProposal]
     @Query private var relations: [ConceptRelation]
     @State private var followUpText = ""
     @State private var turns: [ConceptHistoryTurnDTO] = []
@@ -62,37 +61,37 @@ struct ConceptDetailView: View {
         self.conceptId = conceptId
         self.onConceptReplaced = onConceptReplaced
         _detailMode = State(initialValue: initialMode)
-        _concepts = Query(filter: #Predicate<Concept> { concept in
-            concept.id == conceptId
-        })
-        _proposals = Query(
-            filter: #Predicate<ConceptUpdateProposal> { proposal in
-                proposal.conceptId == conceptId
-            },
-            sort: \ConceptUpdateProposal.createdAt,
-            order: .reverse
-        )
     }
 
     private var concept: Concept? {
-        concepts.first
+        allConcepts.first { $0.id == conceptId }
     }
 
     private var lastTurnSignature: String {
         ConversationTimeline.scrollSignature(for: turns.last)
     }
 
+    private var isBuildingInitialCard: Bool {
+        guard let concept,
+              let status = CaptureStatus(rawValue: concept.captureStatus),
+              status == .buildingCard,
+              let assistant = turns.last(where: { $0.role == "assistant" })
+        else { return false }
+        return !assistant.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var localConversationSignature: String {
         guard let messages = concept?.conversation?.messages else { return "empty" }
         return messages
             .sorted { $0.createdAt < $1.createdAt }
-            .map { "\($0.id.uuidString):\($0.content.count):\($0.updateMode)" }
+            .map { "\($0.id.uuidString):\($0.content.count):\($0.updateMode):\($0.operationStatus ?? "")" }
             .joined(separator: "|")
     }
 
     private var activeProposal: ConceptUpdateProposal? {
         proposals.first { proposal in
-            proposal.status == ProposalStatus.proposed.rawValue
+            proposal.conceptId == conceptId
+                && proposal.status == ProposalStatus.proposed.rawValue
         }
     }
 
@@ -174,6 +173,10 @@ struct ConceptDetailView: View {
                             proxy,
                             streaming: turns.last?.status == "streaming"
                         )
+                    }
+                    .onChange(of: isBuildingInitialCard) { _, isBuilding in
+                        guard isBuilding else { return }
+                        proxy.scrollTo("conversation-bottom", anchor: .bottom)
                     }
                 }
                 .safeAreaInset(edge: .bottom) {
@@ -676,6 +679,11 @@ struct ConceptDetailView: View {
             }
         } catch is CancellationError {
             return
+        } catch let failure as ReconciledCaptureGenerationFailure {
+            if failure.conceptId != concept.id {
+                onConceptReplaced(concept.id, failure.conceptId)
+            }
+            present(failure.underlying)
         } catch {
             present(error)
         }

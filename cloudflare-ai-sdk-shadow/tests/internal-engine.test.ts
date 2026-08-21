@@ -1,4 +1,4 @@
-import { APICallError, RetryError } from "ai";
+import { APICallError, NoOutputGeneratedError, RetryError } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
@@ -120,6 +120,12 @@ describe("internal AI SDK engine contract", () => {
       output_tokens: 4,
     });
     expect(model.doGenerateCalls).toHaveLength(1);
+  });
+
+  it("keeps structured validation failures distinct from provider transport errors", async () => {
+    expect(internalErrorCode(new NoOutputGeneratedError())).toBe(
+      "schema_validation_failed",
+    );
   });
 
   it("normalizes tool calls and replays checkpointed native SDK messages", async () => {

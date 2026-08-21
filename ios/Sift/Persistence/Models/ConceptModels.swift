@@ -71,6 +71,7 @@ enum CaptureStatus: String, Codable, CaseIterable {
     case draft
     case pendingGeneration
     case generating
+    case buildingCard
     case needsDisambiguation
     case ready
     case generationFailed

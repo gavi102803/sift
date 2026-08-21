@@ -330,7 +330,12 @@ struct ConceptTurnRow: View {
                 ConceptUserBubble(text: turn.content)
                 MessageActionBar(
                     actions: [
-                        MessageAction(icon: "doc.on.doc", title: "Copy") {
+                        MessageAction(
+                            icon: "doc.on.doc",
+                            title: "Copy",
+                            completionIcon: "checkmark",
+                            completionTitle: "Copied"
+                        ) {
                             copyToPasteboard(turn.content)
                         },
                         MessageAction(icon: "pencil", title: "Edit") {
@@ -379,7 +384,12 @@ struct AssistantMessage: View {
                 MessageActionBar(
                     actions: [
                         MessageAction(icon: "plus.square.on.square", title: "Add to note", action: onAddToNote),
-                        MessageAction(icon: "doc.on.doc", title: "Copy") {
+                        MessageAction(
+                            icon: "doc.on.doc",
+                            title: "Copy",
+                            completionIcon: "checkmark",
+                            completionTitle: "Copied"
+                        ) {
                             copyToPasteboard(text)
                         },
                         MessageAction(icon: "arrow.clockwise", title: "Retry", action: onRetry)
@@ -394,26 +404,49 @@ struct AssistantMessage: View {
 }
 
 struct MessageAction: Identifiable {
-    let id = UUID()
     var icon: String
     var title: String
+    var completionIcon: String? = nil
+    var completionTitle: String? = nil
     var action: () -> Void
+
+    var id: String { title }
 }
 
 struct MessageActionBar: View {
     var actions: [MessageAction]
+    @State private var completedActionTitle: String?
 
     var body: some View {
         HStack(spacing: 12) {
             ForEach(actions) { action in
-                Button(action: action.action) {
-                    Image(systemName: action.icon)
+                let isCompleted = completedActionTitle == action.title
+                Button {
+                    action.action()
+                    guard action.completionIcon != nil else { return }
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        completedActionTitle = action.title
+                    }
+                } label: {
+                    Image(systemName: isCompleted ? action.completionIcon ?? action.icon : action.icon)
                         .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(SiftColor.textMuted)
+                        .foregroundStyle(isCompleted ? SiftColor.accent : SiftColor.textMuted)
                         .frame(width: 28, height: 28)
+                        .contentTransition(.symbolEffect(.replace))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(action.title)
+                .accessibilityLabel(isCompleted ? action.completionTitle ?? action.title : action.title)
+            }
+        }
+        .task(id: completedActionTitle) {
+            guard completedActionTitle != nil else { return }
+            do {
+                try await Task.sleep(for: .seconds(1.5))
+            } catch {
+                return
+            }
+            withAnimation(.easeInOut(duration: 0.16)) {
+                completedActionTitle = nil
             }
         }
     }

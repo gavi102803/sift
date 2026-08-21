@@ -199,6 +199,20 @@ BYOK key. Handtest initial capture, inline citations, follow-up, cancellation, r
 and duplicate submission. A full public deployed-path provider check still requires disabling the
 current `workers.dev` TLS interception or assigning a custom domain.
 
+For a signed physical-device dogfood build, keep the production plist unchanged and build Release
+with the dedicated staging plist:
+
+```bash
+xcodebuild -project ios/Sift.xcodeproj -scheme Sift -configuration Release \
+  -destination 'generic/platform=iOS' \
+  INFOPLIST_FILE=Sift/AiSdkDogfoodRelease-Info.plist \
+  -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
+```
+
+Verify the built `Sift.app/Info.plist` contains the AI SDK staging URL before installing it. The
+dogfood build uses the normal bundle identifier, so installing it replaces the current Sift app;
+Keychain provider credentials remain device-local, while staging beta access may need activation.
+
 Wrangler confirmed the deployment and route above. On 2026-08-11, Cloudflare
 Browser Run independently returned `200` with the production Workers identity
 from `/health` and the stable `authentication_required` response from

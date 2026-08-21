@@ -2,6 +2,8 @@ import {
   APICallError,
   generateText,
   jsonSchema,
+  NoObjectGeneratedError,
+  NoOutputGeneratedError,
   Output,
   RetryError,
   streamText,
@@ -84,6 +86,7 @@ export type InternalErrorCode =
   | "invalid_provider_key"
   | "provider_quota_exhausted"
   | "provider_error"
+  | "schema_validation_failed"
   | "cancelled"
   | "timeout";
 
@@ -234,6 +237,12 @@ export function internalErrorCode(
     (error instanceof DOMException && error.name === "AbortError")
   ) {
     return abortCode(abortSignal);
+  }
+  if (
+    NoOutputGeneratedError.isInstance(error) ||
+    NoObjectGeneratedError.isInstance(error)
+  ) {
+    return "schema_validation_failed";
   }
   const apiError = findApiCallError(error);
   if (apiError?.statusCode === 401 || apiError?.statusCode === 403) {

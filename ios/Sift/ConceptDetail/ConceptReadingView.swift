@@ -117,7 +117,7 @@ struct ConceptReadingView: View {
 
     private var emptyContentText: String {
         switch CaptureStatus(rawValue: concept.captureStatus) {
-        case .draft, .pendingGeneration, .generating:
+        case .draft, .pendingGeneration, .generating, .buildingCard:
             return "Sift is preparing the first card. You can stay here while it works."
         case .generationFailed:
             return "Generation didn’t finish. Your original question is still here."
@@ -220,7 +220,7 @@ struct ConceptReadingView: View {
     private func statusLabel(_ status: String) -> String {
         switch CaptureStatus(rawValue: status) {
         case .ready: "Ready"
-        case .generating, .pendingGeneration, .draft: "Generating"
+        case .generating, .pendingGeneration, .buildingCard, .draft: "Generating"
         case .generationFailed: "Failed"
         case .needsDisambiguation: "Review"
         case .archived: "Archived"

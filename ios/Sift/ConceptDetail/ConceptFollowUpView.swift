@@ -21,15 +21,24 @@ struct ConceptFollowUpView: View {
 
     private var isGenerating: Bool {
         switch status {
-        case .draft, .pendingGeneration, .generating: true
+        case .draft, .pendingGeneration, .generating, .buildingCard: true
         default: false
         }
     }
 
     private var hasStreamingAssistantTurn: Bool {
-        turns.contains { turn in
+        guard status != .buildingCard else { return false }
+        return turns.contains { turn in
             turn.role == "assistant"
                 && turn.status == "streaming"
+        }
+    }
+
+    private var hasCompletedAssistantTurn: Bool {
+        turns.contains { turn in
+            turn.role == "assistant"
+                && turn.status != "streaming"
+                && !turn.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 
@@ -59,7 +68,7 @@ struct ConceptFollowUpView: View {
             // Status-driven trailing element. Generation is in progress or has
             // failed: show an explicit loading row / retry card, never a turn.
             if isGenerating && !hasStreamingAssistantTurn {
-                GeneratingAnswerRow()
+                GeneratingAnswerRow(isBuildingCard: status == .buildingCard || hasCompletedAssistantTurn)
             } else if status == .generationFailed {
                 GenerationFailureCard(isRetrying: isRetryingGeneration, onRetry: onRetryGeneration)
             } else if turns.isEmpty {
@@ -80,26 +89,43 @@ struct ConceptFollowUpView: View {
     }
 
     private func isStreaming(_ turn: ConceptHistoryTurnDTO) -> Bool {
-        turn.role == "assistant" && turn.status == "streaming"
+        status != .buildingCard
+            && turn.role == "assistant"
+            && turn.status == "streaming"
     }
 
 }
 
-/// Pre-stream loading state. Renders identically to an empty streaming
-/// assistant turn — the "Sift" header plus the blue caret — so the first-card
-/// wait looks the same as a follow-up answer arriving, not a distinct card.
+/// Generation trailing state. Before the first delta it matches an empty
+/// assistant turn; after the answer it shows that durable card work continues.
 private struct GeneratingAnswerRow: View {
+    var isBuildingCard = false
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 7) {
-                SiftSymbol(size: 18)
-                    .frame(width: 18, height: 18)
-                Text("Sift")
-                    .font(SiftFont.sans(13, .semibold))
-                    .foregroundStyle(SiftColor.textPrimary)
+        Group {
+            if isBuildingCard {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(SiftColor.accent)
+                    Text("Building card…")
+                        .font(SiftFont.sans(12, .medium))
+                        .foregroundStyle(SiftColor.textMuted)
+                }
+                .accessibilityLabel("Agent progress: Building card")
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 7) {
+                        SiftSymbol(size: 18)
+                            .frame(width: 18, height: 18)
+                        Text("Sift")
+                            .font(SiftFont.sans(13, .semibold))
+                            .foregroundStyle(SiftColor.textPrimary)
+                    }
+                    StreamingCaret()
+                        .padding(.bottom, 3)
+                }
             }
-            StreamingCaret()
-                .padding(.bottom, 3)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)

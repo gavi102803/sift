@@ -4,6 +4,22 @@ import XCTest
 
 final class ProductLogicTests: XCTestCase {
 
+    func testConceptRouteKeepsNavigationIdentityWhenAuthoritativeConceptChanges() {
+        let routeId = UUID()
+        let draftId = UUID()
+        let remoteId = UUID()
+        let original = ConceptRoute(
+            conceptId: draftId,
+            initialMode: .followUp,
+            routeId: routeId
+        )
+        let navigationPath = Set([original])
+        original.conceptId = remoteId
+
+        XCTAssertTrue(navigationPath.contains(original))
+        XCTAssertEqual(original.conceptId, remoteId)
+    }
+
     @MainActor
     func testStreamingTextSmootherRevealsNetworkChunksInSmallOrderedFragments() async throws {
         var fragments: [String] = []

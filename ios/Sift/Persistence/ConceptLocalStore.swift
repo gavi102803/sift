@@ -161,6 +161,10 @@ struct ConceptLocalStore {
     func appendInitialGenerationAnswerDelta(concept: Concept, question: String, delta: String) {
         recordInitialCaptureQuestion(concept: concept, question: question)
         guard !delta.isEmpty else { return }
+        if concept.captureStatus == CaptureStatus.buildingCard.rawValue {
+            concept.captureStatus = CaptureStatus.generating.rawValue
+            concept.updatedAt = .now
+        }
         let conversation = ensureConversation(for: concept)
         if let message = conversation.messages
             .filter({
@@ -184,6 +188,23 @@ struct ConceptLocalStore {
                 conversation: conversation
             )
         )
+    }
+
+    func markInitialGenerationBuildingCard(concept: Concept) {
+        guard let conversation = concept.conversation,
+              let message = conversation.messages
+                .filter({
+                    $0.role == ConversationRole.assistant.rawValue
+                        && $0.updateMode == initialCaptureUpdateMode
+                })
+                .sorted(by: { $0.createdAt < $1.createdAt })
+                .last,
+              !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return }
+        message.operationStatus = "completed"
+        concept.captureStatus = CaptureStatus.buildingCard.rawValue
+        concept.updatedAt = .now
+        conversation.updatedAt = .now
     }
 
     func clearInitialGenerationAnswer(concept: Concept) {
@@ -530,7 +551,27 @@ struct ConceptLocalStore {
 
     func upsertConcepts(from dtos: [ConceptDTO]) throws {
         for dto in dtos {
-            _ = try upsertConcept(from: dto)
+            let concept = try upsertConcept(from: dto)
+            try reconcileInitialDraftMirror(with: concept)
+        }
+    }
+
+    private func reconcileInitialDraftMirror(with remoteConcept: Concept) throws {
+        let mirrors = try modelContext.fetch(FetchDescriptor<ModelRunMirror>()).filter {
+            $0.kind == "initialConcept" && $0.runId == remoteConcept.id
+        }
+        guard let mirror = mirrors.max(by: { $0.updatedAt < $1.updatedAt }) else { return }
+
+        let drafts = try modelContext.fetch(FetchDescriptor<Concept>()).filter { concept in
+            concept.id.uuidString.caseInsensitiveCompare(mirror.clientDraftId ?? "") == .orderedSame
+                || concept.captureGenerationIdempotencyKey == mirror.idempotencyKey
+        }
+        if remoteConcept.captureStatus == CaptureStatus.generationFailed.rawValue {
+            remoteConcept.captureGenerationOperationStatus = LocalOperationStatus.failed.rawValue
+            remoteConcept.captureGenerationIdempotencyKey = mirror.idempotencyKey
+        }
+        for draft in drafts where draft.id != remoteConcept.id {
+            deleteConcept(draft)
         }
     }
 

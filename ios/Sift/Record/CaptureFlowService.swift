@@ -1,6 +1,17 @@
 import Foundation
 import SwiftData
 
+struct ReconciledCaptureGenerationFailure: LocalizedError {
+    let underlying: Error
+    let conceptId: UUID
+
+    var errorDescription: String? { underlying.localizedDescription }
+}
+
+private struct TerminalInitialFailureReconciliation {
+    let replacementConceptId: UUID?
+}
+
 @MainActor
 struct CaptureFlowService {
     var localStore: ConceptLocalStore
@@ -50,6 +61,7 @@ struct CaptureFlowService {
             var dto: ConceptDTO?
             var streamedAnswer = ""
             var streamedCitations: [CitationDTO] = []
+            var answerIdleTask: Task<Void, Never>?
             var textSmoother = StreamingTextSmoother { fragment in
                 streamedAnswer += fragment
                 localStore.appendInitialGenerationAnswerDelta(
@@ -58,7 +70,10 @@ struct CaptureFlowService {
                     delta: fragment
                 )
             }
-            defer { textSmoother.cancel() }
+            defer {
+                answerIdleTask?.cancel()
+                textSmoother.cancel()
+            }
             let stream: AsyncThrowingStream<ConceptInitialStreamEvent, Error>
             if let recoverableRunId {
                 stream = apiClient.streamResumeInitialConceptRun(id: recoverableRunId)
@@ -75,6 +90,7 @@ struct CaptureFlowService {
                     try localStore.upsertModelRun(run, lastSequence: event.sequence)
                 }
                 if event.type == "reset" {
+                    answerIdleTask?.cancel()
                     textSmoother.cancel()
                     streamedAnswer = ""
                     localStore.clearInitialGenerationAnswer(concept: draft)
@@ -88,7 +104,24 @@ struct CaptureFlowService {
                     }
                 }
                 if let delta = event.delta, !delta.isEmpty {
+                    answerIdleTask?.cancel()
                     textSmoother.append(delta)
+                    let activeSmoother = textSmoother
+                    answerIdleTask = Task { @MainActor in
+                        do {
+                            // Some live execution streams deliver answer deltas
+                            // and terminal state but omit the later structure
+                            // progress event. Treat a quiet answer stream as a
+                            // presentation boundary only; the backend remains
+                            // authoritative for actual run completion.
+                            try await Task.sleep(for: .milliseconds(1_500))
+                            try await activeSmoother.finish()
+                            try Task.checkCancellation()
+                            localStore.markInitialGenerationBuildingCard(concept: draft)
+                        } catch {
+                            return
+                        }
+                    }
                 }
                 if let citations = event.citations, !citations.isEmpty {
                     streamedCitations = citations
@@ -96,6 +129,11 @@ struct CaptureFlowService {
                         concept: draft,
                         citations: citations
                     )
+                }
+                if event.progressLabel != nil, !streamedAnswer.isEmpty {
+                    answerIdleTask?.cancel()
+                    try await textSmoother.finish()
+                    localStore.markInitialGenerationBuildingCard(concept: draft)
                 }
                 if let concept = event.concept {
                     dto = concept
@@ -142,6 +180,17 @@ struct CaptureFlowService {
             localStore.markCaptureGenerationUnknown(draft)
             throw CancellationError()
         } catch {
+            if isModelRunFailure(error),
+               let activeRunID,
+               let reconciliation = await reconcileTerminalInitialFailure(runID: activeRunID) {
+                if let conceptId = reconciliation.replacementConceptId {
+                    throw ReconciledCaptureGenerationFailure(
+                        underlying: error,
+                        conceptId: conceptId
+                    )
+                }
+                throw error
+            }
             if isTerminalGenerationFailure(error) {
                 localStore.markCaptureGenerationTerminalFailure(
                     draft,
@@ -175,6 +224,30 @@ struct CaptureFlowService {
     private func isModelRunFailure(_ error: Error) -> Bool {
         if case SiftAPIError.modelRunFailed = error { return true }
         return false
+    }
+
+    private func reconcileTerminalInitialFailure(
+        runID: UUID
+    ) async -> TerminalInitialFailureReconciliation? {
+        guard let run = try? await apiClient.getModelRun(id: runID),
+              run.kind == "initialConcept",
+              run.status == "failed" else { return nil }
+        do {
+            _ = try localStore.upsertModelRun(run)
+            let remoteConcept: ConceptDTO?
+            if let conceptId = run.conceptId {
+                remoteConcept = try? await apiClient.getConcept(id: conceptId)
+            } else {
+                remoteConcept = nil
+            }
+            try localStore.reconcileFailedModelRun(run, remoteConcept: remoteConcept)
+            try localStore.modelContext.save()
+            return TerminalInitialFailureReconciliation(
+                replacementConceptId: remoteConcept?.id
+            )
+        } catch {
+            return nil
+        }
     }
 
     private func preferredInitialConversationAnswer(streamed: String, final: String) -> String {

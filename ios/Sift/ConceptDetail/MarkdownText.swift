@@ -40,7 +40,7 @@ struct CitedMarkdownText: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 10) {
             ForEach(blocks) { block in
                 MarkdownText(
                     block.text,
@@ -56,8 +56,8 @@ struct CitedMarkdownText: View {
                         }
                     }
                     .scrollIndicators(.hidden)
-                    .padding(.top, -4)
-                    .padding(.bottom, 8)
+                    .padding(.top, 4)
+                    .padding(.bottom, 10)
                 }
             }
         }
@@ -140,13 +140,19 @@ private struct InlineCitationPill: View {
                 .font(SiftFont.sans(11, .medium))
                 .lineLimit(1)
         }
-        .foregroundStyle(SiftColor.textSecondary)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 6)
-        .frame(maxWidth: 220)
-        .background(SiftColor.surfaceSoftHi, in: Capsule())
+        .foregroundStyle(SiftColor.accent)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 7)
+        .frame(maxWidth: 240)
+        .background {
+            Capsule()
+                .fill(.thinMaterial)
+                .overlay {
+                    Capsule().fill(SiftColor.accent.opacity(0.09))
+                }
+        }
         .overlay {
-            Capsule().strokeBorder(SiftColor.hairline, lineWidth: 1)
+            Capsule().strokeBorder(SiftColor.accent.opacity(0.22), lineWidth: 0.75)
         }
     }
 }

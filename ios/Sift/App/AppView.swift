@@ -1,9 +1,25 @@
 import SwiftUI
 import SwiftData
 
-private struct ConceptRoute: Hashable {
-    var id: UUID
-    var initialMode: ConceptDetailMode
+@Observable
+final class ConceptRoute: Hashable {
+    private let routeId: UUID
+    var conceptId: UUID
+    let initialMode: ConceptDetailMode
+
+    init(conceptId: UUID, initialMode: ConceptDetailMode, routeId: UUID = UUID()) {
+        self.routeId = routeId
+        self.conceptId = conceptId
+        self.initialMode = initialMode
+    }
+
+    static func == (lhs: ConceptRoute, rhs: ConceptRoute) -> Bool {
+        lhs.routeId == rhs.routeId
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(routeId)
+    }
 }
 
 /// Height the floating tab bar occupies above the safe-area bottom.
@@ -51,7 +67,7 @@ struct AppView: View {
                         },
                         onOpenConcept: { conceptId, initialMode in
                             recordPath.append(
-                                ConceptRoute(id: conceptId, initialMode: initialMode)
+                                ConceptRoute(conceptId: conceptId, initialMode: initialMode)
                             )
                         },
                         onGenerateConcept: { draft in
@@ -60,7 +76,7 @@ struct AppView: View {
                     )
                     .navigationDestination(for: ConceptRoute.self) { route in
                         ConceptDetailView(
-                            conceptId: route.id,
+                            conceptId: route.conceptId,
                             initialMode: route.initialMode,
                             onConceptReplaced: { oldId, newId in
                                 replaceLastConcept(in: &recordPath, oldId: oldId, newId: newId)
@@ -167,6 +183,13 @@ struct AppView: View {
                 replaceLastConcept(in: &recordPath, oldId: draftId, newId: generated.id)
             } catch is CancellationError {
                 return
+            } catch let failure as ReconciledCaptureGenerationFailure {
+                replaceLastConcept(
+                    in: &recordPath,
+                    oldId: draftId,
+                    newId: failure.conceptId
+                )
+                companion.note(failure.underlying)
             } catch {
                 // The durable draft remains visible and retryable from its detail page.
                 companion.note(error)
@@ -192,8 +215,8 @@ struct AppView: View {
 
     private func replaceLastConcept(in path: inout [ConceptRoute], oldId: UUID, newId: UUID) {
         guard oldId != newId else { return }
-        if path.last?.id == oldId {
-            path[path.count - 1].id = newId
+        if path.last?.conceptId == oldId {
+            path.last?.conceptId = newId
         }
     }
 }

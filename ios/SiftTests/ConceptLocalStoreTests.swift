@@ -348,6 +348,10 @@ final class ConceptLocalStoreTests: XCTestCase {
         let concepts = try context.fetch(FetchDescriptor<Concept>())
         XCTAssertEqual(concepts.map(\.id), [runId])
         XCTAssertEqual(concepts.first?.captureStatus, CaptureStatus.generationFailed.rawValue)
+        XCTAssertEqual(
+            store.localConversationTurns(for: try XCTUnwrap(concepts.first)).map(\.content),
+            ["Recovered failure"]
+        )
     }
 
     func testTerminalInitialFailureRemovesPartialAnswerBeforeRetry() throws {
@@ -634,6 +638,49 @@ final class ConceptLocalStoreTests: XCTestCase {
                 .map(\.content),
             ["RAG evaluation", "Measures retrieval-augmented answer quality."]
         )
+    }
+
+    func testCaptureGenerationForwardsRuntimeProgressLabels() async throws {
+        let context = try makeModelContext()
+        let store = ConceptLocalStore(modelContext: context)
+        let remote = conceptDTO(
+            id: UUID(),
+            revision: 1,
+            blockId: UUID(),
+            content: "A runtime with visible progress."
+        )
+        let client = TestAPIClient(
+            createConceptResult: .failure(TestError.unimplemented),
+            streamCreateConceptHandler: { _, _, _ in
+                AsyncThrowingStream { continuation in
+                    continuation.yield(
+                        ConceptInitialStreamEvent(
+                            type: "progress",
+                            delta: nil,
+                            concept: nil,
+                            progressLabel: "Researching sources"
+                        )
+                    )
+                    continuation.yield(
+                        ConceptInitialStreamEvent(
+                            type: "completed",
+                            delta: nil,
+                            concept: remote
+                        )
+                    )
+                    continuation.finish()
+                }
+            }
+        )
+        let service = CaptureFlowService(localStore: store, apiClient: client)
+        guard case .newDraft(let draft) = try service.resolveCapture(rawCapture: "Agent runtime") else {
+            return XCTFail("Expected a new local draft")
+        }
+        var labels: [String] = []
+
+        _ = try await service.generateConcept(from: draft) { labels.append($0) }
+
+        XCTAssertEqual(labels, ["Researching sources"])
     }
 
     func testManualNoteEditCreatesAuditRecordsAndLocksBlock() throws {

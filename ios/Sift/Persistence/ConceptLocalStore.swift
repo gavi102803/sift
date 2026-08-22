@@ -79,7 +79,11 @@ struct ConceptLocalStore {
             // id (not the client draft id). Adopt that authoritative record so
             // the Library shows exactly one "Needs retry" card whose id matches
             // the backend; a later archive/delete won't 404 with an unknown id.
+            let originalQuestion = drafts.first?.conversation?.initialQuery
+                ?? drafts.first?.displayTitle
+                ?? remoteConcept.displayTitle
             let adopted = try upsertConcept(from: remoteConcept)
+            recordInitialCaptureQuestion(concept: adopted, question: originalQuestion)
             adopted.captureStatus = CaptureStatus.generationFailed.rawValue
             adopted.captureGenerationOperationStatus = LocalOperationStatus.failed.rawValue
             adopted.captureGenerationIdempotencyKey = run.idempotencyKey

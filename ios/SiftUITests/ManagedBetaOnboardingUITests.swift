@@ -117,6 +117,27 @@ final class ManagedBetaOnboardingUITests: XCTestCase {
         XCTAssertEqual(server.requestCount(containing: "POST /v1/concept-runs"), 1)
     }
 
+    func testFailedCardRetryMovesIntoConversationAndKeepsAnchorAfterCompletion() throws {
+        server.beginFailedCardRetry()
+        let app = XCUIApplication()
+        app.launchEnvironment["SIFT_BACKEND_BASE_URL"] = "http://127.0.0.1:\(server.port)"
+        app.launchEnvironment["SIFT_UI_TEST_IN_MEMORY"] = "1"
+        app.launch()
+
+        openConcept(named: "Retry this concept", in: app)
+        let retry = app.buttons["Try again"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 5), app.debugDescription)
+        retry.tap()
+
+        XCTAssertTrue(
+            app.staticTexts["Retry this concept"].waitForExistence(timeout: 5),
+            app.debugDescription
+        )
+        XCTAssertTrue(app.staticTexts["A durable UI test answer."].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Show concept card"].waitForExistence(timeout: 5))
+        XCTAssertEqual(server.requestCount(containing: "POST /v1/concept-runs"), 1)
+    }
+
     func testFollowUpModelRunCompletesAfterAppTerminationAndReloadsConversation() throws {
         server.beginFollowUpRecovery()
         let app = XCUIApplication()
@@ -319,6 +340,8 @@ private final class LocalHTTPServer: @unchecked Sendable {
     private var versionHistoryScenario = false
     private var versionHistoryBackendUnavailable = false
     private var versionHistoryEmpty = false
+    private var failedCardRetryScenario = false
+    private var failedCardRetryCompleted = false
     private var reviewPollCount = 0
     private var credentialResumeReceived = false
     private var credentialResumeHadExpectedHeader = false
@@ -383,6 +406,20 @@ private final class LocalHTTPServer: @unchecked Sendable {
         versionHistoryScenario = true
         versionHistoryBackendUnavailable = backendUnavailable
         versionHistoryEmpty = empty
+        runIdempotencyKey = nil
+        lock.unlock()
+    }
+
+    func beginFailedCardRetry() {
+        lock.lock()
+        runCompleted = true
+        recoveryScenario = false
+        followUpRecoveryScenario = false
+        managedCredentialResumeScenario = false
+        periodicReviewScenario = false
+        versionHistoryScenario = false
+        failedCardRetryScenario = true
+        failedCardRetryCompleted = false
         runIdempotencyKey = nil
         lock.unlock()
     }
@@ -517,6 +554,9 @@ private final class LocalHTTPServer: @unchecked Sendable {
                 .components(separatedBy: "\r\n")
                 .first { $0.lowercased().hasPrefix("idempotency-key:") }
                 .map { String($0.split(separator: ":", maxSplits: 1)[1]).trimmingCharacters(in: .whitespaces) }
+            if failedCardRetryScenario {
+                failedCardRetryCompleted = true
+            }
         }
         if method == "POST", path.hasSuffix("/resume") || path.hasSuffix("/resume-stream") {
             let providerKey = request
@@ -655,8 +695,13 @@ private final class LocalHTTPServer: @unchecked Sendable {
         } else {
             "UI Test Concept"
         }
+        let isFailedRetry = isFailedCardRetryPending
+        let displayTitle = isFailedRetry ? "Retry this concept" : title
+        let explanation = isFailedRetry ? "" : "Generated through the managed beta UI journey."
+        let initialAnswer = isFailedRetry ? "" : "A durable UI test answer."
+        let status = isFailedRetry ? "generationFailed" : "ready"
         return """
-        {"id":"00000000-0000-0000-0000-000000000101","canonicalTitle":"ui-test-concept","displayTitle":"\(title)","oneLineExplanation":"Generated through the managed beta UI journey.","initialAnswer":"A durable UI test answer.","maturity":"initial","captureStatus":"ready","noteRevision":1,"blocks":[],"tags":[],"topics":[],"relations":[]}
+        {"id":"00000000-0000-0000-0000-000000000101","canonicalTitle":"ui-test-concept","displayTitle":"\(displayTitle)","oneLineExplanation":"\(explanation)","initialAnswer":"\(initialAnswer)","maturity":"initial","captureStatus":"\(status)","noteRevision":1,"blocks":[],"tags":[],"topics":[],"relations":[]}
         """
     }
 
@@ -799,6 +844,12 @@ private final class LocalHTTPServer: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return versionHistoryScenario && versionHistoryEmpty
+    }
+
+    private var isFailedCardRetryPending: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return failedCardRetryScenario && !failedCardRetryCompleted
     }
 }
 

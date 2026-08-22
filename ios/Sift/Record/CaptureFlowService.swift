@@ -43,7 +43,10 @@ struct CaptureFlowService {
         }
     }
 
-    func generateConcept(from draft: Concept) async throws -> Concept {
+    func generateConcept(
+        from draft: Concept,
+        onProgress: (String) -> Void = { _ in }
+    ) async throws -> Concept {
         draft.captureStatus = CaptureStatus.pendingGeneration.rawValue
         draft.updatedAt = .now
         let idempotencyKey = localStore.beginCaptureGeneration(for: draft)
@@ -85,6 +88,9 @@ struct CaptureFlowService {
                 )
             }
             for try await event in stream {
+                if let progressLabel = event.progressLabel {
+                    onProgress(progressLabel)
+                }
                 if let run = event.modelRun {
                     activeRunID = run.id
                     try localStore.upsertModelRun(run, lastSequence: event.sequence)
@@ -204,8 +210,11 @@ struct CaptureFlowService {
         }
     }
 
-    func retryGeneration(for concept: Concept) async throws -> Concept {
-        try await generateConcept(from: concept)
+    func retryGeneration(
+        for concept: Concept,
+        onProgress: (String) -> Void = { _ in }
+    ) async throws -> Concept {
+        try await generateConcept(from: concept, onProgress: onProgress)
     }
 
     private func isTerminalGenerationFailure(_ error: Error) -> Bool {

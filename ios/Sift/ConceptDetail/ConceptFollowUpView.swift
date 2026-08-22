@@ -42,6 +42,25 @@ struct ConceptFollowUpView: View {
         }
     }
 
+    private var activeProgressLabel: String? {
+        if isSubmitting {
+            guard !hasStreamingAssistantTurn || turns.last?.content.isEmpty == true else {
+                return nil
+            }
+            return AgentProgressPresentation.label(
+                for: progressLabel,
+                isBuildingCard: false
+            )
+        }
+        guard isRetryingGeneration || (isGenerating && !hasStreamingAssistantTurn) else {
+            return nil
+        }
+        return AgentProgressPresentation.label(
+            for: progressLabel,
+            isBuildingCard: status == .buildingCard || hasCompletedAssistantTurn
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             ForEach(turns) { turn in
@@ -56,22 +75,15 @@ struct ConceptFollowUpView: View {
                 .accessibilityHidden(turn.id == hiddenTurnId)
             }
 
-            if isSubmitting,
-               let progressLabel,
-               !hasStreamingAssistantTurn || turns.last?.content.isEmpty == true {
-                Text(progressLabel)
-                    .font(SiftFont.sans(12, .medium))
-                    .foregroundStyle(SiftColor.textMuted)
-                    .accessibilityLabel("Agent progress: \(progressLabel)")
+            if let activeProgressLabel {
+                AgentProgressText(activeProgressLabel)
             }
 
             // Status-driven trailing element. Generation is in progress or has
             // failed: show an explicit loading row / retry card, never a turn.
-            if isGenerating && !hasStreamingAssistantTurn {
-                GeneratingAnswerRow(isBuildingCard: status == .buildingCard || hasCompletedAssistantTurn)
-            } else if status == .generationFailed {
+            if status == .generationFailed && !isRetryingGeneration {
                 GenerationFailureCard(isRetrying: isRetryingGeneration, onRetry: onRetryGeneration)
-            } else if turns.isEmpty {
+            } else if turns.isEmpty && activeProgressLabel == nil {
                 emptyPrompt
             }
         }
@@ -96,39 +108,95 @@ struct ConceptFollowUpView: View {
 
 }
 
-/// Generation trailing state. Before the first delta it matches an empty
-/// assistant turn; after the answer it shows that durable card work continues.
-private struct GeneratingAnswerRow: View {
-    var isBuildingCard = false
+enum AgentProgressPresentation {
+    static func label(for rawLabel: String?, isBuildingCard: Bool) -> String {
+        let rawLabel = rawLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let normalized = rawLabel.lowercased()
+        if normalized.contains("card")
+            || normalized.contains("saving")
+            || normalized.contains("structure") {
+            return "Building card…"
+        }
+        if normalized.contains("search")
+            || normalized.contains("research")
+            || normalized.contains("retrieval") {
+            return "Searching…"
+        }
+        if normalized.contains("answer")
+            || normalized.contains("writing")
+            || normalized.contains("think") {
+            return "Thinking…"
+        }
+        if normalized.contains("prepar") {
+            return "Preparing…"
+        }
+        if !rawLabel.isEmpty {
+            return rawLabel.hasSuffix("…") || rawLabel.hasSuffix("...")
+                ? rawLabel
+                : rawLabel + "…"
+        }
+        return isBuildingCard ? "Building card…" : "Searching…"
+    }
+}
+
+/// A stable turn-level status inspired by DeepSeek Harness: muted Sift blue is
+/// always readable while a brighter blue band crosses the text every 1.8s.
+/// Reduce Motion keeps the same label without animation.
+struct AgentProgressText: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var shimmerPhase: CGFloat = -1
+
+    var label: String
+
+    init(_ label: String) {
+        self.label = label
+    }
 
     var body: some View {
-        Group {
-            if isBuildingCard {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(SiftColor.accent)
-                    Text("Building card…")
-                        .font(SiftFont.sans(12, .medium))
-                        .foregroundStyle(SiftColor.textMuted)
-                }
-                .accessibilityLabel("Agent progress: Building card")
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 7) {
-                        SiftSymbol(size: 18)
-                            .frame(width: 18, height: 18)
-                        Text("Sift")
-                            .font(SiftFont.sans(13, .semibold))
-                            .foregroundStyle(SiftColor.textPrimary)
+        Text(label)
+            .font(SiftFont.sans(13, .semibold))
+            .foregroundStyle(SiftColor.accent.opacity(reduceMotion ? 0.8 : 0.42))
+            .overlay {
+                if !reduceMotion {
+                    GeometryReader { geometry in
+                        let bandWidth = max(48, geometry.size.width * 0.55)
+                        LinearGradient(
+                            colors: [
+                                SiftColor.accent.opacity(0),
+                                SiftColor.accent,
+                                SiftColor.accent.opacity(0),
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: bandWidth)
+                        .offset(
+                            x: ((shimmerPhase + 1) / 2)
+                                * (geometry.size.width + bandWidth) - bandWidth
+                        )
                     }
-                    StreamingCaret()
-                        .padding(.bottom, 3)
+                    .mask {
+                        Text(label)
+                            .font(SiftFont.sans(13, .semibold))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
             }
+            .fixedSize(horizontal: true, vertical: false)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 4)
+            .accessibilityLabel("Agent progress: \(label)")
+            .accessibilityIdentifier("agent.progress")
+            .onAppear(perform: startShimmer)
+            .onChange(of: reduceMotion) { _, _ in startShimmer() }
+    }
+
+    private func startShimmer() {
+        shimmerPhase = -1
+        guard !reduceMotion else { return }
+        withAnimation(.linear(duration: 1.8).repeatForever(autoreverses: false)) {
+            shimmerPhase = 1
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 4)
     }
 }
 

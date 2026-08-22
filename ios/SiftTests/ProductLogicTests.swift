@@ -4,6 +4,46 @@ import XCTest
 
 final class ProductLogicTests: XCTestCase {
 
+    func testConceptAnchorTitleSurvivesFailedCardRetry() {
+        XCTAssertEqual(
+            ConceptDetailPresentation.anchorTitle(
+                displayTitle: " ",
+                initialQuery: "What is MCP?"
+            ),
+            "What is MCP?"
+        )
+        XCTAssertEqual(
+            ConceptDetailPresentation.anchorTitle(
+                displayTitle: "Model Context Protocol",
+                initialQuery: "What is MCP?"
+            ),
+            "Model Context Protocol"
+        )
+        XCTAssertEqual(
+            ConceptDetailPresentation.anchorTitle(displayTitle: "", initialQuery: nil),
+            "Concept"
+        )
+    }
+
+    func testAgentProgressPresentationKeepsSiftPhaseMeaning() {
+        XCTAssertEqual(
+            AgentProgressPresentation.label(for: "Researching sources", isBuildingCard: false),
+            "Searching…"
+        )
+        XCTAssertEqual(
+            AgentProgressPresentation.label(for: "Writing first answer", isBuildingCard: false),
+            "Thinking…"
+        )
+        XCTAssertEqual(
+            AgentProgressPresentation.label(for: "Structuring concept card", isBuildingCard: true),
+            "Building card…"
+        )
+        XCTAssertEqual(
+            AgentProgressPresentation.label(for: nil, isBuildingCard: true),
+            "Building card…"
+        )
+    }
+
     func testConceptRouteKeepsNavigationIdentityWhenAuthoritativeConceptChanges() {
         let routeId = UUID()
         let draftId = UUID()

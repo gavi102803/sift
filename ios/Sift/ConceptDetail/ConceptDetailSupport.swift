@@ -89,6 +89,24 @@ enum ProposalCopy {
     }
 }
 
+// MARK: - Detail presentation
+
+enum ConceptDetailPresentation {
+    static func anchorTitle(for concept: Concept) -> String {
+        anchorTitle(
+            displayTitle: concept.displayTitle,
+            initialQuery: concept.conversation?.initialQuery
+        )
+    }
+
+    static func anchorTitle(displayTitle: String, initialQuery: String?) -> String {
+        let displayTitle = displayTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !displayTitle.isEmpty { return displayTitle }
+        let initialQuery = initialQuery?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return initialQuery.isEmpty ? "Concept" : initialQuery
+    }
+}
+
 // MARK: - Conversation timeline (authority + offline fallback)
 
 /// Decides what the follow-up timeline shows.

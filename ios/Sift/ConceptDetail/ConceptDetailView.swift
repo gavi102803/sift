@@ -39,6 +39,7 @@ struct ConceptDetailView: View {
     @State private var detailMode: ConceptDetailMode = .overview
     @State private var isReadingOffline = false
     @State private var isRetryingGeneration = false
+    @State private var generationProgressLabel: String?
     @State private var followUpTask: Task<Void, Never>?
     @State private var editingTurnIndex: Int?
     @State private var isPresentingQueryEditor = false
@@ -128,7 +129,9 @@ struct ConceptDetailView: View {
                                         turns: turns,
                                         hiddenTurnId: editingQuery?.id,
                                         isSubmitting: isSubmittingFollowUp,
-                                        progressLabel: followUpProgressLabel,
+                                        progressLabel: isRetryingGeneration
+                                            ? generationProgressLabel
+                                            : followUpProgressLabel,
                                         isRetryingGeneration: isRetryingGeneration,
                                         onRetryGeneration: { Task { await retryGeneration(concept) } },
                                         onAddAssistantToNote: { turn in
@@ -205,6 +208,7 @@ struct ConceptDetailView: View {
             if let concept {
                 ToolbarItem(placement: .topBarLeading) {
                     conceptAnchorPill(for: concept)
+                        .id(conceptAnchorIdentity(for: concept))
                 }
             }
             if concept != nil {
@@ -297,7 +301,7 @@ struct ConceptDetailView: View {
                         .fill(SiftColor.accent)
                         .frame(width: 6, height: 6)
                 }
-                Text(pillTitle(concept.displayTitle))
+                Text(pillTitle(ConceptDetailPresentation.anchorTitle(for: concept)))
                     .font(SiftFont.sans(15, .semibold))
                     .foregroundStyle(SiftColor.textPrimary)
                     .lineLimit(1)
@@ -318,6 +322,15 @@ struct ConceptDetailView: View {
     /// Cap the pill title so it never crowds the Edit button.
     private func pillTitle(_ title: String) -> String {
         title.count > 16 ? String(title.prefix(15)).trimmingCharacters(in: .whitespaces) + "…" : title
+    }
+
+    private func conceptAnchorIdentity(for concept: Concept) -> String {
+        [
+            concept.id.uuidString,
+            ConceptDetailPresentation.anchorTitle(for: concept),
+            concept.captureStatus,
+            String(describing: detailMode),
+        ].joined(separator: ":")
     }
 
     private func scrollToConversationBottom(
@@ -661,22 +674,34 @@ struct ConceptDetailView: View {
     /// idempotent), so the navigation route is updated to follow it.
     private func retryGeneration(_ concept: Concept) async {
         guard !isRetryingGeneration else { return }
-        isRetryingGeneration = true
-        errorMessage = nil
-        defer { isRetryingGeneration = false }
-        let service = CaptureFlowService(
-            localStore: ConceptLocalStore(modelContext: modelContext),
-            apiClient: appServices.apiClient
+        let localStore = ConceptLocalStore(modelContext: modelContext)
+        localStore.recordInitialCaptureQuestion(
+            concept: concept,
+            question: concept.conversation?.initialQuery ?? concept.displayTitle
         )
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.86)) {
+            detailMode = .followUp
+        }
+        syncLocalInitialTurnsIfNeeded()
+        isRetryingGeneration = true
+        generationProgressLabel = "Searching…"
+        errorMessage = nil
+        defer {
+            isRetryingGeneration = false
+            generationProgressLabel = nil
+        }
+        let service = CaptureFlowService(localStore: localStore, apiClient: appServices.apiClient)
         do {
-            let regenerated = try await service.retryGeneration(for: concept)
+            let regenerated = try await service.retryGeneration(for: concept) { label in
+                generationProgressLabel = label
+            }
             companion?.noteSuccess()
             isReadingOffline = false
             if regenerated.id != concept.id {
                 onConceptReplaced(concept.id, regenerated.id)
-            } else {
-                await refreshTurns(regenerated.id)
             }
+            await refreshConcept(regenerated.id)
+            await refreshTurns(regenerated.id)
         } catch is CancellationError {
             return
         } catch let failure as ReconciledCaptureGenerationFailure {

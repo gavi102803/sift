@@ -80,6 +80,7 @@ ToolPlanner = Callable[
     [list[dict[str, Any]]], Awaitable[tuple[RuntimeToolCall, ...]]
 ]
 RECOVERY_DELTA_CHARS = 256
+TRANSIENT_STREAM_RETRY_CODES = {"provider_timeout", "provider_unreachable"}
 RUN_LEASE_SECONDS = 60
 RUN_LEASE_HEARTBEAT_SECONDS = 10
 MAX_TOOL_PLANNER_ROUNDS = 2
@@ -803,7 +804,7 @@ class ModelRunService:
                 tool_call_count=execution.tool_calls,
             )
         except AgentControlError as error:
-            if error.code not in {"agent_cancelled", "agent_lease_lost"}:
+            if error.code != "agent_cancelled":
                 await self.store.fail_model_run(
                     run_id,
                     principal.owner_id,
@@ -820,6 +821,15 @@ class ModelRunService:
                 worker_id=worker_id,
             )
             code = "agent_cancelled" if cancelled else "agent_lease_lost"
+            if not cancelled:
+                await self.store.fail_model_run(
+                    run_id,
+                    principal.owner_id,
+                    worker_id=worker_id,
+                    code=code,
+                    message="The agent run stopped safely.",
+                    now=_utc_isoformat(self.clock()),
+                )
             raise PublicError(code, "The agent run stopped safely.", 409) from error
         except PublicError as error:
             await self.store.fail_model_run(
@@ -1251,7 +1261,7 @@ class ModelRunService:
                 tool_call_count=execution.tool_calls,
             )
         except AgentControlError as error:
-            if error.code not in {"agent_cancelled", "agent_lease_lost"}:
+            if error.code != "agent_cancelled":
                 await self.store.fail_model_run(
                     run_id,
                     principal.owner_id,
@@ -1268,6 +1278,15 @@ class ModelRunService:
                 worker_id=worker_id,
             )
             code = "agent_cancelled" if cancelled else "agent_lease_lost"
+            if not cancelled:
+                await self.store.fail_model_run(
+                    run_id,
+                    principal.owner_id,
+                    worker_id=worker_id,
+                    code=code,
+                    message="The agent run stopped safely.",
+                    now=_utc_isoformat(self.clock()),
+                )
             raise PublicError(code, "The agent run stopped safely.", 409) from error
         except PublicError as error:
             await self.store.fail_model_run(
@@ -2056,9 +2075,11 @@ class ModelRunService:
     ) -> str:
         recovery_deltas: list[str] = []
         recovery_chars = 0
+        received_delta = False
 
         async def on_delta(delta: str) -> None:
-            nonlocal recovery_chars
+            nonlocal received_delta, recovery_chars
+            received_delta = True
             if live_delta_sink is not None:
                 await live_delta_sink(delta)
             recovery_deltas.append(delta)
@@ -2084,7 +2105,12 @@ class ModelRunService:
                 worker_id,
             )
 
-        answer = await stream(on_delta)
+        try:
+            answer = await stream(on_delta)
+        except PublicError as error:
+            if received_delta or error.code not in TRANSIENT_STREAM_RETRY_CODES:
+                raise
+            answer = await stream(on_delta)
         await flush_recovery_delta()
         return answer
 

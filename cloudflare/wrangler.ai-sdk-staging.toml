@@ -23,4 +23,4 @@ binding = "AI_SDK_ENGINE"
 service = "sift-ai-sdk-engine-staging"
 
 [observability]
-enabled = false
+enabled = true

@@ -169,6 +169,8 @@ The Python Worker owns ModelRun persistence, idempotency, leases, checkpoints, r
 tool execution, evidence, and final writes. The TypeScript Worker uses the unmodified, pinned
 Vercel AI SDK for provider calls, streaming, structured output, and normalized tool-call messages.
 Production continues to use the legacy runtime unless `SIFT_MODEL_ENGINE=ai-sdk` is explicitly set.
+Both staging Workers enable Cloudflare observability. Application errors remain reduced to stable
+error codes; request bodies, provider keys, and provider error bodies are not logged or returned.
 
 On networks that can reach `workers.dev`, point Debug directly at the public staging URL. This Mac's
 current VPN/TLS path cannot, so the shared `Sift AI SDK Staging` scheme uses

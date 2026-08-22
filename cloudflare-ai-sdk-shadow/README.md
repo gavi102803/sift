@@ -30,6 +30,9 @@ authenticated with `SIFT_ENGINE_TOKEN` and accept the provider key only as a req
 
 The engine disables AI SDK retries and telemetry. It returns only normalized content, tool calls,
 usage, and stable error codes; provider error bodies and credentials are not relayed to Sift.
+The Sift control Worker may make one budgeted retry for a transport-safe answer-stream failure
+only before the first text delta. Once any text is visible, recovery requires the persisted
+checkpoint and emits a reset before replay rather than transparently retrying the SDK stream.
 
 AI SDK UI is not a native SwiftUI component library, and AG-UI is an event protocol rather than a
 drop-in iOS interface. Sift therefore keeps its native SwiftUI and maps stable Sift events to it.

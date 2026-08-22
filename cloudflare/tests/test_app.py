@@ -885,8 +885,8 @@ def test_model_completed_checkpoint_resumes_without_duplicate_provider_calls() -
             )
         assert stopped.value.code == "agent_lease_lost"
         assert store.runs[run.id]["checkpoint"] == "modelCompleted"
+        assert store.runs[run.id]["status"] == "failed"
         calls_before_resume = CountingProvider.calls
-        store.runs[run.id]["lease_expires_at"] = "2000-01-01T00:00:00Z"
 
         completed = await service.execute_initial(
             run.id,
@@ -1006,9 +1006,9 @@ def test_retrieval_checkpoint_resumes_without_repeating_completed_search() -> No
             )
         assert stopped.value.code == "agent_lease_lost"
         assert store.runs[run.id]["checkpoint"] == "retrievalInProgress"
+        assert store.runs[run.id]["status"] == "failed"
         assert web_tools.search_calls == 1
 
-        store.runs[run.id]["lease_expires_at"] = "2000-01-01T00:00:00Z"
         completed = await service.execute_initial(
             run.id,
             principal,
@@ -1154,8 +1154,8 @@ def test_follow_up_model_checkpoint_resumes_without_duplicate_provider_calls() -
                 client_factory=CountingProvider,
             )
         assert stopped.value.code == "agent_lease_lost"
+        assert store.runs[follow_up.id]["status"] == "failed"
         calls_before_resume = CountingProvider.calls
-        store.runs[follow_up.id]["lease_expires_at"] = "2000-01-01T00:00:00Z"
 
         completed = await service.execute_follow_up(
             follow_up.id,
@@ -1240,6 +1240,133 @@ def test_failed_follow_up_does_not_enter_completed_conversation_history() -> Non
     asyncio.run(scenario())
 
 
+def test_answer_stream_retries_once_before_first_delta() -> None:
+    class TransientAnswerProvider(FakeProviderClient):
+        attempts = 0
+
+        async def stream_initial_answer(
+            self,
+            raw_capture: str,
+            locale: str,
+            retrieval_evidence: list[dict[str, str]] | None,
+            on_delta,
+        ) -> str:
+            await self._record_model_call()
+            del locale, retrieval_evidence
+            type(self).attempts += 1
+            if type(self).attempts == 1:
+                raise PublicError(
+                    "provider_unreachable",
+                    "The AI provider could not be reached.",
+                    502,
+                )
+            answer = f"Recovered answer about {raw_capture}."
+            await on_delta(answer)
+            return answer
+
+    async def scenario() -> None:
+        store = MemoryWorkerStore()
+        principal = CurrentPrincipal(
+            owner_id="owner-a",
+            installation_id="installation-a",
+        )
+        await store.save_provider_connection(
+            {
+                "owner_id": principal.owner_id,
+                "provider_id": "deepseek",
+                "base_url": "https://provider.example/v1",
+                "model": "test-model",
+                "created_at": "2026-08-01T00:00:00Z",
+                "updated_at": "2026-08-01T00:00:00Z",
+            }
+        )
+        service = ModelRunService(store)
+        run, _ = await service.submit_initial(
+            principal,
+            CreateConceptRunRequest.model_validate(
+                {"capture": {"rawCapture": "Transient stream", "locale": "en"}}
+            ),
+            idempotency_key="transient-answer-stream",
+            has_provider_credential=True,
+        )
+
+        completed = await service.execute_initial(
+            run.id,
+            principal,
+            "request-only-key",
+            client_factory=TransientAnswerProvider,
+        )
+
+        assert completed.status == "succeeded"
+        assert TransientAnswerProvider.attempts == 2
+        assert store.runs[run.id]["model_call_count"] == 4
+
+    asyncio.run(scenario())
+
+
+def test_answer_stream_does_not_retry_after_first_delta() -> None:
+    class PartialAnswerProvider(FakeProviderClient):
+        attempts = 0
+
+        async def stream_initial_answer(
+            self,
+            raw_capture: str,
+            locale: str,
+            retrieval_evidence: list[dict[str, str]] | None,
+            on_delta,
+        ) -> str:
+            await self._record_model_call()
+            del raw_capture, locale, retrieval_evidence
+            type(self).attempts += 1
+            await on_delta("Visible partial answer. " * 16)
+            raise PublicError(
+                "provider_unreachable",
+                "The AI provider could not be reached.",
+                502,
+            )
+
+    async def scenario() -> None:
+        store = MemoryWorkerStore()
+        principal = CurrentPrincipal(
+            owner_id="owner-a",
+            installation_id="installation-a",
+        )
+        await store.save_provider_connection(
+            {
+                "owner_id": principal.owner_id,
+                "provider_id": "deepseek",
+                "base_url": "https://provider.example/v1",
+                "model": "test-model",
+                "created_at": "2026-08-01T00:00:00Z",
+                "updated_at": "2026-08-01T00:00:00Z",
+            }
+        )
+        service = ModelRunService(store)
+        run, _ = await service.submit_initial(
+            principal,
+            CreateConceptRunRequest.model_validate(
+                {"capture": {"rawCapture": "Do not replay", "locale": "en"}}
+            ),
+            idempotency_key="partial-answer-stream",
+            has_provider_credential=True,
+        )
+
+        with pytest.raises(PublicError) as failed:
+            await service.execute_initial(
+                run.id,
+                principal,
+                "request-only-key",
+                client_factory=PartialAnswerProvider,
+            )
+
+        assert failed.value.code == "provider_unreachable"
+        assert PartialAnswerProvider.attempts == 1
+        assert store.runs[run.id]["status"] == "failed"
+        assert any(event["event_type"] == "delta" for event in store.events[run.id])
+
+    asyncio.run(scenario())
+
+
 def test_answer_stream_checkpoint_resets_partial_delta_before_replay() -> None:
     class InterruptedStreamProvider(FakeProviderClient):
         interrupted = False
@@ -1292,7 +1419,7 @@ def test_answer_stream_checkpoint_resets_partial_delta_before_replay() -> None:
             )
         assert stopped.value.code == "agent_lease_lost"
         assert store.runs[run.id]["checkpoint"] == "answerStreaming"
-        store.runs[run.id]["lease_expires_at"] = "2000-01-01T00:00:00Z"
+        assert store.runs[run.id]["status"] == "failed"
 
         completed = await service.execute_initial(
             run.id,

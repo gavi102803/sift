@@ -212,6 +212,39 @@ async def test_ai_sdk_adapter_relays_one_ndjson_stream_without_retry() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ai_sdk_adapter_redacts_stream_transport_failure() -> None:
+    class FailingReader:
+        async def read(self) -> dict:
+            raise RuntimeError("transport included request-only-secret")
+
+    class FailingBody:
+        def getReader(self) -> FailingReader:
+            return FailingReader()
+
+    async def fetcher(_url: str, **_options):
+        response = FakeStreamResponse([])
+        response.body = FailingBody()
+        return response
+
+    client = AiSdkProviderClient(
+        validate_provider_connection("owner", "deepseek", None, "deepseek-chat"),
+        "request-only-secret",
+        engine_fetcher=fetcher,
+        engine_token="engine-test-token-with-enough-entropy",
+    )
+
+    async def on_delta(_delta: str) -> None:
+        return None
+
+    with pytest.raises(PublicError) as captured:
+        await client.stream_initial_answer("Explain Sift", "en", [], on_delta)
+
+    assert captured.value.code == "provider_unreachable"
+    assert "request-only-secret" not in captured.value.message
+    assert client.model_call_count == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("engine_code", "expected_code"),
     [

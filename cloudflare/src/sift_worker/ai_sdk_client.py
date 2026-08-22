@@ -157,50 +157,59 @@ class AiSdkProviderClient(WorkerProviderClient):
         on_delta: TextDeltaSink,
     ) -> str:
         async def stream() -> dict[str, Any]:
-            response = await self._fetch(
-                "/internal/v1/stream",
-                {
-                    "messages": list(messages),
-                    "maxOutputTokens": _ANSWER_MAX_OUTPUT_TOKENS,
-                },
-            )
-            _raise_for_internal_status(response)
-            chunks: list[str] = []
-            completed: dict[str, Any] | None = None
-            answer_chars = 0
-            async for event in _iter_ndjson(response):
-                event_type = event.get("type")
-                if event_type == "delta":
-                    delta = event.get("delta")
-                    if not isinstance(delta, str) or not delta:
+            try:
+                response = await self._fetch(
+                    "/internal/v1/stream",
+                    {
+                        "messages": list(messages),
+                        "maxOutputTokens": _ANSWER_MAX_OUTPUT_TOKENS,
+                    },
+                )
+                _raise_for_internal_status(response)
+                chunks: list[str] = []
+                completed: dict[str, Any] | None = None
+                answer_chars = 0
+                async for event in _iter_ndjson(response):
+                    event_type = event.get("type")
+                    if event_type == "delta":
+                        delta = event.get("delta")
+                        if not isinstance(delta, str) or not delta:
+                            raise _provider_payload_error()
+                        answer_chars += len(delta)
+                        if answer_chars > _MAX_STREAM_ANSWER_CHARS:
+                            raise _provider_payload_error()
+                        chunks.append(delta)
+                        await on_delta(delta)
+                    elif event_type == "completed":
+                        if completed is not None:
+                            raise _provider_payload_error()
+                        completed = event
+                    elif event_type == "error":
+                        _raise_for_engine_code(event.get("code"))
+                    else:
                         raise _provider_payload_error()
-                    answer_chars += len(delta)
-                    if answer_chars > _MAX_STREAM_ANSWER_CHARS:
-                        raise _provider_payload_error()
-                    chunks.append(delta)
-                    await on_delta(delta)
-                elif event_type == "completed":
-                    if completed is not None:
-                        raise _provider_payload_error()
-                    completed = event
-                elif event_type == "error":
-                    _raise_for_engine_code(event.get("code"))
-                else:
-                    raise _provider_payload_error()
 
-            content = "".join(chunks)
-            if completed is None or completed.get("content") != content:
-                raise _provider_payload_error()
-            answer = content.strip()
-            if not answer:
-                raise _provider_payload_error()
-            return {
-                "content": answer,
-                "model": _optional_string(completed.get("model"))
-                or self.connection.model,
-                "input_tokens": _optional_int(completed.get("input_tokens")),
-                "output_tokens": _optional_int(completed.get("output_tokens")),
-            }
+                content = "".join(chunks)
+                if completed is None or completed.get("content") != content:
+                    raise _provider_payload_error()
+                answer = content.strip()
+                if not answer:
+                    raise _provider_payload_error()
+                return {
+                    "content": answer,
+                    "model": _optional_string(completed.get("model"))
+                    or self.connection.model,
+                    "input_tokens": _optional_int(completed.get("input_tokens")),
+                    "output_tokens": _optional_int(completed.get("output_tokens")),
+                }
+            except PublicError:
+                raise
+            except Exception as error:
+                raise PublicError(
+                    "provider_unreachable",
+                    "The AI provider could not be reached.",
+                    502,
+                ) from error
 
         result = await self._run_model_call(stream)
         return str(result["content"])

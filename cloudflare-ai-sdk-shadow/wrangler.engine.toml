@@ -10,4 +10,4 @@ preview_urls = false
 SIFT_SHADOW_ALLOWED_BASE_URLS = "https://api.openai.com/v1,https://api.anthropic.com,https://generativelanguage.googleapis.com/v1beta,https://api.deepseek.com/v1,https://openrouter.ai/api/v1,https://inference-api.nousresearch.com/v1,https://api.moonshot.ai/v1"
 
 [observability]
-enabled = false
+enabled = true
